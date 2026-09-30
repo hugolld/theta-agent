@@ -28,14 +28,20 @@ built as a [pi package](https://pi.dev) rather than a monolithic fork:
   light local sandbox for small tasks
 - **Models**: any of pi's 48 providers — bring your own key
 
+Theta ships today as a pi package. The staged plan (M7–M8) grows it into a
+standalone `theta` application with pi embedded as the core engine — macOS and
+Linux first, Windows later.
+
 ## Roadmap
 
-- [ ] M1 — package skeleton + Tier-1 research-loop skills
+- [ ] M1 — package skeleton, `theta` launcher (bin), Tier-1 research-loop skills
 - [ ] M2 — literature connectors (PubMed, arXiv, Semantic Scholar)
 - [ ] M3 — research prompt + provenance entries
 - [ ] M4 — compute: Slurm MCP gateway + typed AlphaFold3 tool
 - [ ] M5 — safety gates + containerized execution
 - [ ] M6 — eval suite (MCP client is built into pi)
+- [ ] M7 — standalone `theta` shell on pi's headless core (macOS/Linux)
+- [ ] M8 — installers & release channel: Homebrew, deb/AUR, Windows
 
 ## Install (once functional)
 
