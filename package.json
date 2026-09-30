@@ -1,0 +1,34 @@
+{
+	"name": "theta-agent",
+	"version": "0.0.1",
+	"description": "Theta — a science co-researcher agent built as a package for the pi coding agent harness",
+	"keywords": [
+		"pi",
+		"pi-agent",
+		"agent",
+		"science",
+		"research",
+		"co-scientist",
+		"scientific-computing",
+		"bioinformatics",
+		"agent-skills"
+	],
+	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/hugolld/theta-agent.git"
+	},
+	"files": [
+		"extensions/",
+		"skills/",
+		"README.md",
+		"LICENSE"
+	],
+	"pi": {
+		"extensions": "./extensions",
+		"skills": "./skills"
+	},
+	"engines": {
+		"node": ">=22"
+	}
+}
