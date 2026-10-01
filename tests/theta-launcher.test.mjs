@@ -117,6 +117,19 @@ test('ENOENT seam: with no pi on PATH, prints the exact install message and exit
 	);
 });
 
+test('ENOENT seam: a non-executable pi on PATH reports the spawn error, not "not found"', { skip: skipOnWindows }, (t) => {
+	const binDir = mkdtempSync(join(tmpdir(), 'theta-test-bin-'));
+	t.after(() => rmSync(binDir, { recursive: true, force: true }));
+	// Exists but lacks the exec bit → spawnSync fails with EACCES, not ENOENT.
+	writeFileSync(join(binDir, 'pi'), '#!/bin/sh\nexit 0\n', { mode: 0o644 });
+
+	const result = runTheta(['anything'], { pathDir: binDir });
+
+	assert.equal(result.status, 1);
+	assert.match(result.stderr, /failed to run pi/i);
+	assert.doesNotMatch(result.stderr, /pi not found/);
+});
+
 test('version-guard seam: pi below 0.99.0 warns on stderr but still launches', { skip: skipOnWindows }, (t) => {
 	const binDir = makeStubPiDir('pi 0.98.4');
 	t.after(() => rmSync(binDir, { recursive: true, force: true }));
