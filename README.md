@@ -8,7 +8,7 @@
 
 ## Status
 
-**Very early development (0.0.1 — name reservation release).** The architecture,
+**Very early development (0.0.2 — launcher release).** The architecture,
 skill-selection plan, and milestones are being designed in the open. This package
 currently reserves the name and lays out the pi package skeleton; functionality
 arrives with the milestones below.
