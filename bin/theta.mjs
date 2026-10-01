@@ -3,9 +3,9 @@
 // Thin wrapper: resolve the package source, find pi, exec `pi -e <source> …`.
 
 import { spawn, spawnSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
 import { constants as osConstants } from 'node:os';
 import process from 'node:process';
+import { realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 const pkgRoot = fileURLToPath(new URL('..', import.meta.url));
@@ -18,7 +18,8 @@ if (args[0] === '-h' || args[0] === '--help') {
 		'',
 		'Usage: theta [--dev] [pi arguments…]',
 		'',
-		'  --dev   load Theta from the current directory instead of the installed package',
+		'  --dev   load Theta from a local checkout: the launcher\'s own repo (when run',
+		'          from a source checkout) or the directory named by $THETA_DEV_ROOT',
 		'  -h      show this help',
 		'',
 		'Anything else is passed through to pi untouched.',
@@ -37,22 +38,31 @@ if (process.platform === 'win32') {
 let source = pkgRoot;
 if (args[0] === '--dev') {
 	args.shift();
-	source = process.cwd();
-	// Guard the confused-deputy path: --dev must load a Theta checkout, not an
-	// arbitrary directory's extensions under the Theta name. An explicit -e
-	// source is loaded by pi without further trust gating, so theta checks here.
-	let manifest = null;
-	try {
-		manifest = JSON.parse(readFileSync(`${source}/package.json`, 'utf8'));
-	} catch {
-		// fall through to the error below
-	}
-	if (manifest?.name !== 'theta-agent') {
+	// --dev must only load a Theta checkout the *user* vouched for, never an
+	// arbitrary cwd: pi loads explicit -e sources without trust gating, so an
+	// in-band check (e.g. a package.json name inside cwd) is spoofable by any
+	// repository telling users to run `theta --dev`. Two out-of-band anchors:
+	//  1. cwd is the launcher's own checkout (running bin/theta.mjs from the
+	//     source repo — the canonical dogfood path), or
+	//  2. cwd matches $THETA_DEV_ROOT, a path the user configured themselves.
+	const cwd = process.cwd();
+	const devRoot = process.env.THETA_DEV_ROOT;
+	const samePath = (a, b) => {
+		try {
+			return realpathSync(a) === realpathSync(b);
+		} catch {
+			return false;
+		}
+	};
+	const fromOwnCheckout = samePath(cwd, pkgRoot);
+	const fromEnvAnchor = devRoot !== undefined && samePath(cwd, devRoot);
+	if (!fromOwnCheckout && !fromEnvAnchor) {
 		console.error(
-			`--dev expects a theta-agent checkout, but ${source} is not one (missing or foreign package.json).`,
+			'--dev loads a local Theta checkout only from this checkout itself, or when the current directory matches $THETA_DEV_ROOT. Set THETA_DEV_ROOT to your theta-agent checkout to use --dev elsewhere.',
 		);
 		process.exit(1);
 	}
+	source = cwd;
 }
 
 // pi management commands parse only when they are the first token; prepending
