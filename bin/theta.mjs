@@ -2,7 +2,9 @@
 // theta — launch pi with the Theta package preloaded (M1 stage A, decision T9).
 // Thin wrapper: resolve the package source, find pi, exec `pi -e <source> …`.
 
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
+import { constants as osConstants } from 'node:os';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 
@@ -36,6 +38,21 @@ let source = pkgRoot;
 if (args[0] === '--dev') {
 	args.shift();
 	source = process.cwd();
+	// Guard the confused-deputy path: --dev must load a Theta checkout, not an
+	// arbitrary directory's extensions under the Theta name. An explicit -e
+	// source is loaded by pi without further trust gating, so theta checks here.
+	let manifest = null;
+	try {
+		manifest = JSON.parse(readFileSync(`${source}/package.json`, 'utf8'));
+	} catch {
+		// fall through to the error below
+	}
+	if (manifest?.name !== 'theta-agent') {
+		console.error(
+			`--dev expects a theta-agent checkout, but ${source} is not one (missing or foreign package.json).`,
+		);
+		process.exit(1);
+	}
 }
 
 // pi management commands parse only when they are the first token; prepending
@@ -83,30 +100,39 @@ if (versionMatch) {
 	}
 }
 
-const result = spawnSync(piBin, piArgs, { stdio: 'inherit' });
-if (result.error) {
-	if (result.error.code === 'ENOENT') {
+// Launch pi asynchronously so launcher-directed signals reach the child instead
+// of killing theta and orphaning pi.
+const child = spawn(piBin, piArgs, { stdio: 'inherit' });
+child.on('error', (err) => {
+	if (err.code === 'ENOENT') {
 		console.error('pi not found. Install it with: npm install -g @earendil-works/pi-coding-agent');
 	} else {
-		console.error(`failed to run pi (${piBin}): ${result.error.message}`);
+		console.error(`failed to run pi (${piBin}): ${err.message}`);
 	}
 	process.exit(1);
-}
-if (result.signal) {
-	// Match the shell convention: a signal death exits 128 + signal number.
-	process.exit(128 + signalNumber(result.signal));
-}
-process.exit(result.status ?? 1);
+});
 
-function signalNumber(signal) {
+// Forward catchable termination signals aimed at theta to pi, then mirror pi's
+// own exit once it terminates.
+for (const signal of ['SIGTERM', 'SIGINT', 'SIGHUP']) {
+	process.on(signal, () => {
+		if (!child.killed) child.kill(signal);
+	});
+}
+process.on('SIGPIPE', () => {
+	// theta's stdout/stderr are pi's; ignore SIGPIPE and let pi decide.
+});
+
+child.on('close', (code, signal) => {
+	if (signal) {
+		// Match the shell convention: a signal death exits 128 + signal number.
+		process.exit(128 + signalNumberOf(signal));
+	}
+	process.exit(code ?? 1);
+});
+
+function signalNumberOf(signal) {
 	const name = signal.startsWith('SIG') ? signal : `SIG${signal}`;
-	const numbers = {
-		SIGHUP: 1,
-		SIGINT: 2,
-		SIGQUIT: 3,
-		SIGABRT: 6,
-		SIGKILL: 9,
-		SIGTERM: 15,
-	};
-	return numbers[name] ?? 1;
+	const number = osConstants.signals[name];
+	return typeof number === 'number' ? number : 1;
 }
