@@ -1,3 +1,9 @@
 node_modules/
 *.tgz
 .DS_Store
+
+# machine-local Claude Code / agent skills (symlinks into .agents/)
+.claude/
+.agents/
+skills-lock.json
+CLAUDE.local.md
