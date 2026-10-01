@@ -4,9 +4,18 @@
 // The "pi" binary is stubbed with a /bin/sh script on a controlled PATH.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import process from 'node:process';
-import { chmodSync, existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import {
+	chmodSync,
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	readFileSync,
+	realpathSync,
+	rmSync,
+	writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -70,11 +79,21 @@ test('launch seam: runs pi -e <pkgRoot> and passes remaining args through untouc
 	assert.deepEqual(recordedArgs(record).map(normalizeArg), ['-e', root, 'hello.txt', '--flag', 'x'].map(normalizeArg));
 });
 
+// A minimal theta-agent checkout fixture for --dev tests.
+function makeDevCheckout() {
+	const dir = mkdtempSync(join(tmpdir(), 'theta-test-dev-'));
+	writeFileSync(
+		join(dir, 'package.json'),
+		JSON.stringify({ name: 'theta-agent', version: '0.0.2' }, null, '\t'),
+	);
+	return dir;
+}
+
 test('launch seam: --dev drops the flag and uses the cwd as the -e source', { skip: skipOnWindows }, (t) => {
 	const binDir = makeStubPiDir('pi 0.99.2');
 	t.after(() => rmSync(binDir, { recursive: true, force: true }));
 	const record = join(binDir, 'record.txt');
-	const devCwd = mkdtempSync(join(tmpdir(), 'theta-test-cwd-'));
+	const devCwd = makeDevCheckout();
 	t.after(() => rmSync(devCwd, { recursive: true, force: true }));
 
 	const result = runTheta(['--dev', 'prompt.txt'], { pathDir: binDir, record, cwd: devCwd });
@@ -215,6 +234,119 @@ test('signal seam: pi dying by signal exits 128 + signal number', { skip: skipOn
 	const result = runTheta([], { pathDir: binDir });
 
 	assert.equal(result.status, 128 + 15, `stderr: ${result.stderr}`);
+});
+
+test('signal seam: SIGSEGV death exits 139 and SIGKILL death exits 137 (platform signal numbers)', { skip: skipOnWindows }, (t) => {
+	const cases = [
+		['SEGV', 11],
+		['KILL', 9],
+	];
+	for (const [sigName, num] of cases) {
+		const binDir = mkdtempSync(join(tmpdir(), 'theta-test-bin-'));
+		t.after(() => rmSync(binDir, { recursive: true, force: true }));
+		writeFileSync(
+			join(binDir, 'pi'),
+			[
+				'#!/bin/sh',
+				'if [ "$1" = "--version" ]; then echo "pi 0.99.2"; exit 0; fi',
+				`kill -${sigName} $$`,
+			].join('\n'),
+			{ mode: 0o755 },
+		);
+		chmodSync(join(binDir, 'pi'), 0o755);
+
+		const result = runTheta([], { pathDir: binDir });
+
+		assert.equal(result.status, 128 + num, `signal ${sigName}: stderr ${result.stderr}`);
+	}
+});
+
+test('signal-forwarding seam: SIGTERM aimed at theta is forwarded to pi, which exits 143', { skip: skipOnWindows }, async () => {
+	const binDir = mkdtempSync(join(tmpdir(), 'theta-test-bin-'));
+	rmSync(binDir, { recursive: true, force: true }); // cleanup handled below via promise
+	const readyFlag = join(binDir, 'ready');
+	const deathReport = join(binDir, 'death.txt');
+	mkdirSync(binDir, { recursive: true });
+	// A stub pi that announces readiness, waits, and records how it died.
+	// /bin-absolute tools because PATH holds only this stub dir.
+	writeFileSync(
+		join(binDir, 'pi'),
+		[
+			'#!/bin/sh',
+			'if [ "$1" = "--version" ]; then echo "pi 0.99.2"; exit 0; fi',
+			'/usr/bin/touch "$READY_FLAG"',
+			'trap "echo TERM-handled > \"$DEATH_REPORT\"; exit 143" TERM',
+			'while [ ! -f "$DEATH_REPORT" ]; do /bin/sleep 0.05; done',
+		].join('\n'),
+		{ mode: 0o755 },
+	);
+	chmodSync(join(binDir, 'pi'), 0o755);
+
+	const env = {
+		...process.env,
+		PATH: binDir,
+		READY_FLAG: readyFlag,
+		DEATH_REPORT: deathReport,
+	};
+	const child = spawn(process.execPath, [launcher], { env });
+	try {
+		// Wait for pi to be up, then signal theta (the parent) specifically.
+		await waitFor(() => existsSync(readyFlag), 5000, 'pi readiness');
+		child.kill('SIGTERM');
+		const { status, signal } = await closeOf(child);
+		assert.equal(status, 143, `theta should mirror pi's TERM exit; signal=${signal}`);
+		assert.equal(readFileSync(deathReport, 'utf8').trim(), 'TERM-handled');
+	} finally {
+		if (!child.killed) child.kill('SIGKILL');
+		rmSync(binDir, { recursive: true, force: true });
+	}
+});
+
+function waitFor(predicate, timeoutMs, what) {
+	const start = Date.now();
+	return new Promise((resolve, reject) => {
+		const tick = () => {
+			if (predicate()) return resolve();
+			if (Date.now() - start > timeoutMs) return reject(new Error(`timeout waiting for ${what}`));
+			setTimeout(tick, 25);
+		};
+		tick();
+	});
+}
+
+function closeOf(child) {
+	return new Promise((resolve) => child.on('close', (status, signal) => resolve({ status, signal })));
+}
+
+test('--dev validation seam: --dev outside a theta-agent checkout fails with a clear error', { skip: skipOnWindows }, (t) => {
+	const binDir = makeStubPiDir('pi 0.99.2');
+	t.after(() => rmSync(binDir, { recursive: true, force: true }));
+	const foreignDir = mkdtempSync(join(tmpdir(), 'theta-test-foreign-'));
+	t.after(() => rmSync(foreignDir, { recursive: true, force: true }));
+	// An unrelated repo with its own package.json — must still be rejected.
+	writeFileSync(
+		join(foreignDir, 'package.json'),
+		JSON.stringify({ name: 'not-theta', version: '1.0.0' }, null, '\t'),
+	);
+
+	const result = runTheta(['--dev'], { pathDir: binDir, cwd: foreignDir });
+
+	assert.equal(result.status, 1);
+	assert.match(result.stderr, /--dev expects a theta-agent checkout/);
+	// The stub record file is only written when pi actually launches.
+	assert.ok(!existsSync(join(binDir, 'record.txt')), 'pi must not be launched for a foreign --dev cwd');
+});
+
+test('--dev validation seam: --dev in an empty directory fails with a clear error', { skip: skipOnWindows }, (t) => {
+	const binDir = makeStubPiDir('pi 0.99.2');
+	t.after(() => rmSync(binDir, { recursive: true, force: true }));
+	const emptyDir = makeEmptyDir();
+	t.after(() => rmSync(emptyDir, { recursive: true, force: true }));
+
+	const result = runTheta(['--dev'], { pathDir: binDir, cwd: emptyDir });
+
+	assert.equal(result.status, 1);
+	assert.match(result.stderr, /--dev expects a theta-agent checkout/);
 });
 
 test('launch-failure seam: pi disappearing between probe and launch reports the spawn error, not silent exit 1', { skip: skipOnWindows }, (t) => {
