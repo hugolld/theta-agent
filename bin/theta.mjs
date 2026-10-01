@@ -34,7 +34,11 @@ if (args[0] === '--dev') {
 const piBin = process.platform === 'win32' ? 'pi.cmd' : 'pi';
 const probe = spawnSync(piBin, ['--version'], { encoding: 'utf8' });
 if (probe.error) {
-	console.error('pi not found. Install it with: npm install -g @earendil-works/pi-coding-agent');
+	if (probe.error.code === 'ENOENT') {
+		console.error('pi not found. Install it with: npm install -g @earendil-works/pi-coding-agent');
+	} else {
+		console.error(`failed to run pi (${piBin}): ${probe.error.message}`);
+	}
 	process.exit(1);
 }
 
