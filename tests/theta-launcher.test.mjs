@@ -44,10 +44,11 @@ function makeEmptyDir() {
 	return mkdtempSync(join(tmpdir(), 'theta-test-empty-'));
 }
 
-function runTheta(args, { pathDir, cwd, record } = {}) {
+function runTheta(args, { pathDir, cwd, record, env: extraEnv } = {}) {
 	const env = { ...process.env };
 	if (pathDir) env.PATH = pathDir;
 	if (record) env.PI_STUB_RECORD = record;
+	if (extraEnv) Object.assign(env, extraEnv);
 	return spawnSync(process.execPath, [launcher, ...args], {
 		encoding: 'utf8',
 		env,
@@ -89,14 +90,26 @@ function makeDevCheckout() {
 	return dir;
 }
 
-test('launch seam: --dev drops the flag and uses the cwd as the -e source', { skip: skipOnWindows }, (t) => {
+test('launch seam: --dev from the launcher\'s own checkout uses the cwd as the -e source', { skip: skipOnWindows }, (t) => {
+	const binDir = makeStubPiDir('pi 0.99.2');
+	t.after(() => rmSync(binDir, { recursive: true, force: true }));
+	const record = join(binDir, 'record.txt');
+
+	// cwd = repo root (where bin/theta.mjs lives) is the canonical dev path.
+	const result = runTheta(['--dev', 'prompt.txt'], { pathDir: binDir, record, cwd: root });
+
+	assert.equal(result.status, 0, `stderr: ${result.stderr}`);
+	assert.deepEqual(recordedArgs(record).map(normalizeArg), ['-e', root, 'prompt.txt'].map(normalizeArg));
+});
+
+test('launch seam: --dev in a directory matching $THETA_DEV_ROOT is allowed', { skip: skipOnWindows }, (t) => {
 	const binDir = makeStubPiDir('pi 0.99.2');
 	t.after(() => rmSync(binDir, { recursive: true, force: true }));
 	const record = join(binDir, 'record.txt');
 	const devCwd = makeDevCheckout();
 	t.after(() => rmSync(devCwd, { recursive: true, force: true }));
 
-	const result = runTheta(['--dev', 'prompt.txt'], { pathDir: binDir, record, cwd: devCwd });
+	const result = runTheta(['--dev', 'prompt.txt'], { pathDir: binDir, record, cwd: devCwd, env: { THETA_DEV_ROOT: devCwd } });
 
 	assert.equal(result.status, 0, `stderr: ${result.stderr}`);
 	assert.deepEqual(recordedArgs(record).map(normalizeArg), ['-e', devCwd, 'prompt.txt'].map(normalizeArg));
@@ -318,26 +331,26 @@ function closeOf(child) {
 	return new Promise((resolve) => child.on('close', (status, signal) => resolve({ status, signal })));
 }
 
-test('--dev validation seam: --dev outside a theta-agent checkout fails with a clear error', { skip: skipOnWindows }, (t) => {
+test('--dev validation seam: --dev in a foreign directory is rejected even when its manifest spoofs the theta-agent name', { skip: skipOnWindows }, (t) => {
 	const binDir = makeStubPiDir('pi 0.99.2');
 	t.after(() => rmSync(binDir, { recursive: true, force: true }));
-	const foreignDir = mkdtempSync(join(tmpdir(), 'theta-test-foreign-'));
+	const foreignDir = mkdtempSync(join(tmpdir(), 'theta-test-spoof-'));
 	t.after(() => rmSync(foreignDir, { recursive: true, force: true }));
-	// An unrelated repo with its own package.json — must still be rejected.
+	// Spoofed manifest: attacker-controlled content claims to be theta-agent.
 	writeFileSync(
 		join(foreignDir, 'package.json'),
-		JSON.stringify({ name: 'not-theta', version: '1.0.0' }, null, '\t'),
+		JSON.stringify({ name: 'theta-agent', version: '0.0.2', pi: { extensions: './extensions' } }, null, '\t'),
 	);
 
 	const result = runTheta(['--dev'], { pathDir: binDir, cwd: foreignDir });
 
 	assert.equal(result.status, 1);
-	assert.match(result.stderr, /--dev expects a theta-agent checkout/);
+	assert.match(result.stderr, /THETA_DEV_ROOT/);
 	// The stub record file is only written when pi actually launches.
-	assert.ok(!existsSync(join(binDir, 'record.txt')), 'pi must not be launched for a foreign --dev cwd');
+	assert.ok(!existsSync(join(binDir, 'record.txt')), 'pi must not be launched for a spoofed --dev cwd');
 });
 
-test('--dev validation seam: --dev in an empty directory fails with a clear error', { skip: skipOnWindows }, (t) => {
+test('--dev validation seam: --dev in an unrelated directory without THETA_DEV_ROOT fails with a clear error', { skip: skipOnWindows }, (t) => {
 	const binDir = makeStubPiDir('pi 0.99.2');
 	t.after(() => rmSync(binDir, { recursive: true, force: true }));
 	const emptyDir = makeEmptyDir();
@@ -346,7 +359,23 @@ test('--dev validation seam: --dev in an empty directory fails with a clear erro
 	const result = runTheta(['--dev'], { pathDir: binDir, cwd: emptyDir });
 
 	assert.equal(result.status, 1);
-	assert.match(result.stderr, /--dev expects a theta-agent checkout/);
+	assert.match(result.stderr, /THETA_DEV_ROOT/);
+});
+
+test('--dev validation seam: THETA_DEV_ROOT pointing elsewhere does not unlock the current directory', { skip: skipOnWindows }, (t) => {
+	const binDir = makeStubPiDir('pi 0.99.2');
+	t.after(() => rmSync(binDir, { recursive: true, force: true }));
+	const elsewhere = makeDevCheckout();
+	t.after(() => rmSync(elsewhere, { recursive: true, force: true }));
+	const foreignDir = mkdtempSync(join(tmpdir(), 'theta-test-mismatch-'));
+	t.after(() => rmSync(foreignDir, { recursive: true, force: true }));
+
+	// cwd does not match THETA_DEV_ROOT → still rejected.
+	const result = runTheta(['--dev'], { pathDir: binDir, cwd: foreignDir, env: { THETA_DEV_ROOT: elsewhere } });
+
+	assert.equal(result.status, 1);
+	assert.match(result.stderr, /THETA_DEV_ROOT/);
+	assert.ok(!existsSync(join(binDir, 'record.txt')), 'pi must not be launched when cwd mismatches the anchor');
 });
 
 test('launch-failure seam: pi disappearing between probe and launch reports the spawn error, not silent exit 1', { skip: skipOnWindows }, (t) => {

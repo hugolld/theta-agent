@@ -56,7 +56,7 @@ npm i -g theta-agent
 theta
 ```
 
-That launches pi with the Theta package preloaded. `theta --dev` loads Theta from the current repo checkout instead of the installed package. Theta targets pi ≥ 0.99 — if it isn't installed yet: `npm i -g @earendil-works/pi-coding-agent`.
+That launches pi with the Theta package preloaded. `theta --dev` loads Theta from a local checkout — either the launcher's own repo, or the directory you name with `$THETA_DEV_ROOT` (theta never loads an arbitrary current directory this way). Theta targets pi ≥ 0.99 — if it isn't installed yet: `npm i -g @earendil-works/pi-coding-agent`.
 
 ## License
 
