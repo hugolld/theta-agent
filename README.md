@@ -51,12 +51,17 @@ pi install npm:theta-agent
 
 ## Try it
 
+theta rides on the [pi](https://pi.dev) coding agent, and pi is a peer
+dependency — a global install of theta-agent does not bring `pi` along. Install
+pi first, then theta:
+
 ```sh
+npm i -g @earendil-works/pi-coding-agent
 npm i -g theta-agent
 theta
 ```
 
-That launches pi with the Theta package preloaded. `theta --dev` loads Theta from a local checkout — either the launcher's own repo, or the directory you name with `$THETA_DEV_ROOT` (theta never loads an arbitrary current directory this way). Theta targets pi ≥ 0.99 — if it isn't installed yet: `npm i -g @earendil-works/pi-coding-agent`.
+That launches pi with the Theta package preloaded. `theta --dev` loads Theta from a local checkout — either the launcher's own repo, or the directory you name with `$THETA_DEV_ROOT` (theta never loads an arbitrary current directory this way). Theta targets pi ≥ 0.99; if `theta` reports `pi not found`, install pi with the command above and retry.
 
 ## License
 
