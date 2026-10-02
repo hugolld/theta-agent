@@ -19,7 +19,7 @@ Current state: 0.0.x skeleton. Pending deliverable: the M1 launcher spike (2026-
 
 - Conventional commits (`feat:`, `chore:`, `docs:`). Tabs and existing field order in `package.json`.
 - `.npmrc` pins the official registry (the machine default is npmmirror).
-- No build step or test framework yet — pi loads extension TS via jiti. Verify changes with `npm run lint` and `npm run typecheck`; check shipped files with `npm pack --dry-run`.
+- No build step — pi loads extension TS via jiti. Tests use the built-in `node:test` runner (`npm test`). Verify changes with `npm test`, `npm run lint`, and `npm run typecheck`; check shipped files with `npm pack --dry-run`.
 
 ## Git workflow — one "coding strike" per task
 
