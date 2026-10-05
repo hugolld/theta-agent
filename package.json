@@ -1,9 +1,10 @@
 {
 	"name": "theta-agent",
-	"version": "0.0.1",
+	"version": "0.0.2",
 	"description": "Theta — a science co-researcher agent built as a package for the pi coding agent harness",
 	"keywords": [
 		"pi",
+		"pi-package",
 		"pi-agent",
 		"agent",
 		"science",
@@ -15,11 +16,15 @@
 	],
 	"license": "MIT",
 	"type": "module",
+	"bin": {
+		"theta": "./bin/theta.mjs"
+	},
 	"repository": {
 		"type": "git",
 		"url": "git+https://github.com/hugolld/theta-agent.git"
 	},
 	"files": [
+		"bin/",
 		"extensions/",
 		"skills/",
 		"README.md",
