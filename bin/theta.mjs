@@ -84,11 +84,7 @@ const piArgs = isManagementCommand ? args : ['-e', source, ...args];
 
 const probe = spawnSync(piBin, ['--version'], { encoding: 'utf8' });
 if (probe.error) {
-	if (probe.error.code === 'ENOENT') {
-		console.error('pi not found. Install it with: npm install -g @earendil-works/pi-coding-agent');
-	} else {
-		console.error(`failed to run pi (${piBin}): ${probe.error.message}`);
-	}
+	reportSpawnFailure(probe.error);
 	process.exit(1);
 }
 
@@ -101,8 +97,7 @@ if (versionMatch) {
 	const patch = Number(versionMatch[3]);
 	const hasPrerelease = versionMatch[4] !== undefined;
 	const belowTarget =
-		major < 0 ||
-		(major === 0 && (minor < 99 || (minor === 99 && patch === 0 && hasPrerelease)));
+		major === 0 && (minor < 99 || (minor === 99 && patch === 0 && hasPrerelease));
 	if (belowTarget) {
 		console.warn(
 			`warning: found pi ${versionMatch[0]}, but Theta targets pi >= 0.99 — continuing; some features may misbehave`,
@@ -114,11 +109,7 @@ if (versionMatch) {
 // of killing theta and orphaning pi.
 const child = spawn(piBin, piArgs, { stdio: 'inherit' });
 child.on('error', (err) => {
-	if (err.code === 'ENOENT') {
-		console.error('pi not found. Install it with: npm install -g @earendil-works/pi-coding-agent');
-	} else {
-		console.error(`failed to run pi (${piBin}): ${err.message}`);
-	}
+	reportSpawnFailure(err);
 	process.exit(1);
 });
 
@@ -145,4 +136,14 @@ function signalNumberOf(signal) {
 	const name = signal.startsWith('SIG') ? signal : `SIG${signal}`;
 	const number = osConstants.signals[name];
 	return typeof number === 'number' ? number : 1;
+}
+
+// Shared by the pi probe and the async launch: one ENOENT story, one
+// everything-else story.
+function reportSpawnFailure(err) {
+	if (err.code === 'ENOENT') {
+		console.error('pi not found. Install it with: npm install -g @earendil-works/pi-coding-agent');
+	} else {
+		console.error(`failed to run pi (${piBin}): ${err.message}`);
+	}
 }
