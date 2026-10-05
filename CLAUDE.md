@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 `theta-agent` — a **pi package** (extensions + skills for the [pi](https://pi.dev) coding agent) that grows into **Theta**, a science co-researcher agent for biology/biomedicine. It is the code repo of the Theta campaign; design decisions (T1–T10), milestone definitions, and task handoffs live in the campaign vault (path in `CLAUDE.local.md`). Treat the vault as read-only reference.
 
-Current state: 0.0.x skeleton. Pending deliverable: the M1 launcher spike (2026-10-01 handoff in the vault) — a thin `bin/theta.mjs` that runs `pi -e <package-root>` so `npm i -g theta-agent && theta` works.
+Current state: 0.0.2 — the M1 launcher (stage A of T9, PR #1) is merged: a thin `bin/theta.mjs` that runs `pi -e <package-root>` so `npm i -g theta-agent && theta` works (macOS/Linux; Windows waits for M8, tracked in issue #2). Pending deliverable: the M1 second half — the Tier-1 science skills (literature review, hypothesis generation, experimental design, statistical analysis, scientific writing, critical thinking) that replace the `skills/theta-research-loop` stub.
 
 ## pi-package rules
 
