@@ -18,7 +18,7 @@ test("package.json carries the pi manifest", () => {
 
 test("pi manifest targets exist on disk", async () => {
 	for (const dir of [manifest.pi.extensions, manifest.pi.skills]) {
-		const s = await stat(new URL(`../${dir}`, import.meta.url));
-		assert.ok(s.isDirectory(), `${dir} is not a directory`);
+		const dirStat = await stat(new URL(`../${dir}`, import.meta.url));
+		assert.ok(dirStat.isDirectory(), `${dir} is not a directory`);
 	}
 });
