@@ -1,0 +1,13 @@
+{
+	"vendored": [
+		{
+			"name": "literature-review",
+			"sha256": "fd2f4bfd880a49980427d56e6911ae8dd3cdabf85f52f8ce86071fdab71593d3"
+		},
+		{
+			"name": "hypothesis-generation",
+			"sha256": "5e2760e334c03cbb315f9680c89909a6bcabbadac1d5a0d9ce502104c2a4287e"
+		}
+	],
+	"self-authored": ["theta-research-loop"]
+}
