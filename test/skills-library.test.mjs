@@ -170,6 +170,27 @@ test("every skill carries a parseable SKILL.md with a valid name and description
 	}
 });
 
+// Digest of a whole skill directory: sha256 over the sorted manifest of
+// "relative-path file-digest" lines, recursing into subdirectories. Any byte
+// change anywhere in a vendored tree moves this value.
+async function treeDigest(dirUrl) {
+	const entries = (await readdir(dirUrl, { withFileTypes: true })).sort((a, b) =>
+		a.name < b.name ? -1 : 1,
+	);
+	const manifest = [];
+	for (const entry of entries) {
+		if (entry.isDirectory()) {
+			manifest.push(`${entry.name}/ ${await treeDigest(new URL(`${entry.name}/`, dirUrl))}`);
+		} else {
+			const fileDigest = createHash("sha256")
+				.update(await readFile(new URL(entry.name, dirUrl)))
+				.digest("hex");
+			manifest.push(`${entry.name} ${fileDigest}`);
+		}
+	}
+	return createHash("sha256").update(manifest.join("\n")).digest("hex");
+}
+
 test("vendored skills carry full provenance and are hash-pinned", async () => {
 	for (const skill of expected.vendored) {
 		const { frontmatter } = await loadSkill(skill.name);
@@ -187,19 +208,19 @@ test("vendored skills carry full provenance and are hash-pinned", async () => {
 		assert.match(provenance.commit, /^[0-9a-f]{40}$/);
 		assert.match(provenance.date, /^\d{4}-\d{2}-\d{2}$/);
 		assert.match(provenance.license, /MIT/);
-		// Content pin: any edit to a vendored file (including its SKILL.md body)
-		// fails CI; a re-sync updates the hash with the provenance header.
-		const bytes = await readFile(new URL(`${skill.name}/SKILL.md`, skillsRoot));
-		const digest = createHash("sha256").update(bytes).digest("hex");
+		// Content pin over the whole tree (SKILL.md, references, scripts,
+		// assets): any edit fails CI; a re-sync updates the pin with the
+		// provenance header.
+		const digest = await treeDigest(new URL(`${skill.name}/`, skillsRoot));
 		assert.match(
-			skill.sha256,
+			skill["tree-sha256"],
 			/^[0-9a-f]{64}$/,
-			`${skill.name}: sha256 pin missing from expected-skills.json`,
+			`${skill.name}: tree-sha256 pin missing from expected-skills.json`,
 		);
 		assert.equal(
 			digest,
-			skill.sha256,
-			`${skill.name}: content drifted from the pinned hash`,
+			skill["tree-sha256"],
+			`${skill.name}: content drifted from the pinned tree digest`,
 		);
 	}
 });
@@ -214,18 +235,20 @@ test("the orchestrator is self-authored and walks the six-stage loop", async () 
 		`${name}: metadata.authorship must mark it self-authored`,
 	);
 	assert.equal(frontmatter.metadata?.provenance, undefined, `${name}: must not carry vendored provenance`);
-	for (const stage of ["frame", "search", "hypothesize", "design", "execute", "report"]) {
-		assert.match(
-			markdown.toLowerCase(),
-			new RegExp(stage),
-			`${name}: loop stage "${stage}" missing from the body`,
-		);
-	}
-	for (const routed of ["literature-review", "hypothesis-generation"]) {
+	// Anchored to the loop table rows so incidental prose (e.g. "experimental
+	// design") cannot stand in for a missing stage.
+	const stages = ["Frame", "Search", "Hypothesize", "Design", "Execute", "Report"];
+	for (const [index, stage] of stages.entries()) {
 		assert.match(
 			markdown,
-			new RegExp(routed),
-			`${name}: routing to "${routed}" missing from the body`,
+			new RegExp(`\\| ${index + 1}\\. ${stage}\\s*\\|`),
+			`${name}: loop table row ${index + 1} (${stage}) missing`,
+		);
+	}
+	for (const routed of ["`literature-review`", "`hypothesis-generation`"]) {
+		assert.ok(
+			markdown.includes(routed),
+			`${name}: routing to ${routed} missing from the body`,
 		);
 	}
 });

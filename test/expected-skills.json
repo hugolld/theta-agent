@@ -2,12 +2,14 @@
 	"vendored": [
 		{
 			"name": "literature-review",
-			"sha256": "fd2f4bfd880a49980427d56e6911ae8dd3cdabf85f52f8ce86071fdab71593d3"
+			"tree-sha256": "e79da167a6b1774761ed0fe1c06b348c6348802f7aa9099e0d8d72d6c3a9c816"
 		},
 		{
 			"name": "hypothesis-generation",
-			"sha256": "5e2760e334c03cbb315f9680c89909a6bcabbadac1d5a0d9ce502104c2a4287e"
+			"tree-sha256": "aabc20086140facf0ad4a4d1c0d0a690e8a5d949ace3b8ce49ebc3babd7f3b4f"
 		}
 	],
-	"self-authored": ["theta-research-loop"]
+	"self-authored": [
+		"theta-research-loop"
+	]
 }
