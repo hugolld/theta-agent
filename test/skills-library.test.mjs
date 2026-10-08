@@ -276,3 +276,88 @@ test("no Tier-2 infra skills ship", () => {
 	const crossed = shipped.filter((name) => TIER2_INFRA_NAMES.includes(name));
 	assert.deepEqual(crossed, [], `Tier-2 infra skills must not ship: ${crossed.join(", ")}`);
 });
+
+// Glossary discipline, with GLOSSARY.md as the single source of truth: the
+// _Avoid_ synonyms must not surface in self-authored prose, and every
+// headword must describe language the docs actually use. Vendored trees are
+// exempt — upstream voice by design. Banned terms use hyphen-guarded
+// boundaries so legitimate hyphenated compounds (e.g. "re-syncs") do not
+// match a banned single word; headword usage uses plain word boundaries so
+// "tier" matches the "Tier-1" compounds the docs actually write.
+const scanSurfaces = [
+	"README.md",
+	"CLAUDE.md",
+	"skills/theta-research-loop/SKILL.md",
+	"test/manifest.test.mjs",
+	"test/skills-library.test.mjs",
+];
+const scanText = (
+	await Promise.all(
+		scanSurfaces.map((path) => readFile(new URL(`../${path}`, import.meta.url), "utf8")),
+	)
+).join("\n");
+const glossary = await readFile(new URL("../GLOSSARY.md", import.meta.url), "utf8");
+
+function wordPattern(core, hyphenGuarded) {
+	const escaped = core
+		.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+		.replace(/\s+/g, "\\s+");
+	const [start, end] = hyphenGuarded ? ["(?<![\\w-])", "(?![\\w-])"] : ["\\b", "\\b"];
+	return new RegExp(`${start}${escaped}s?${end}`, "i");
+}
+
+function glossaryAvoidTerms(markdown) {
+	const terms = [];
+	for (const line of markdown.split(/\r?\n/)) {
+		const match = /^_Avoid_: (.*)$/.exec(line.trim());
+		if (!match) continue;
+		// Split on top-level commas, then drop the parenthetical glosses.
+		const parts = [];
+		let depth = 0;
+		let current = "";
+		for (const ch of match[1]) {
+			if (ch === "(") depth++;
+			if (depth === 0 && ch === ",") {
+				parts.push(current);
+				current = "";
+				continue;
+			}
+			if (ch === ")") depth--;
+			current += ch;
+		}
+		parts.push(current);
+		for (const part of parts) {
+			const term = part.replace(/\s*\([^)]*\)/g, "").trim();
+			if (term) terms.push(term);
+		}
+	}
+	return terms;
+}
+
+test("self-authored prose keeps the glossary's _Avoid_ terms out", () => {
+	const offenders = glossaryAvoidTerms(glossary).filter((term) =>
+		wordPattern(term, true).test(scanText),
+	);
+	assert.deepEqual(
+		offenders,
+		[],
+		`_Avoid_ terms found in self-authored files: ${offenders.join(", ")}`,
+	);
+});
+
+test("every glossary headword describes language the docs use", () => {
+	const unused = [];
+	for (const line of glossary.split(/\r?\n/)) {
+		const match = /^\*\*(.+)\*\*:$/.exec(line.trim());
+		if (!match) continue;
+		for (const word of match[1].toLowerCase().split(/\s+/)) {
+			const stem = word.replace(/s$/, "");
+			if (!wordPattern(stem, false).test(scanText)) unused.push(word);
+		}
+	}
+	assert.deepEqual(
+		unused,
+		[],
+		`glossary headword words with no usage in self-authored docs: ${unused.join(", ")}`,
+	);
+});
