@@ -52,6 +52,7 @@ function parseYamlBlock(text) {
 		const list = [];
 		while (pos < lines.length) {
 			skipBlanks();
+			if (pos >= lines.length) break;
 			const line = lines[pos];
 			const at = indentOf(line);
 			const trimmed = line.trim();
@@ -65,8 +66,22 @@ function parseYamlBlock(text) {
 				const key = rest.slice(0, colon).trim();
 				const value = rest.slice(colon + 1).trim();
 				item[key] = value === "" ? parseNode(indent + 2) : parseScalar(value);
-				while (pos < lines.length && indentOf(lines[pos]) > indent) {
-					const member = lines[pos].trim();
+				while (pos < lines.length) {
+					const memberLine = lines[pos];
+					if (memberLine.trim() === "") {
+						// An interior blank of the item's map is significant only
+						// if a deeper member follows; otherwise leave it for the
+						// caller's loops to end the item.
+						let next = pos + 1;
+						while (next < lines.length && lines[next].trim() === "") next++;
+						if (next < lines.length && indentOf(lines[next]) > indent) {
+							pos = next;
+							continue;
+						}
+						break;
+					}
+					if (indentOf(memberLine) <= indent) break;
+					const member = memberLine.trim();
 					const mColon = member.indexOf(":");
 					if (mColon === -1) {
 						throw new Error(`unsupported list member: ${member.slice(0, 40)}`);
@@ -88,6 +103,7 @@ function parseYamlBlock(text) {
 		const map = {};
 		while (pos < lines.length) {
 			skipBlanks();
+			if (pos >= lines.length) break;
 			const line = lines[pos];
 			const at = indentOf(line);
 			const trimmed = line.trim();
@@ -131,9 +147,9 @@ function parseYamlBlock(text) {
 	// under real folding) throw. Blank lines fold per YAML: a folded scalar
 	// turns one blank line into a newline and n consecutive blanks into n
 	// newlines; a literal scalar keeps the empty line. Leading and trailing
-	// blanks only affect edge newlines, which the subset normalizes away, so
-	// they are dropped. Headers outside the family (keep chomping, explicit
-	// indent indicators) throw.
+	// blank lines are dropped rather than folded — a documented subset limit,
+	// since real YAML keeps their newlines at the value's edges. Headers
+	// outside the family (keep chomping, explicit indent indicators) throw.
 	function parseBlockScalar(header, indent) {
 		if (![">", ">-", "|", "|-"].includes(header)) {
 			throw new Error(`unsupported block scalar header: ${header}`);
@@ -195,7 +211,7 @@ function parseFrontmatter(markdown) {
 // a folded scalar turns one blank line into a newline and n consecutive
 // blanks into n newlines; a literal scalar keeps the empty line. Blank lines
 // elsewhere in the frontmatter are insignificant. Pinning these here keeps a
-// re-sync that imports a paragraph-broken description from silently
+// re-sync that vendors a paragraph-broken description from silently
 // mis-parsing or failing the length check.
 test("frontmatter parser: block scalars fold blank lines per YAML semantics", () => {
 	const folded = parseFrontmatter(
@@ -234,6 +250,26 @@ test("frontmatter parser: blank lines outside block scalars are insignificant", 
 	assert.equal(withBlanks.name, "x");
 	assert.equal(withBlanks.description, "plain value");
 	assert.deepEqual(withBlanks.metadata, { version: "1.0" });
+
+	// Trailing blanks before the closing fence (and after a block list) end
+	// the frontmatter cleanly — a re-sync can plausibly import either shape.
+	const trailingBlank = parseFrontmatter("---\nname: x\n\n---\nbody");
+	assert.equal(trailingBlank.name, "x");
+
+	const blankAfterList = parseFrontmatter(
+		"---\nname: x\nallowed-tools:\n- Read\n- Write\n\n---\nbody",
+	);
+	assert.deepEqual(blankAfterList["allowed-tools"], ["Read", "Write"]);
+
+	// A blank line inside a list item's map is insignificant when a deeper
+	// member follows (the openclaw.envVars shape), and ends the item cleanly
+	// when a dedent does.
+	const blankInListItem = parseFrontmatter(
+		'---\nname: x\nmetadata:\n  envVars:\n  - name: A_KEY\n\n    required: false\n---\nbody',
+	);
+	assert.deepEqual(blankInListItem.metadata.envVars, [
+		{ name: "A_KEY", required: "false" },
+	]);
 });
 
 const shipped = (await readdir(skillsRoot, { withFileTypes: true }))
