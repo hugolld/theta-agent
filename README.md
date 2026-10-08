@@ -71,12 +71,47 @@ library, vendored **verbatim** per [ADR 0001](docs/adr/0001-vendor-k-dense-skill
 upstream names, directory shapes, and content unchanged except a provenance
 header in each vendored `SKILL.md`. Re-syncs happen at milestone boundaries.
 
-Currently vendored (upstream release `v2.72.0`, commit `526ebce`):
+Currently vendored (upstream release `v2.72.0`, commit `526ebce`) — the full
+Tier-1 research-loop set:
 
 - `literature-review` — systematic, scoping, and narrative literature reviews
   with reproducible searches and citation checks
+- `paper-lookup` — searches 18 scholarly APIs for papers, citations, abstracts,
+  and open-access full text with reproducible provenance
+- `paperzilla` — reads Paperzilla projects, searches project feeds, and
+  retrieves recommendations and canonical papers
+- `bgpt-paper-search` — searches BGPT scientific papers by topic or DOI and
+  retrieves claim-level evidence from full text
+- `research-lookup` — compiles current scholarly evidence for manuscripts and
+  research briefs via Parallel Search, Extract, and Research
+- `citation-management` — citation search, metadata validation, and BibTeX
+  generation across OpenAlex, PubMed, and Google Scholar
+- `pyzotero` — manages Zotero reference libraries through the pyzotero Python
+  client and the Zotero Web API
+- `peer-review` — evidence-bounded, constructive peer-review drafts and
+  structured manuscript assessments
+- `scholar-evaluation` — qualitative-first, evidence-traceable developmental
+  review of scholarly works and research-assessment rubrics
+- `scientific-writing` — drafts, revises, and audits manuscripts with explicit
+  evidence provenance and reporting-guideline coverage
+- `scientific-critical-thinking` — evaluates scientific claims and evidence
+  quality: validity, bias, confounders, and evidence grading
+- `scientific-brainstorming` — evidence-aware scientific ideation with
+  structured discussion, adversarial review, and decision logs
 - `hypothesis-generation` — evidence-bounded candidate hypotheses, rival
   explanations, and preregistration-ready analysis plans
+- `hypogenic` — plans and audits LLM-assisted hypothesis generation from
+  labeled text datasets with HypoGeniC/HypoRefine
+- `experimental-design` — designs experiments before data collection:
+  randomization, blocking, factorial designs, and treatment layouts
+- `statistical-analysis` — guided test selection, assumption checking, effect
+  sizes, power analysis, and APA-formatted reporting
+- `statistical-power` — sample-size and power calculation, closed-form and
+  simulation-based, for study planning
+- `uncertainty-and-units` — unit tracking and measurement-uncertainty
+  propagation in scientific calculations
+- `exploratory-data-analysis` — bounded, local first-pass analysis profiles of
+  supported scientific file formats
 
 The `theta-research-loop` orchestrator that routes the research loop into the
 library is Theta's own, self-authored work.

@@ -14,8 +14,9 @@ const expected = JSON.parse(
 );
 
 // The subset of YAML frontmatter the shipped SKILL.md files use: nested maps,
-// block lists of scalars or maps, quoted/plain scalars. Deliberately not a
-// general YAML engine — constructs outside the subset throw, so a future
+// block lists of scalars or maps, quoted/plain scalars, and block scalars as
+// map values (`>` folded, `|` literal; `-` strip chomping only). Deliberately
+// not a general YAML engine — constructs outside the subset throw, so a future
 // vendored file the parser cannot read fails the seam instead of mis-parsing.
 function parseScalar(raw) {
 	const value = raw.trim();
@@ -103,11 +104,36 @@ function parseYamlBlock(text) {
 				} else {
 					map[key] = null;
 				}
+			} else if (value.startsWith(">") || value.startsWith("|")) {
+				map[key] = parseBlockScalar(value, indent);
 			} else {
 				map[key] = parseScalar(value);
 			}
 		}
 		return map;
+	}
+
+	// Block scalar as a map value: `>` folds lines into spaces, `|` keeps
+	// them; `-` strips the trailing newline. Shapes outside the vendored files'
+	// usage (keep chomping, explicit indent indicators, blank or more-indented
+	// block lines) throw rather than mis-parse.
+	function parseBlockScalar(header, indent) {
+		if (![">", ">-", "|", "|-"].includes(header)) {
+			throw new Error(`unsupported block scalar header: ${header}`);
+		}
+		const block = [];
+		while (pos < lines.length && indentOf(lines[pos]) > indent) {
+			const line = lines[pos];
+			if (line.trim() === "") {
+				throw new Error("unsupported blank line inside a block scalar");
+			}
+			block.push(line.trim());
+			pos++;
+		}
+		if (block.length === 0) {
+			throw new Error("block scalar with no content lines");
+		}
+		return block.join(header.startsWith("|") ? "\n" : " ");
 	}
 
 	function parseNode(indent) {
