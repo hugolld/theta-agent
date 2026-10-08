@@ -8,10 +8,11 @@ From the checkout:
 
 ```sh
 node bin/theta.mjs --dev --provider zai-coding-cn --model glm-5.3-flash \
-  --print "<prompt>"
+  --print "<prompt>" < /dev/null
 ```
 
 - Pass provider and model explicitly: pi's default model can 401 with an invalid bearer token.
+- Close stdin (`< /dev/null`): `pi --print` waits for stdin EOF even with a prompt argument, and a shell that leaves the pipe open hangs the session silently (found in the #8 close-out dogfood — 50 minutes, zero output, zero CPU).
 - Boot-clean evidence is exit 0 with empty stderr.
 
 ## Ground-truth the evidence

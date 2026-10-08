@@ -34,7 +34,7 @@ Linux first, Windows later.
 
 ## Roadmap
 
-- [ ] M1 — package skeleton, `theta` launcher (bin), Tier-1 research-loop skills
+- [x] M1 — package skeleton, `theta` launcher (bin), Tier-1 research-loop skills
 - [ ] M2 — literature connectors (PubMed, arXiv, Semantic Scholar)
 - [ ] M3 — research prompt + provenance entries
 - [ ] M4 — compute: Slurm MCP gateway + typed AlphaFold3 tool
