@@ -34,16 +34,24 @@ function parseScalar(raw) {
 }
 
 function parseYamlBlock(text) {
-	const lines = text.split(/\r?\n/).filter((line) => line.trim() !== "");
+	// Blank lines are kept in `lines` because block scalars need them (they
+	// fold into newlines); everywhere else skipBlanks() makes them
+	// insignificant.
+	const lines = text.split(/\r?\n/);
 	let pos = 0;
 
 	function indentOf(line) {
 		return line.length - line.trimStart().length;
 	}
 
+	function skipBlanks() {
+		while (pos < lines.length && lines[pos].trim() === "") pos++;
+	}
+
 	function parseList(indent) {
 		const list = [];
 		while (pos < lines.length) {
+			skipBlanks();
 			const line = lines[pos];
 			const at = indentOf(line);
 			const trimmed = line.trim();
@@ -79,6 +87,7 @@ function parseYamlBlock(text) {
 	function parseMap(indent) {
 		const map = {};
 		while (pos < lines.length) {
+			skipBlanks();
 			const line = lines[pos];
 			const at = indentOf(line);
 			const trimmed = line.trim();
@@ -95,6 +104,7 @@ function parseYamlBlock(text) {
 			pos++;
 			if (value === "") {
 				// Block value: a deeper map, a list at this indent, or empty.
+				skipBlanks();
 				if (
 					pos < lines.length &&
 					(indentOf(lines[pos]) > indent ||
@@ -113,34 +123,57 @@ function parseYamlBlock(text) {
 		return map;
 	}
 
-	// Block scalar as a map value: `>` folds lines into spaces, `|` keeps
-	// them; `-` strips the trailing newline. Supported content is the shape
-	// the vendored files use: a uniform-indent paragraph. More-indented lines
-	// (literal newlines under real folding) throw. Blank lines cannot reach
-	// this loop — parseYamlBlock pre-filters them — so a block scalar with
-	// interior blank lines folds flat rather than throwing; nothing shipped
-	// uses that shape, and the header variants outside this subset
-	// (keep chomping, explicit indent indicators) throw.
+	// Block scalar as a map value. The header family (`>` folded, `|`
+	// literal, optional `-` strip) is supported as one unit — a deliberate
+	// re-sync-facing choice, since upstream skills move between the variants
+	// across releases. Content is the shape the vendored files use: a
+	// uniform-indent paragraph, where more-indented lines (literal newlines
+	// under real folding) throw. Blank lines fold per YAML: a folded scalar
+	// turns one blank line into a newline and n consecutive blanks into n
+	// newlines; a literal scalar keeps the empty line. Leading and trailing
+	// blanks only affect edge newlines, which the subset normalizes away, so
+	// they are dropped. Headers outside the family (keep chomping, explicit
+	// indent indicators) throw.
 	function parseBlockScalar(header, indent) {
 		if (![">", ">-", "|", "|-"].includes(header)) {
 			throw new Error(`unsupported block scalar header: ${header}`);
 		}
-		const block = [];
+		const parts = [];
 		let blockIndent = -1;
-		while (pos < lines.length && indentOf(lines[pos]) > indent) {
-			const at = indentOf(lines[pos]);
+		while (pos < lines.length) {
+			const line = lines[pos];
+			if (line.trim() === "") {
+				parts.push("");
+				pos++;
+				continue;
+			}
+			const at = indentOf(line);
+			if (at <= indent) break;
 			if (blockIndent === -1) {
 				blockIndent = at;
 			} else if (at !== blockIndent) {
-				throw new Error(`unsupported indent inside block scalar: ${lines[pos].slice(0, 40)}`);
+				throw new Error(`unsupported indent inside block scalar: ${line.slice(0, 40)}`);
 			}
-			block.push(lines[pos].trim());
+			parts.push(line.trim());
 			pos++;
 		}
-		if (block.length === 0) {
+		while (parts.length > 0 && parts[0] === "") parts.shift();
+		while (parts.length > 0 && parts[parts.length - 1] === "") parts.pop();
+		if (parts.length === 0) {
 			throw new Error("block scalar with no content lines");
 		}
-		return block.join(header.startsWith("|") ? "\n" : " ");
+		const literal = header.startsWith("|");
+		let value = parts[0];
+		for (let i = 1; i < parts.length; i++) {
+			if (parts[i] === "") {
+				value += "\n";
+			} else if (literal) {
+				value += `\n${parts[i]}`;
+			} else {
+				value += `${parts[i - 1] === "" ? "" : " "}${parts[i]}`;
+			}
+		}
+		return value;
 	}
 
 	function parseNode(indent) {
@@ -156,6 +189,52 @@ function parseFrontmatter(markdown) {
 	if (!match) throw new Error("SKILL.md has no frontmatter block");
 	return parseYamlBlock(match[1]);
 }
+
+// Parser-subset unit tests: block scalars must fold blank lines the way a
+// real YAML engine does (verified against the `yaml` package pi itself uses):
+// a folded scalar turns one blank line into a newline and n consecutive
+// blanks into n newlines; a literal scalar keeps the empty line. Blank lines
+// elsewhere in the frontmatter are insignificant. Pinning these here keeps a
+// re-sync that imports a paragraph-broken description from silently
+// mis-parsing or failing the length check.
+test("frontmatter parser: block scalars fold blank lines per YAML semantics", () => {
+	const folded = parseFrontmatter(
+		"---\nname: x\ndescription: >-\n  para one\n\n  para two\n---\nbody",
+	);
+	assert.equal(folded.description, "para one\npara two");
+
+	const foldedTwoBlanks = parseFrontmatter(
+		"---\nname: x\ndescription: >-\n  para one\n\n\n  para two\n---\nbody",
+	);
+	assert.equal(foldedTwoBlanks.description, "para one\n\npara two");
+
+	const literal = parseFrontmatter(
+		"---\nname: x\ndescription: |-\n  para one\n\n  para two\n---\nbody",
+	);
+	assert.equal(literal.description, "para one\n\npara two");
+
+	const literalNoBlanks = parseFrontmatter(
+		"---\nname: x\ndescription: |-\n  line one\n  line two\n---\nbody",
+	);
+	assert.equal(literalNoBlanks.description, "line one\nline two");
+
+	// Clip chomping (no indicator) differs from strip only in trailing
+	// newlines, which the subset normalizes away — the folded value is the
+	// same shape.
+	const foldedClip = parseFrontmatter(
+		"---\nname: x\ndescription: >\n  para one\n\n  para two\n---\nbody",
+	);
+	assert.equal(foldedClip.description, "para one\npara two");
+});
+
+test("frontmatter parser: blank lines outside block scalars are insignificant", () => {
+	const withBlanks = parseFrontmatter(
+		"---\nname: x\n\ndescription: plain value\n\nmetadata:\n\n  version: \"1.0\"\n---\nbody",
+	);
+	assert.equal(withBlanks.name, "x");
+	assert.equal(withBlanks.description, "plain value");
+	assert.deepEqual(withBlanks.metadata, { version: "1.0" });
+});
 
 const shipped = (await readdir(skillsRoot, { withFileTypes: true }))
 	.filter((entry) => entry.isDirectory())
