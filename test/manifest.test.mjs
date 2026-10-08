@@ -12,7 +12,14 @@ test("package.json carries the pi manifest", () => {
 	assert.equal(manifest.name, "theta-agent");
 	assert.ok(manifest.pi, "missing top-level pi manifest");
 	for (const key of ["extensions", "skills"]) {
-		assert.ok(manifest.pi[key], `pi.${key} missing from manifest`);
+		// pi's readPiManifest accepts only arrays of strings; a bare string
+		// field is silently dropped, so `pi -e <root>` would load nothing.
+		assert.ok(
+			Array.isArray(manifest.pi[key]) &&
+				manifest.pi[key].length > 0 &&
+				manifest.pi[key].every((entry) => typeof entry === "string"),
+			`pi.${key} must be a non-empty array of strings (got ${JSON.stringify(manifest.pi[key])})`,
+		);
 	}
 });
 
