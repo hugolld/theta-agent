@@ -129,8 +129,11 @@ const shipped = (await readdir(skillsRoot, { withFileTypes: true }))
 	.map((entry) => entry.name)
 	.sort();
 
-const expectedVendored = [...expected.vendored].map((s) => s.name).sort();
-const expectedSelfAuthored = [...expected["self-authored"]].sort();
+// The hyphenated key is destructured once; everything downstream uses
+// plain identifiers.
+const { vendored, "self-authored": selfAuthored } = expected;
+const expectedVendored = [...vendored].map((s) => s.name).sort();
+const expectedSelfAuthored = [...selfAuthored].sort();
 const expectedShipped = [...expectedVendored, ...expectedSelfAuthored].sort();
 
 async function loadSkill(name) {
@@ -192,7 +195,7 @@ async function treeDigest(dirUrl) {
 }
 
 test("vendored skills carry full provenance and are hash-pinned", async () => {
-	for (const skill of expected.vendored) {
+	for (const skill of vendored) {
 		const { frontmatter } = await loadSkill(skill.name);
 		const provenance = frontmatter.metadata?.provenance;
 		assert.ok(provenance, `${skill.name}: metadata.provenance missing`);
