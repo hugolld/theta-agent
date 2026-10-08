@@ -8,10 +8,11 @@
 
 ## Status
 
-**Very early development (0.0.2 — launcher release).** The architecture,
-skill-selection plan, and milestones are being designed in the open. This package
-currently reserves the name and lays out the pi package skeleton; functionality
-arrives with the milestones below.
+**Very early development (0.0.2).** The architecture, skill-selection plan, and
+milestones are being designed in the open. M1 is built: the `theta` launcher plus
+the Tier-1 research-loop skill library — 19 K-Dense skills vendored verbatim plus
+the self-authored `theta-research-loop` orchestrator (see [Vendored
+skills](#vendored-skills)). The milestones below continue from there.
 
 ## What Theta will be
 
