@@ -24,6 +24,6 @@ _Avoid_: umbrella skill, router, meta-skill
 The milestone-boundary re-vendor of changed upstream skills, updating provenance headers.
 _Avoid_: upgrade, sync, upstream pull
 
-**Tracer ticket**:
-The first ticket of a batch, taken end-to-end to prove the pattern the remaining tickets then repeat mechanically; M1's tracer vendored two skills plus the orchestrator.
+**Tracer**:
+The first slice of a batch, taken end-to-end to prove the pattern the remaining slices then repeat mechanically; M1's tracer vendored two K-Dense skills and shipped them alongside the self-authored orchestrator.
 _Avoid_: pilot, spike
