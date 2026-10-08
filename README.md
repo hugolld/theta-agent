@@ -63,6 +63,31 @@ theta
 
 That launches pi with the Theta package preloaded. `theta --dev` loads Theta from a local checkout — either the launcher's own repo, or the directory you name with `$THETA_DEV_ROOT` (theta never loads an arbitrary current directory this way). Theta targets pi ≥ 0.99; if `theta` reports `pi not found`, install pi with the command above and retry.
 
+## Vendored skills
+
+The research-loop skill library starts from the K-Dense
+[`scientific-agent-skills`](https://github.com/K-Dense-AI/scientific-agent-skills)
+library, vendored **verbatim** per [ADR 0001](docs/adr/0001-vendor-k-dense-skills-verbatim.md):
+upstream names, directory shapes, and content unchanged except a provenance
+header in each vendored `SKILL.md`. Re-syncs happen at milestone boundaries.
+
+Currently vendored (upstream release `v2.72.0`, commit `526ebce`):
+
+- `literature-review` — systematic, scoping, and narrative literature reviews
+  with reproducible searches and citation checks
+- `hypothesis-generation` — evidence-bounded candidate hypotheses, rival
+  explanations, and preregistration-ready analysis plans
+
+The `theta-research-loop` orchestrator that routes the research loop into the
+library is Theta's own, self-authored work.
+
+K-Dense's skills are MIT-licensed, © K-Dense Inc. If you use them in research,
+please cite their paper:
+
+> Kassis, T., Agarwal, V., He, Y., Patel, D., & Brueckner, A. M. (2026).
+> *Scientific Agent Skills: A Library of Procedural Knowledge for Research
+> Agents*. arXiv:2609.00065. https://doi.org/10.48550/arXiv.2609.00065
+
 ## License
 
 MIT

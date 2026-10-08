@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 `theta-agent` — a **pi package** (extensions + skills for the [pi](https://pi.dev) coding agent) that grows into **Theta**, a science co-researcher agent for biology/biomedicine. It is the code repo of the Theta campaign; design decisions (T1–T10), milestone definitions, and task handoffs live in the campaign vault (path in `CLAUDE.local.md`). Treat the vault as read-only reference.
 
-Current state: 0.0.2 — the M1 launcher (stage A of T9, PR #1) is merged: a thin `bin/theta.mjs` that runs `pi -e <package-root>` so `npm i -g theta-agent && theta` works (macOS/Linux; Windows waits for M8, tracked in issue #2). Pending deliverable: the M1 second half — the Tier-1 science skills (literature review, hypothesis generation, experimental design, statistical analysis, scientific writing, critical thinking) that replace the `skills/theta-research-loop` stub.
+Current state: 0.0.2 — the M1 launcher (stage A of T9, PR #1) is merged: a thin `bin/theta.mjs` that runs `pi -e <package-root>` so `npm i -g theta-agent && theta` works (macOS/Linux; Windows waits for M8, tracked in issue #2). M1 tracer (PR #9) vendored the first K-Dense skills verbatim per ADR 0001 — `literature-review`, `hypothesis-generation` — plus the self-authored `theta-research-loop` orchestrator (no longer a stub); the remaining ~20-skill Tier-1 set follows as a mechanical batch (spec #5).
 
 ## pi-package rules
 
@@ -18,6 +18,7 @@ Current state: 0.0.2 — the M1 launcher (stage A of T9, PR #1) is merged: a thi
 ## Conventions
 
 - Conventional commits (`feat:`, `chore:`, `docs:`). Tabs and existing field order in `package.json`.
+- When a change supersedes text in a steering doc (`CLAUDE.md`, `GLOSSARY.md`, `docs/adr/`), the same strike edits that text.
 - `.npmrc` pins the official registry (the machine default is npmmirror).
 - No build step; tests use Node's built-in node:test runner (pi loads extension TS via jiti). Verify changes with `npm test`, `npm run lint`, and `npm run typecheck`; check shipped files with `npm pack --dry-run`.
 
