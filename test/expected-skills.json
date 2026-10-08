@@ -5,8 +5,76 @@
 			"tree-sha256": "e79da167a6b1774761ed0fe1c06b348c6348802f7aa9099e0d8d72d6c3a9c816"
 		},
 		{
+			"name": "paper-lookup",
+			"tree-sha256": "c30981889bbedff3e2857ace7c91f181d8d198e97ceba23e6d87fdb21b142c99"
+		},
+		{
+			"name": "paperzilla",
+			"tree-sha256": "4e57d87f17e75a7483e3693ae5d386007efda44b523b2930a0799f51ea979429"
+		},
+		{
+			"name": "bgpt-paper-search",
+			"tree-sha256": "c75cf59b4cbd61f55778ce6c3a8a3f9243a3566e6e5984c76688916ba88ac3ac"
+		},
+		{
+			"name": "research-lookup",
+			"tree-sha256": "6ade2e7ef128ac8f09f864d6b4aea1bb33980b943c488373c2829294878db49b"
+		},
+		{
+			"name": "citation-management",
+			"tree-sha256": "a385d0e68b0d41607c386b7f723830dc05e735f9fac094762d4339f3a1917303"
+		},
+		{
+			"name": "pyzotero",
+			"tree-sha256": "a3b7687877dd9dd6e3f9980718972160088bca1d3094ffd9ccf9a46261fafe04"
+		},
+		{
+			"name": "peer-review",
+			"tree-sha256": "26b01c7e1786a77e56cc4a7d7bfebb516b036764c9ba9e6e888ab46d97fcdf66"
+		},
+		{
+			"name": "scholar-evaluation",
+			"tree-sha256": "4073e1387590740b20a1aa25f31d5996137092da015f0c1b354aed4a0d520d34"
+		},
+		{
+			"name": "scientific-writing",
+			"tree-sha256": "bba1bb21422e34b392472c2f4211b7674acbb27709b047d96bd3f26006ca2117"
+		},
+		{
+			"name": "scientific-critical-thinking",
+			"tree-sha256": "4ac07f2c009c1230e35c5da1e3717e7154686364866d681bc1b718d0919ec4ba"
+		},
+		{
+			"name": "scientific-brainstorming",
+			"tree-sha256": "37908ec3408837710c3e27399da2fc401cad590be1f69292f774389430d2e5b6"
+		},
+		{
 			"name": "hypothesis-generation",
 			"tree-sha256": "aabc20086140facf0ad4a4d1c0d0a690e8a5d949ace3b8ce49ebc3babd7f3b4f"
+		},
+		{
+			"name": "hypogenic",
+			"tree-sha256": "a5167182f364120d22332b84c577f64a4f9bbdc1649e5c66ce265a9d7f86d90a"
+		},
+		{
+			"name": "experimental-design",
+			"tree-sha256": "7dfeaf1eac9f81d14b263cacf80e3f7af191011abc30fe681d04ea42c469b309"
+		},
+		{
+			"name": "statistical-analysis",
+			"tree-sha256": "9917f19e3e9c267e9cd153c10f4c04b6f916243a529ecd5c7f637512bb06ec67"
+		},
+		{
+			"name": "statistical-power",
+			"tree-sha256": "fc97ecb98920b4b8ddd4735cb4691183946a19fbbe7b21bf68b1db55f2525460"
+		},
+		{
+			"name": "uncertainty-and-units",
+			"tree-sha256": "9ed6fb3dce30cd22e1ea1cde7ac2df967e8f57eb3e706fc6312bd9071c3f8a8a"
+		},
+		{
+			"name": "exploratory-data-analysis",
+			"tree-sha256": "cb4744b62154018f5df3f7d62c95ac37ee68b7a63728a61b6dd197d33bfa9669"
 		}
 	],
 	"self-authored": [

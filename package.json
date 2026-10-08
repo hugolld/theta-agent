@@ -31,8 +31,8 @@
 		"LICENSE"
 	],
 	"pi": {
-		"extensions": "./extensions",
-		"skills": "./skills"
+		"extensions": ["./extensions"],
+		"skills": ["./skills"]
 	},
 	"scripts": {
 		"lint": "eslint .",

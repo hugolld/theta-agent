@@ -14,8 +14,10 @@ const expected = JSON.parse(
 );
 
 // The subset of YAML frontmatter the shipped SKILL.md files use: nested maps,
-// block lists of scalars or maps, quoted/plain scalars. Deliberately not a
-// general YAML engine — constructs outside the subset throw, so a future
+// block lists of scalars or maps, quoted/plain scalars, and block scalars as
+// map values (`>` folded, `|` literal; `-` strip chomping only). Scalars come
+// back as strings — `false`, `1.5`, `null` are not coerced. Deliberately not
+// a general YAML engine — constructs outside the subset throw, so a future
 // vendored file the parser cannot read fails the seam instead of mis-parsing.
 function parseScalar(raw) {
 	const value = raw.trim();
@@ -33,16 +35,33 @@ function parseScalar(raw) {
 }
 
 function parseYamlBlock(text) {
-	const lines = text.split(/\r?\n/).filter((line) => line.trim() !== "");
+	// Blank lines are kept in `lines` because block scalars need them (they
+	// fold into newlines); everywhere else skipBlanks() makes them
+	// insignificant.
+	const lines = text.split(/\r?\n/);
 	let pos = 0;
 
 	function indentOf(line) {
 		return line.length - line.trimStart().length;
 	}
 
+	function skipBlanks() {
+		pos = peekNonBlank(pos);
+	}
+
+	// Index of the first non-blank line at or after `from` (lines.length if
+	// none). The one cursor walk both skipBlanks and blank lookaheads share.
+	function peekNonBlank(from) {
+		let i = from;
+		while (i < lines.length && lines[i].trim() === "") i++;
+		return i;
+	}
+
 	function parseList(indent) {
 		const list = [];
 		while (pos < lines.length) {
+			skipBlanks();
+			if (pos >= lines.length) break;
 			const line = lines[pos];
 			const at = indentOf(line);
 			const trimmed = line.trim();
@@ -56,15 +75,32 @@ function parseYamlBlock(text) {
 				const key = rest.slice(0, colon).trim();
 				const value = rest.slice(colon + 1).trim();
 				item[key] = value === "" ? parseNode(indent + 2) : parseScalar(value);
-				while (pos < lines.length && indentOf(lines[pos]) > indent) {
-					const member = lines[pos].trim();
+				while (pos < lines.length) {
+					const memberLine = lines[pos];
+					if (memberLine.trim() === "") {
+						// An interior blank of the item's map is significant only
+						// if a deeper member follows; otherwise leave it for the
+						// caller's loops to end the item.
+						const next = peekNonBlank(pos + 1);
+						if (next < lines.length && indentOf(lines[next]) > indent) {
+							pos = next;
+							continue;
+						}
+						break;
+					}
+					if (indentOf(memberLine) <= indent) break;
+					const member = memberLine.trim();
 					const mColon = member.indexOf(":");
 					if (mColon === -1) {
 						throw new Error(`unsupported list member: ${member.slice(0, 40)}`);
 					}
-					item[member.slice(0, mColon).trim()] = parseScalar(
-						member.slice(mColon + 1),
-					);
+					const mValue = member.slice(mColon + 1).trim();
+					if (mValue === "") {
+						// A nested map as a list-item member is outside the
+						// subset; parsing it would hoist its keys onto the item.
+						throw new Error(`unsupported list member: ${member.slice(0, 40)}`);
+					}
+					item[member.slice(0, mColon).trim()] = parseScalar(mValue);
 					pos++;
 				}
 				list.push(item);
@@ -78,6 +114,8 @@ function parseYamlBlock(text) {
 	function parseMap(indent) {
 		const map = {};
 		while (pos < lines.length) {
+			skipBlanks();
+			if (pos >= lines.length) break;
 			const line = lines[pos];
 			const at = indentOf(line);
 			const trimmed = line.trim();
@@ -94,6 +132,7 @@ function parseYamlBlock(text) {
 			pos++;
 			if (value === "") {
 				// Block value: a deeper map, a list at this indent, or empty.
+				skipBlanks();
 				if (
 					pos < lines.length &&
 					(indentOf(lines[pos]) > indent ||
@@ -103,11 +142,66 @@ function parseYamlBlock(text) {
 				} else {
 					map[key] = null;
 				}
+			} else if (value.startsWith(">") || value.startsWith("|")) {
+				map[key] = parseBlockScalar(value, indent);
 			} else {
 				map[key] = parseScalar(value);
 			}
 		}
 		return map;
+	}
+
+	// Block scalar as a map value. The header family (`>` folded, `|`
+	// literal, optional `-` strip) is supported as one unit — a deliberate
+	// re-sync-facing choice, since upstream skills move between the variants
+	// across releases. Content is the shape the vendored files use: a
+	// uniform-indent paragraph, where more-indented lines (literal newlines
+	// under real folding) throw. Blank lines fold per YAML: a folded scalar
+	// turns one blank line into a newline and n consecutive blanks into n
+	// newlines; a literal scalar keeps the empty line. Leading and trailing
+	// blank lines are dropped rather than folded — a documented subset limit,
+	// since real YAML keeps their newlines at the value's edges. Headers
+	// outside the family (keep chomping, explicit indent indicators) throw.
+	function parseBlockScalar(header, indent) {
+		if (![">", ">-", "|", "|-"].includes(header)) {
+			throw new Error(`unsupported block scalar header: ${header}`);
+		}
+		const parts = [];
+		let blockIndent = -1;
+		while (pos < lines.length) {
+			const line = lines[pos];
+			if (line.trim() === "") {
+				parts.push("");
+				pos++;
+				continue;
+			}
+			const at = indentOf(line);
+			if (at <= indent) break;
+			if (blockIndent === -1) {
+				blockIndent = at;
+			} else if (at !== blockIndent) {
+				throw new Error(`unsupported indent inside block scalar: ${line.slice(0, 40)}`);
+			}
+			parts.push(line.trim());
+			pos++;
+		}
+		while (parts.length > 0 && parts[0] === "") parts.shift();
+		while (parts.length > 0 && parts[parts.length - 1] === "") parts.pop();
+		if (parts.length === 0) {
+			throw new Error("block scalar with no content lines");
+		}
+		const literal = header.startsWith("|");
+		let value = parts[0];
+		for (let i = 1; i < parts.length; i++) {
+			if (parts[i] === "") {
+				value += "\n";
+			} else if (literal) {
+				value += `\n${parts[i]}`;
+			} else {
+				value += `${parts[i - 1] === "" ? "" : " "}${parts[i]}`;
+			}
+		}
+		return value;
 	}
 
 	function parseNode(indent) {
@@ -123,6 +217,82 @@ function parseFrontmatter(markdown) {
 	if (!match) throw new Error("SKILL.md has no frontmatter block");
 	return parseYamlBlock(match[1]);
 }
+
+// Parser-subset unit tests: block scalars must fold blank lines the way a
+// real YAML engine does (verified against the `yaml` package pi itself uses):
+// a folded scalar turns one blank line into a newline and n consecutive
+// blanks into n newlines; a literal scalar keeps the empty line. Blank lines
+// elsewhere in the frontmatter are insignificant. Pinning these here keeps a
+// re-sync that vendors a paragraph-broken description from silently
+// mis-parsing or failing the length check.
+test("frontmatter parser: block scalars fold blank lines per YAML semantics", () => {
+	const folded = parseFrontmatter(
+		"---\nname: x\ndescription: >-\n  para one\n\n  para two\n---\nbody",
+	);
+	assert.equal(folded.description, "para one\npara two");
+
+	const foldedTwoBlanks = parseFrontmatter(
+		"---\nname: x\ndescription: >-\n  para one\n\n\n  para two\n---\nbody",
+	);
+	assert.equal(foldedTwoBlanks.description, "para one\n\npara two");
+
+	const literal = parseFrontmatter(
+		"---\nname: x\ndescription: |-\n  para one\n\n  para two\n---\nbody",
+	);
+	assert.equal(literal.description, "para one\n\npara two");
+
+	const literalNoBlanks = parseFrontmatter(
+		"---\nname: x\ndescription: |-\n  line one\n  line two\n---\nbody",
+	);
+	assert.equal(literalNoBlanks.description, "line one\nline two");
+
+	// Clip chomping (no indicator) differs from strip only in trailing
+	// newlines, which the subset normalizes away — the folded value is the
+	// same shape.
+	const foldedClip = parseFrontmatter(
+		"---\nname: x\ndescription: >\n  para one\n\n  para two\n---\nbody",
+	);
+	assert.equal(foldedClip.description, "para one\npara two");
+});
+
+test("frontmatter parser: blank lines outside block scalars are insignificant", () => {
+	const withBlanks = parseFrontmatter(
+		"---\nname: x\n\ndescription: plain value\n\nmetadata:\n\n  version: \"1.0\"\n---\nbody",
+	);
+	assert.equal(withBlanks.name, "x");
+	assert.equal(withBlanks.description, "plain value");
+	assert.deepEqual(withBlanks.metadata, { version: "1.0" });
+
+	// Trailing blanks before the closing fence (and after a block list) end
+	// the frontmatter cleanly — a re-sync can plausibly import either shape.
+	const trailingBlank = parseFrontmatter("---\nname: x\n\n---\nbody");
+	assert.equal(trailingBlank.name, "x");
+
+	const blankAfterList = parseFrontmatter(
+		"---\nname: x\nallowed-tools:\n- Read\n- Write\n\n---\nbody",
+	);
+	assert.deepEqual(blankAfterList["allowed-tools"], ["Read", "Write"]);
+
+	// A blank line inside a list item's map is insignificant when a deeper
+	// member follows (the openclaw.envVars shape), and ends the item cleanly
+	// when a dedent does.
+	const blankInListItem = parseFrontmatter(
+		'---\nname: x\nmetadata:\n  envVars:\n  - name: A_KEY\n\n    required: false\n---\nbody',
+	);
+	assert.deepEqual(blankInListItem.metadata.envVars, [
+		{ name: "A_KEY", required: "false" },
+	]);
+
+	// A nested map as a list-item member is outside the subset: it must fail
+	// loudly, not hoist the inner keys onto the item.
+	assert.throws(
+		() =>
+			parseFrontmatter(
+				"---\nname: x\nmetadata:\n  items:\n  - name: A\n    cfg:\n      k: v\n---\nbody",
+			),
+		/unsupported list member/,
+	);
+});
 
 const shipped = (await readdir(skillsRoot, { withFileTypes: true }))
 	.filter((entry) => entry.isDirectory())
