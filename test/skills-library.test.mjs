@@ -15,8 +15,9 @@ const expected = JSON.parse(
 
 // The subset of YAML frontmatter the shipped SKILL.md files use: nested maps,
 // block lists of scalars or maps, quoted/plain scalars, and block scalars as
-// map values (`>` folded, `|` literal; `-` strip chomping only). Deliberately
-// not a general YAML engine — constructs outside the subset throw, so a future
+// map values (`>` folded, `|` literal; `-` strip chomping only). Scalars come
+// back as strings — `false`, `1.5`, `null` are not coerced. Deliberately not
+// a general YAML engine — constructs outside the subset throw, so a future
 // vendored file the parser cannot read fails the seam instead of mis-parsing.
 function parseScalar(raw) {
 	const value = raw.trim();
@@ -45,7 +46,15 @@ function parseYamlBlock(text) {
 	}
 
 	function skipBlanks() {
-		while (pos < lines.length && lines[pos].trim() === "") pos++;
+		pos = peekNonBlank(pos);
+	}
+
+	// Index of the first non-blank line at or after `from` (lines.length if
+	// none). The one cursor walk both skipBlanks and blank lookaheads share.
+	function peekNonBlank(from) {
+		let i = from;
+		while (i < lines.length && lines[i].trim() === "") i++;
+		return i;
 	}
 
 	function parseList(indent) {
@@ -72,8 +81,7 @@ function parseYamlBlock(text) {
 						// An interior blank of the item's map is significant only
 						// if a deeper member follows; otherwise leave it for the
 						// caller's loops to end the item.
-						let next = pos + 1;
-						while (next < lines.length && lines[next].trim() === "") next++;
+						const next = peekNonBlank(pos + 1);
 						if (next < lines.length && indentOf(lines[next]) > indent) {
 							pos = next;
 							continue;
@@ -86,9 +94,13 @@ function parseYamlBlock(text) {
 					if (mColon === -1) {
 						throw new Error(`unsupported list member: ${member.slice(0, 40)}`);
 					}
-					item[member.slice(0, mColon).trim()] = parseScalar(
-						member.slice(mColon + 1),
-					);
+					const mValue = member.slice(mColon + 1).trim();
+					if (mValue === "") {
+						// A nested map as a list-item member is outside the
+						// subset; parsing it would hoist its keys onto the item.
+						throw new Error(`unsupported list member: ${member.slice(0, 40)}`);
+					}
+					item[member.slice(0, mColon).trim()] = parseScalar(mValue);
 					pos++;
 				}
 				list.push(item);
@@ -270,6 +282,16 @@ test("frontmatter parser: blank lines outside block scalars are insignificant", 
 	assert.deepEqual(blankInListItem.metadata.envVars, [
 		{ name: "A_KEY", required: "false" },
 	]);
+
+	// A nested map as a list-item member is outside the subset: it must fail
+	// loudly, not hoist the inner keys onto the item.
+	assert.throws(
+		() =>
+			parseFrontmatter(
+				"---\nname: x\nmetadata:\n  items:\n  - name: A\n    cfg:\n      k: v\n---\nbody",
+			),
+		/unsupported list member/,
+	);
 });
 
 const shipped = (await readdir(skillsRoot, { withFileTypes: true }))
