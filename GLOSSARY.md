@@ -23,3 +23,7 @@ _Avoid_: umbrella skill, router, meta-skill
 **Re-sync**:
 The milestone-boundary re-vendor of changed upstream skills, updating provenance headers.
 _Avoid_: upgrade, sync, upstream pull
+
+**Tracer ticket**:
+The first ticket of a batch, taken end-to-end to prove the pattern the remaining tickets then repeat mechanically; M1's tracer vendored two skills plus the orchestrator.
+_Avoid_: pilot, spike
