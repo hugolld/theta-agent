@@ -114,20 +114,27 @@ function parseYamlBlock(text) {
 	}
 
 	// Block scalar as a map value: `>` folds lines into spaces, `|` keeps
-	// them; `-` strips the trailing newline. Shapes outside the vendored files'
-	// usage (keep chomping, explicit indent indicators, blank or more-indented
-	// block lines) throw rather than mis-parse.
+	// them; `-` strips the trailing newline. Supported content is the shape
+	// the vendored files use: a uniform-indent paragraph. More-indented lines
+	// (literal newlines under real folding) throw. Blank lines cannot reach
+	// this loop — parseYamlBlock pre-filters them — so a block scalar with
+	// interior blank lines folds flat rather than throwing; nothing shipped
+	// uses that shape, and the header variants outside this subset
+	// (keep chomping, explicit indent indicators) throw.
 	function parseBlockScalar(header, indent) {
 		if (![">", ">-", "|", "|-"].includes(header)) {
 			throw new Error(`unsupported block scalar header: ${header}`);
 		}
 		const block = [];
+		let blockIndent = -1;
 		while (pos < lines.length && indentOf(lines[pos]) > indent) {
-			const line = lines[pos];
-			if (line.trim() === "") {
-				throw new Error("unsupported blank line inside a block scalar");
+			const at = indentOf(lines[pos]);
+			if (blockIndent === -1) {
+				blockIndent = at;
+			} else if (at !== blockIndent) {
+				throw new Error(`unsupported indent inside block scalar: ${lines[pos].slice(0, 40)}`);
 			}
-			block.push(line.trim());
+			block.push(lines[pos].trim());
 			pos++;
 		}
 		if (block.length === 0) {
