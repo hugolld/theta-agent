@@ -82,6 +82,7 @@ export function extractLocations(skillsText) {
 		);
 	}
 	const skillTags = (skillsText.match(/<skill>/g) ?? []).length;
+	const skillCloses = (skillsText.match(/<\/skill>/g) ?? []).length;
 	const out = [];
 	for (const record of blocks[0].match(/<skill>[\s\S]*?<\/skill>/g) ?? []) {
 		const name = decodeXmlEntities(
@@ -95,9 +96,9 @@ export function extractLocations(skillsText) {
 		}
 		out.push({ name, location });
 	}
-	if (out.length !== skillTags) {
+	if (out.length !== skillTags || skillCloses !== skillTags) {
 		throw new Error(
-			`stray or unclosed <skill> records: ${skillTags} tags, ${out.length} parsed`,
+			`stray or unclosed <skill> records: ${skillTags} openings, ${skillCloses} closings, ${out.length} parsed`,
 		);
 	}
 	return out;
