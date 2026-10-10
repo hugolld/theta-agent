@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 `theta-agent` — a **pi package** (extensions + skills for the [pi](https://pi.dev) coding agent) that grows into **Theta**, a science co-researcher agent for biology/biomedicine. It is the code repo of the Theta campaign; design decisions (T1–T10), milestone definitions, and task handoffs live in the campaign vault (path in `CLAUDE.local.md`). Treat the vault as read-only reference.
 
-Current state: 0.0.2 — the M1 launcher (stage A of T9, PR #1) is merged: a thin `bin/theta.mjs` that runs `pi -e <package-root>` so `npm i -g theta-agent && theta` works (macOS/Linux; Windows waits for M8, tracked in issue #2). The M1 Tier-1 library ships complete: 19 K-Dense skills vendored verbatim per ADR 0001 (tracer PR #9, batch PR #10) plus the self-authored `theta-research-loop` orchestrator; re-syncs happen at milestone boundaries (`docs/agents/resync.md`).
+Current state: 0.0.2 — the M1 launcher (stage A of T9, PR #1) is merged: a thin `bin/theta.mjs` that runs `pi -e <package-root>` so `npm i -g theta-agent && theta` works from 0.0.2 (macOS/Linux; Windows waits for M8, tracked in issue #2; at the M1 close-out the 0.0.2 publish was still pending with the owner). The M1 Tier-1 library ships complete: the K-Dense skills vendored verbatim per ADR 0001 (tracer PR #9, batch PR #10) plus the self-authored `theta-research-loop` orchestrator; re-syncs happen at milestone boundaries (`docs/agents/resync.md`).
 
 ## pi-package rules
 
@@ -21,7 +21,7 @@ Current state: 0.0.2 — the M1 launcher (stage A of T9, PR #1) is merged: a thi
 - When a change supersedes text in a steering doc (`CLAUDE.md`, `GLOSSARY.md`, `docs/adr/`), the same strike edits that text.
 - `.npmrc` pins the official registry (the machine default is npmmirror).
 - No build step; tests use Node's built-in node:test runner (pi loads extension TS via jiti). Verify changes with `npm test`, `npm run lint`, and `npm run typecheck`; check shipped files with `npm pack --dry-run`.
-- Dogfood acceptance criteria are met on pi session-transcript evidence, never the model's self-report. Procedure: `docs/agents/dogfood.md`.
+- Dogfood acceptance criteria are met on captured evidence — session transcripts for the skill criteria, recorded exit status and stderr for clean boot — never the model's self-report. Procedure: `docs/agents/dogfood.md`.
 
 ## Git workflow — one "coding strike" per task
 
