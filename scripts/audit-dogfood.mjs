@@ -120,6 +120,9 @@ export function resolveAdvertisedSkill(root, skill, expected) {
 // tool call on that exact file.
 export function auditSession(dir, rootArg, skill) {
 	const root = fs.realpathSync(rootArg);
+	// Mount aliases (e.g. /var vs /private/var on macOS) give the same tree
+	// two spellings; lexical containment accepts either spelling of root.
+	const rootAliases = [...new Set([rootArg, root])];
 	const files = fs.readdirSync(dir).filter((f) => f.endsWith(".jsonl"));
 	if (files.length !== 1) {
 		throw new Error(`expected exactly 1 session file, found ${files.length}`);
@@ -261,9 +264,11 @@ export function auditSession(dir, rootArg, skill) {
 	const extras = [...canonical.entries()]
 		.filter(([n, p]) => {
 			if (expected.has(p)) return false;
-			const lexical = byName.get(n)?.location ?? "";
+			const lexical =
+				advertisements.find((r) => r.name === n)?.location ?? "";
 			return (
-				lexical.startsWith(root + path.sep) || p.startsWith(root + path.sep)
+				rootAliases.some((r) => lexical.startsWith(r + path.sep)) ||
+				p.startsWith(root + path.sep)
 			);
 		})
 		.map(([n]) => n);
