@@ -4,16 +4,47 @@ import { fileURLToPath } from "node:url";
 import { execSync } from "node:child_process";
 import { createHash } from "node:crypto";
 
-// Numeric semver-ish comparison: true when a >= b. Unparsable segments
-// become NaN and fail closed — malformed versions never pass the floor.
+// SemVer comparison: true when a >= b. Prereleases follow SemVer precedence
+// (a release outranks its own prerelease; numeric identifiers compare
+// numerically and rank below alphanumeric ones). Malformed versions —
+// including trailing dots and bare prerelease tags — fail closed.
 export function ge(a, b) {
-	const pa = a.split(".").map(Number);
-	const pb = b.split(".").map(Number);
-	if (pa.some(Number.isNaN) || pb.some(Number.isNaN)) return false;
-	for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
-		const x = pa[i] || 0;
-		const y = pb[i] || 0;
-		if (x !== y) return x > y;
+	const parse = (v) => {
+		const m =
+			/^v?(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$/.exec(
+				v,
+			);
+		if (!m) return null;
+		return {
+			core: [Number(m[1]), Number(m[2]), Number(m[3])],
+			pre: m[4] === undefined ? null : m[4].split("."),
+		};
+	};
+	// Floors may be written short ("0.99", "22"); pad them to full SemVer.
+	const norm = (v) =>
+		/^\d+$/.test(v) ? `${v}.0.0` : /^\d+\.\d+$/.test(v) ? `${v}.0` : v;
+	const pa = parse(norm(a));
+	const pb = parse(norm(b));
+	if (!pa || !pb) return false;
+	for (let i = 0; i < 3; i++) {
+		if (pa.core[i] !== pb.core[i]) return pa.core[i] > pb.core[i];
+	}
+	if (pa.pre === null && pb.pre === null) return true;
+	if (pa.pre === null) return true;
+	if (pb.pre === null) return false;
+	const cmpId = (x, y) => {
+		const nx = /^\d+$/.test(x);
+		const ny = /^\d+$/.test(y);
+		if (nx && ny) return Number(x) - Number(y);
+		if (nx) return -1;
+		if (ny) return 1;
+		return x < y ? -1 : x > y ? 1 : 0;
+	};
+	for (let i = 0; i < Math.max(pa.pre.length, pb.pre.length); i++) {
+		if (pb.pre[i] === undefined) return true;
+		if (pa.pre[i] === undefined) return false;
+		const c = cmpId(pa.pre[i], pb.pre[i]);
+		if (c !== 0) return c > 0;
 	}
 	return true;
 }
@@ -35,6 +66,19 @@ export function extractLocations(skillsText) {
 			decodeXmlEntities(m[1]),
 		),
 	);
+}
+
+// Resolves the spot-check's skill argument to an absolute checkout path and
+// requires it to be one of the advertised SKILL.md files — traversal and
+// non-skill paths are rejected.
+export function resolveAdvertisedSkill(root, skill, expected) {
+	const target = path.resolve(root, skill);
+	if (!expected.has(target)) {
+		throw new Error(
+			`skill argument must be an advertised checkout SKILL.md, got: ${skill}`,
+		);
+	}
+	return target;
 }
 
 // Audits one dogfood session directory against the checkout at the current
@@ -59,8 +103,13 @@ export function auditSession(dir, root, skill) {
 		throw new Error("watchdog fired: run exceeded 300s");
 	}
 	const sysRecs = recs.filter((r) => r.message?.role === "system");
-	if (sysRecs.length !== 1) {
-		throw new Error(`expected exactly 1 system record, found ${sysRecs.length}`);
+	const skillsRecs = sysRecs.filter(
+		(r) => typeof r.message?.sections?.skills === "string",
+	);
+	if (skillsRecs.length !== 1) {
+		throw new Error(
+			`expected exactly 1 skills-bearing system record, found ${skillsRecs.length}`,
+		);
 	}
 	const sess = recs.find((r) => r.type === "session");
 	if (!sess || sess.cwd !== root) {
@@ -113,29 +162,25 @@ export function auditSession(dir, root, skill) {
 			`model mismatch: ran ${changes[0].provider}/${changes[0].modelId}, expected ${wantModel[0]}/${wantModel[1]}`,
 		);
 	}
-	const skillsText = sysRecs[0].message?.sections?.skills ?? "";
+	const skillsText = skillsRecs[0].message.sections.skills;
 	const locations = extractLocations(skillsText);
 	if (!locations) {
 		throw new Error("no available_skills section in system records");
 	}
 	const inv = JSON.parse(fs.readFileSync("test/expected-skills.json", "utf8"));
-	const raw = manifestSkillRoots();
-	if (raw.length !== 1) {
-		throw new Error("audit supports a single plain-directory pi.skills entry");
-	}
-	const skillRoots = [path.resolve(root, raw[0])];
+	const skillRoot = manifestSkillRoot(root);
 	const names = inv.vendored.map((e) => e.name).concat(inv["self-authored"]);
 	const missing = [];
 	for (const n of names) {
-		const p = `${root}/skills/${n}/SKILL.md`;
+		const p = `${skillRoot}/${n}/SKILL.md`;
 		if (!locations.has(p)) missing.push(n);
 	}
 	if (missing.length > 0) {
 		throw new Error(`NOT advertised: ${missing.join(", ")}`);
 	}
-	const expected = new Set(names.map((n) => `${root}/skills/${n}/SKILL.md`));
+	const expected = new Set(names.map((n) => `${skillRoot}/${n}/SKILL.md`));
 	const extras = [...locations].filter(
-		(l) => skillRoots.some((r) => l.startsWith(r + "/")) && !expected.has(l),
+		(l) => l.startsWith(skillRoot + "/") && !expected.has(l),
 	);
 	if (extras.length > 0) {
 		throw new Error(`UNEXPECTED advertised skills:\n${extras.join("\n")}`);
@@ -168,7 +213,7 @@ export function auditSession(dir, root, skill) {
 		`model ${wantModel[1]}\n` +
 		`inventory ${sha("test/expected-skills.json")}`;
 	if (skill !== undefined) {
-		const target = `${root}/${skill}`;
+		const target = resolveAdvertisedSkill(root, skill, expected);
 		const calls = [];
 		const results = new Map();
 		for (const r of recs) {
@@ -192,7 +237,7 @@ export function auditSession(dir, root, skill) {
 	return out;
 }
 
-function manifestSkillRoots() {
+function manifestSkillRoot(root) {
 	const manifest = JSON.parse(fs.readFileSync("package.json", "utf8"));
 	const raw = manifest.pi?.skills ?? ["./skills"];
 	if (
@@ -203,7 +248,7 @@ function manifestSkillRoots() {
 	) {
 		throw new Error("audit supports a single plain-directory pi.skills entry");
 	}
-	return raw;
+	return path.resolve(root, raw[0]);
 }
 
 function main(argv) {
@@ -218,6 +263,9 @@ function main(argv) {
 	return 0;
 }
 
-if (fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {
+if (
+	process.argv[1] !== undefined &&
+	fileURLToPath(import.meta.url) === path.resolve(process.argv[1])
+) {
 	process.exit(main(process.argv.slice(2)));
 }
