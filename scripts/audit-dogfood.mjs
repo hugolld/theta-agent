@@ -165,12 +165,13 @@ export function auditSession(dir, rootArg, skill) {
 	if (bootExit !== "0" || bootErr !== 0) {
 		throw new Error(`boot not clean: exit ${bootExit}, stderr ${bootErr} bytes`);
 	}
-	// assume-unchanged and skip-worktree index entries hide tracked-file
-	// modifications from git status; their presence fails the audit.
+	// assume-unchanged (lowercase h) and skip-worktree (uppercase S) index
+	// entries hide tracked-file modifications from git status; either fails
+	// the audit.
 	const flagged = execSync("git ls-files -v", { cwd: root })
 		.toString()
 		.split("\n")
-		.filter((l) => /^[hs]/.test(l));
+		.filter((l) => /^[hsS]/.test(l));
 	if (flagged.length > 0) {
 		throw new Error(
 			`index entries marked assume-unchanged or skip-worktree:\n${flagged.join("\n")}`,

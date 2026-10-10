@@ -493,22 +493,19 @@ test("auditSession fails on corrupt, mismatched, or stale evidence", (t) => {
 		/incomplete final assistant response: stopReason length/,
 	);
 
-	const errored = buildSession(t, repo);
-	fs.appendFileSync(
-		path.join(errored, "session.jsonl"),
-		JSON.stringify({
-			type: "message",
-			message: {
-				role: "assistant",
-				stopReason: "error",
-				errorMessage: "provider 500",
-				content: [],
-			},
-		}) + "\n",
+	const skipped = makeTempRepo(t);
+	const skippedDir = buildSession(t, skipped);
+	execSync(
+		"git update-index --skip-worktree skills/literature-review/SKILL.md",
+		{ cwd: skipped },
+	);
+	fs.writeFileSync(
+		path.join(skipped, "skills/literature-review/SKILL.md"),
+		"tampered content\n",
 	);
 	assert.throws(
-		() => auditIn(repo, () => auditSession(errored, repo)),
-		/non-empty assistant response — truncated session/,
+		() => auditIn(skipped, () => auditSession(skippedDir, skipped)),
+		/skip-worktree|assume-unchanged/,
 	);
 });
 
