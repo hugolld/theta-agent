@@ -43,6 +43,11 @@ test("ge fails closed on malformed versions", () => {
 	assert.equal(ge("1.0.0-01", "0.99"), false);
 });
 
+test("ge accepts alphanumeric prerelease identifiers that start with zero", () => {
+	assert.equal(ge("1.0.0-0rc", "0.99"), true);
+	assert.equal(ge("1.0.0-0-rc", "0.99"), true);
+});
+
 test("decodeXmlEntities decodes pi's entity set", () => {
 	assert.equal(
 		decodeXmlEntities("Theta&apos;s &quot;how&quot; &amp; &lt;b&gt; &#39;x&#39;"),

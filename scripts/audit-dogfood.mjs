@@ -11,10 +11,17 @@ import { createHash } from "node:crypto";
 export function ge(a, b) {
 	const parse = (v) => {
 		const m =
-			/^v?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|[1-9A-Za-z-]+)(?:\.(?:0|[1-9]\d*|[1-9A-Za-z-]+))*))?(?:\+[0-9A-Za-z.-]+)?$/.exec(
+			/^v?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+[0-9A-Za-z.-]+)?$/.exec(
 				v,
 			);
 		if (!m) return null;
+		// A wholly numeric prerelease identifier must not carry a leading zero.
+		if (
+			m[4] !== undefined &&
+			m[4].split(".").some((id) => /^0\d+$/.test(id))
+		) {
+			return null;
+		}
 		return {
 			core: [Number(m[1]), Number(m[2]), Number(m[3])],
 			pre: m[4] === undefined ? null : m[4].split("."),
@@ -176,18 +183,31 @@ export function auditSession(dir, root, skill) {
 	const inv = JSON.parse(fs.readFileSync("test/expected-skills.json", "utf8"));
 	const skillRoot = manifestSkillRoot(root);
 	const names = inv.vendored.map((e) => e.name).concat(inv["self-authored"]);
+	// pi may advertise lexical paths through symlinked resources; canonicalize
+	// every advertised location before comparing, so content outside the
+	// checkout cannot pose as contained evidence. Unresolvable locations
+	// fail closed by omission.
+	const realAdvertised = new Set(
+		[...locations]
+			.map((l) => {
+				try {
+					return fs.realpathSync(l);
+				} catch {
+					return null;
+				}
+			})
+			.filter(Boolean),
+	);
 	const missing = [];
 	for (const n of names) {
 		const p = `${skillRoot}/${n}/SKILL.md`;
-		if (!locations.has(p)) missing.push(n);
+		if (!realAdvertised.has(p)) missing.push(n);
 	}
 	if (missing.length > 0) {
 		throw new Error(`NOT advertised: ${missing.join(", ")}`);
 	}
 	const expected = new Set(names.map((n) => `${skillRoot}/${n}/SKILL.md`));
-	const extras = [...locations].filter(
-		(l) => l.startsWith(skillRoot + "/") && !expected.has(l),
-	);
+	const extras = [...realAdvertised].filter((l) => !expected.has(l));
 	if (extras.length > 0) {
 		throw new Error(`UNEXPECTED advertised skills:\n${extras.join("\n")}`);
 	}
@@ -263,7 +283,7 @@ function manifestSkillRoot(root) {
 	if (realResolved !== realRoot && !realResolved.startsWith(realRoot + path.sep)) {
 		throw new Error(`pi.skills entry must resolve inside the checkout, got: ${raw[0]}`);
 	}
-	return resolved;
+	return realResolved;
 }
 
 function main(argv) {
