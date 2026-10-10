@@ -68,16 +68,20 @@ export function decodeXmlEntities(s) {
 
 // The advertised skill records live in exactly one <available_skills> block
 // inside the skills section pi maintains (message.sections.skills). A second
-// block could hide advertisement drift, so any other count throws. Each
-// record must carry both a name and a location — advertisement identity is
-// the pair, not the path alone.
+// block could hide advertisement drift, so any other count throws — and the
+// tag counts must balance, so an unclosed block or stray <skill> records
+// outside the parsed block fail closed too. Each record must carry both a
+// name and a location — advertisement identity is the pair, not the path.
 export function extractLocations(skillsText) {
+	const opens = (skillsText.match(/<available_skills>/g) ?? []).length;
+	const closes = (skillsText.match(/<\/available_skills>/g) ?? []).length;
 	const blocks = skillsText.match(/<available_skills>[\s\S]*?<\/available_skills>/g);
-	if (!blocks || blocks.length !== 1) {
+	if (!blocks || blocks.length !== 1 || opens !== 1 || closes !== 1) {
 		throw new Error(
-			`expected exactly 1 available_skills block, found ${blocks ? blocks.length : 0}`,
+			`expected exactly 1 well-formed available_skills block, found ${blocks ? blocks.length : 0} (open tags ${opens}, close tags ${closes})`,
 		);
 	}
+	const skillTags = (skillsText.match(/<skill>/g) ?? []).length;
 	const out = [];
 	for (const record of blocks[0].match(/<skill>[\s\S]*?<\/skill>/g) ?? []) {
 		const name = decodeXmlEntities(
@@ -90,6 +94,11 @@ export function extractLocations(skillsText) {
 			throw new Error("malformed skill advertisement record (missing name or location)");
 		}
 		out.push({ name, location });
+	}
+	if (out.length !== skillTags) {
+		throw new Error(
+			`stray or unclosed <skill> records: ${skillTags} tags, ${out.length} parsed`,
+		);
 	}
 	return out;
 }

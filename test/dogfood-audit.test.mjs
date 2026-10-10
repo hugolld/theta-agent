@@ -84,7 +84,7 @@ test("extractLocations returns decoded records and rejects other counts", () => 
 	assert.deepEqual(recs[1], { name: "b's", location: "/x/skills/b's/SKILL.md" });
 	assert.throws(
 		() => extractLocations("no section here"),
-		/exactly 1 available_skills block, found 0/,
+		/exactly 1 well-formed available_skills block, found 0/,
 	);
 	assert.throws(
 		() =>
@@ -92,11 +92,25 @@ test("extractLocations returns decoded records and rejects other counts", () => 
 				text +
 					"<available_skills><skill><name>ghost</name><location>/x/ghost/SKILL.md</location></skill></available_skills>",
 			),
-		/exactly 1 available_skills block, found 2/,
+		/exactly 1 well-formed available_skills block, found 2/,
 	);
 	assert.throws(
 		() => extractLocations("<available_skills><skill><name>a</name></skill></available_skills>"),
 		/missing name or location/,
+	);
+	assert.throws(
+		() =>
+			extractLocations(
+				"<available_skills><skill><name>a</name><location>/x/a/SKILL.md</location></skill>",
+			),
+		/exactly 1 well-formed available_skills block/,
+	);
+	assert.throws(
+		() =>
+			extractLocations(
+				'<available_skills><skill><name>a</name><location>/x/a/SKILL.md</location></skill></available_skills><skill><name>stray</name></skill>',
+			),
+		/stray or unclosed <skill> records/,
 	);
 });
 
@@ -459,7 +473,7 @@ test("auditSession fails on corrupt, mismatched, or stale evidence", (t) => {
 	const twoBlocks = buildSession(t, repo, { secondSkillsBlock: true });
 	assert.throws(
 		() => auditIn(repo, () => auditSession(twoBlocks, repo)),
-		/exactly 1 available_skills block/,
+		/exactly 1 well-formed available_skills block/,
 	);
 
 	const twoSessions = buildSession(t, repo);
