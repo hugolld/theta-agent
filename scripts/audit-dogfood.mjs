@@ -255,7 +255,12 @@ function manifestSkillRoot(root) {
 		throw new Error("audit supports a single plain-directory pi.skills entry");
 	}
 	const resolved = path.resolve(root, raw[0]);
-	if (resolved !== root && !resolved.startsWith(root + path.sep)) {
+	const realRoot = fs.realpathSync(root);
+	const realResolved = fs.realpathSync(resolved);
+	if (!fs.statSync(realResolved).isDirectory()) {
+		throw new Error(`pi.skills entry must be a directory, got: ${raw[0]}`);
+	}
+	if (realResolved !== realRoot && !realResolved.startsWith(realRoot + path.sep)) {
 		throw new Error(`pi.skills entry must resolve inside the checkout, got: ${raw[0]}`);
 	}
 	return resolved;

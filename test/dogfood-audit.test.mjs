@@ -1,10 +1,16 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { execSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
 	ge,
 	decodeXmlEntities,
 	extractLocations,
 	resolveAdvertisedSkill,
+	auditSession,
 } from "../scripts/audit-dogfood.mjs";
 
 test("ge enforces the pi and node version floors", () => {
@@ -77,3 +83,177 @@ test("resolveAdvertisedSkill rejects traversal and non-skill paths", () => {
 		/advertised checkout SKILL\.md/,
 	);
 });
+
+// Integration fixtures: a synthetic session directory audited against the
+// real checkout root, covering the clean pass and every failure mode.
+const realRoot = fs.realpathSync(".");
+const head = () => execSync("git rev-parse HEAD").toString().trim();
+const sha256 = (s) => createHash("sha256").update(s).digest("hex");
+const inventory = JSON.parse(
+	fs.readFileSync("test/expected-skills.json", "utf8"),
+);
+const inventoryNames = inventory.vendored
+	.map((e) => e.name)
+	.concat(inventory["self-authored"]);
+const prompt = "test prompt for the dogfood auditor";
+
+function buildSession(t, overrides = {}) {
+	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "dogfood-fixture-"));
+	t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+	const root = realRoot;
+	const advertised = overrides.advertisedNames ?? inventoryNames;
+	const locs = advertised
+		.map(
+			(n) =>
+				`<skill><name>${n}</name><location>${root}/skills/${n}/SKILL.md</location></skill>`,
+		)
+		.join("\n");
+	const thePrompt = overrides.prompt ?? prompt;
+	const records = [
+		JSON.stringify({ type: "session", cwd: root }),
+		JSON.stringify({
+			type: "model_change",
+			provider: "zai-coding-cn",
+			modelId: "glm-5.3-flash",
+		}),
+		JSON.stringify({
+			type: "message",
+			message: {
+				role: "system",
+				sections: { skills: `<available_skills>${locs}</available_skills>` },
+			},
+		}),
+		JSON.stringify({
+			type: "message",
+			message: { role: "user", content: [{ type: "text", text: thePrompt }] },
+		}),
+	];
+	if (overrides.toolResultIsError !== undefined) {
+		const target = `${root}/skills/literature-review/SKILL.md`;
+		records.push(
+			JSON.stringify({
+				type: "message",
+				message: {
+					role: "assistant",
+					content: [
+						{
+							type: "toolCall",
+							id: "call_test",
+							name: "read",
+							arguments: { path: target },
+						},
+					],
+				},
+			}),
+		);
+		records.push(
+			JSON.stringify({
+				type: "message",
+				message: {
+					role: "toolResult",
+					toolCallId: "call_test",
+					toolName: "read",
+					isError: overrides.toolResultIsError,
+					content: [{ type: "text", text: "irrelevant" }],
+				},
+			}),
+		);
+	}
+	fs.writeFileSync(
+		path.join(dir, "session.jsonl"),
+		records.join("\n") + "\n",
+	);
+	fs.writeFileSync(path.join(dir, "prompt.txt"), thePrompt);
+	fs.writeFileSync(
+		path.join(dir, "expected-model"),
+		"zai-coding-cn glm-5.3-flash\n",
+	);
+	fs.writeFileSync(path.join(dir, "exit-status"), overrides.exit ?? "0");
+	fs.writeFileSync(path.join(dir, "stderr.txt"), overrides.stderr ?? "");
+	fs.writeFileSync(path.join(dir, "pi-version"), "1.1.0\n");
+	fs.writeFileSync(path.join(dir, "node-version"), "v26.11.0\n");
+	fs.writeFileSync(path.join(dir, "pre-head"), overrides.preHead ?? head());
+	fs.writeFileSync(
+		path.join(dir, "manifest-sha256"),
+		sha256(fs.readFileSync("package.json", "utf8")),
+	);
+	if (overrides.watchdog) fs.writeFileSync(path.join(dir, "watchdog"), "fired");
+	return dir;
+}
+
+test("auditSession attests a well-formed boot session", (t) => {
+	const dir = buildSession(t);
+	const out = auditSession(dir, realRoot);
+	assert.match(out, /^clean /);
+	assert.match(out, /provider zai-coding-cn/);
+	assert.match(out, /model glm-5.3-flash/);
+});
+
+test("auditSession attests skill use when paired and errors otherwise", (t) => {
+	const good = buildSession(t, { toolResultIsError: false });
+	const out = auditSession(good, realRoot, "skills/literature-review/SKILL.md");
+	assert.match(out, /used .*\/skills\/literature-review\/SKILL\.md/);
+	const bad = buildSession(t, { toolResultIsError: true });
+	assert.throws(
+		() => auditSession(bad, realRoot, "skills/literature-review/SKILL.md"),
+		/NOT used/,
+	);
+});
+
+test("auditSession fails on missing and extra advertised skills", (t) => {
+	assert.throws(
+		() => auditSession(buildSession(t, { advertisedNames: inventoryNames.slice(1) }), realRoot),
+		/NOT advertised: literature-review/,
+	);
+	assert.throws(
+		() =>
+			auditSession(
+				buildSession(t, { advertisedNames: [...inventoryNames, "extra-skill"] }),
+				realRoot,
+			),
+		/UNEXPECTED advertised skills/,
+	);
+});
+
+test("auditSession fails on corrupt, mismatched, or stale evidence", (t) => {
+	const dir = buildSession(t);
+	fs.appendFileSync(path.join(dir, "session.jsonl"), "{corrupt\n");
+	assert.throws(() => auditSession(dir, realRoot), /corrupt transcript/);
+
+	const moved = buildSession(t, { preHead: "0".repeat(40) });
+	assert.throws(() => auditSession(moved, realRoot), /HEAD moved/);
+
+	const stale = buildSession(t, { prompt: "a different prompt" });
+	assert.throws(() => auditSession(stale, realRoot), /prompt mismatch/);
+
+	const wrongModel = buildSession(t);
+	fs.writeFileSync(
+		path.join(wrongModel, "expected-model"),
+		"other-provider other-model\n",
+	);
+	assert.throws(() => auditSession(wrongModel, realRoot), /model mismatch/);
+
+	const failed = buildSession(t, { exit: "1" });
+	assert.throws(() => auditSession(failed, realRoot), /boot not clean/);
+
+	const noisy = buildSession(t, { stderr: "boom\n" });
+	assert.throws(() => auditSession(noisy, realRoot), /boot not clean/);
+
+	const timedOut = buildSession(t, { watchdog: true });
+	assert.throws(() => auditSession(timedOut, realRoot), /watchdog fired/);
+
+	const twoSystem = buildSession(t);
+	fs.appendFileSync(
+		path.join(twoSystem, "session.jsonl"),
+		JSON.stringify({
+			type: "message",
+			message: { role: "system", sections: { skills: null } },
+		}) + "\n",
+	);
+	assert.throws(
+		() => auditSession(twoSystem, realRoot),
+		/skills-bearing system record/,
+	);
+});
+
+
