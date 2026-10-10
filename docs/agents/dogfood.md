@@ -23,7 +23,7 @@ echo $? > "$sd/exit-status"
 
 The pi session transcript is the record. Pi advertises the skill library in the session's system records — assert against those records only. Grepping the whole file proves nothing: the user prompt and tool activity can carry a skill name into a session where nothing was advertised.
 
-The oracle is the checked-in `test/expected-skills.json` inventory, not the `skills/` tree, so a dirty checkout cannot shrink the expectation silently. The audit reads only the `skills` section of the system records (`message.sections.skills` — the field pi maintains) — host skills and project context share the system prompt, so raw text elsewhere in it can vouch for nothing. Locations are XML-decoded (including `&apos;`) and compared exactly. Every transcript line must parse — a corrupt or truncated file fails loudly instead of quietly shrinking the evidence. The same audit re-verifies the boot-clean process files: a non-zero `exit-status`, a non-empty `stderr.txt`, or missing files fails before the transcript is even parsed. On success it prints a full SHA-256 attestation — the Git HEAD plus digests of the transcript, both process files, and the audited inventory — so the evidence names exactly what it attests; keep that output with the run's record. Printed output on failure, or any non-zero exit, fails the criterion. The root comes from `fs.realpathSync`, so a symlinked checkout still matches the advertised paths.
+The oracle is the checked-in `test/expected-skills.json` inventory, not the `skills/` tree, so a dirty checkout cannot shrink the expectation silently. The audit reads only the `skills` section of the single system record (`message.sections.skills` — the field pi maintains; a one-shot session has exactly one system record, and any other count fails loudly) — host skills and project context share the system prompt, so raw text elsewhere in it can vouch for nothing. Locations are XML-decoded (including `&apos;`) and compared exactly. Every transcript line must parse — a corrupt or truncated file fails loudly instead of quietly shrinking the evidence. The same audit re-verifies the boot-clean process files: a non-zero `exit-status`, a non-empty `stderr.txt`, or missing files fails before the transcript is even parsed. The working tree under `skills/` and the inventory must be clean (clear scratch venvs and `__pycache__` first, below), so the cited HEAD is what was audited. On success it prints a full SHA-256 attestation — the Git HEAD plus digests of the transcript, both process files, and the audited inventory — so the evidence names exactly what it attests; keep that output with the run's record. Printed output on failure, or any non-zero exit, fails the criterion. The root comes from `fs.realpathSync`, so a symlinked checkout still matches the advertised paths.
 
 ```sh
 node -e '
@@ -56,10 +56,12 @@ node -e '
       process.exit(1);
     }
   });
-  const skillsText = recs
-    .filter(r => r.message?.role === "system")
-    .map(r => r.message?.sections?.skills ?? "")
-    .join("");
+  const sysRecs = recs.filter(r => r.message?.role === "system");
+  if (sysRecs.length !== 1) {
+    console.error("expected exactly 1 system record, found " + sysRecs.length);
+    process.exit(1);
+  }
+  const skillsText = sysRecs[0].message?.sections?.skills ?? "";
   const section = skillsText.match(/<available_skills>([\s\S]*?)<\/available_skills>/);
   if (!section) {
     console.error("no available_skills section in system records");
@@ -82,6 +84,12 @@ node -e '
   if (fail) process.exit(1);
   const { execSync } = require("child_process");
   const crypto = require("crypto");
+  const dirty = execSync("git status --porcelain -- skills test/expected-skills.json")
+    .toString().trim();
+  if (dirty) {
+    console.error("working tree dirty under skills/ or inventory:\n" + dirty);
+    process.exit(1);
+  }
   const head = execSync("git rev-parse HEAD").toString().trim();
   const sha = p =>
     crypto.createHash("sha256").update(fs.readFileSync(p)).digest("hex");
@@ -103,7 +111,7 @@ node bin/theta.mjs --dev --provider zai-coding-cn --model glm-5.3-flash \
 echo $? > "$sd2/exit-status"
 ```
 
-Audit `$sd2` with the same command as above (substitute it for `$sd`): the routing session must boot clean and advertise the full library too. Then require a read of the skill's `SKILL.md` from this checkout: a `read` tool call whose path argument equals the checkout's copy exactly, paired by `toolCallId` with a `toolResult` that reports no error. Path mentions in `bash` commands, writes, prose, or thinking are not use.
+Audit `$sd2` with the same command as above (substitute it for `$sd`): the routing session must boot clean and advertise the full library too. Then require a read of the skill's `SKILL.md` from this checkout: a `read` tool call whose path argument equals the checkout's copy exactly, paired by `toolCallId` with a `toolResult` that reports no error. Path mentions in `bash` commands, writes, prose, or thinking are not use. On success the check prints a bound attestation — HEAD, transcript digest, the resolved skill path, and the SKILL.md content digest; keep it with the run's record.
 
 ```sh
 f=$(ls "$sd2"/*.jsonl | head -1)   # the audit on $sd2 enforces exactly one file
@@ -133,8 +141,19 @@ node -e '
     const r = results.get(t.id);
     return t.name === "read" && t.arguments?.path === target && r && r.isError !== true;
   });
-  console.log(hit ? "used" : "NOT used");
-  process.exit(hit ? 0 : 1);
+  if (!hit) {
+    console.log("NOT used");
+    process.exit(1);
+  }
+  const { execSync } = require("child_process");
+  const crypto = require("crypto");
+  const head = execSync("git rev-parse HEAD").toString().trim();
+  const sha = p => crypto.createHash("sha256").update(fs.readFileSync(p)).digest("hex");
+  console.log("used " + head +
+    "\ntranscript " + sha(file) +
+    "\nskill " + target +
+    "\nskill-content " + sha(target));
+  process.exit(0);
 ' "$f" "skills/literature-review/SKILL.md"
 ```
 
