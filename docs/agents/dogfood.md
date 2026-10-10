@@ -22,7 +22,7 @@ pid=$!
 ( sleep 300; echo fired > "$sd/watchdog" 2>/dev/null; kill $pid 2>/dev/null; sleep 15; kill -9 $pid 2>/dev/null ) & watchdog=$!
 wait $pid
 echo $? > "$sd/exit-status"
-kill $watchdog 2>/dev/null
+kill $watchdog 2>/dev/null; pkill -P $watchdog 2>/dev/null
 ```
 
 - Pass provider and model explicitly: pi's default model can 401 with an invalid bearer token.
@@ -64,7 +64,7 @@ pid=$!
 ( sleep 300; echo fired > "$sd2/watchdog" 2>/dev/null; kill $pid 2>/dev/null; sleep 15; kill -9 $pid 2>/dev/null ) & watchdog=$!
 wait $pid
 echo $? > "$sd2/exit-status"
-kill $watchdog 2>/dev/null
+kill $watchdog 2>/dev/null; pkill -P $watchdog 2>/dev/null
 ```
 
 Audit `$sd2` with the same one command, passing the skill path as a second argument — one invocation runs every check above on that session and then, only if all of them passed, requires a read of the skill's `SKILL.md` from this checkout against the same in-memory transcript: a `read` tool call whose path canonicalizes to the checkout's copy exactly, paired by `toolCallId` with a `toolResult` that reports no error and whose text equals the current file contents — `offset` and `limit` are not judged, because a fragment cannot reproduce the full file's bytes. The attested fact is **selected file opened in a real session**, not autonomous routing. The skill argument must resolve to an advertised checkout SKILL.md — traversal or any non-skill path is rejected. Path mentions in `bash` commands, writes, prose, or thinking are not use. Nothing can slip between the checks — one auditor, one attestation.
