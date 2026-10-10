@@ -211,8 +211,8 @@ export function auditSession(dir, rootArg, skill) {
 	}
 	// A completed one-shot ends with the assistant's response: a transcript
 	// truncated at a record boundary cannot attest a full session. A final
-	// assistant record that still carries a tool request is a truncated
-	// mid-tool turn, not a completed response.
+	// assistant record that still carries a tool request, a length-truncated
+	// stop reason, or an error is not a completed response.
 	const last = recs[recs.length - 1];
 	const lastContent = last?.message?.content;
 	const endsWithToolCall =
@@ -221,6 +221,11 @@ export function auditSession(dir, rootArg, skill) {
 	if (last?.message?.role !== "assistant" || endsWithToolCall) {
 		throw new Error(
 			"transcript does not end with an assistant response — truncated session",
+		);
+	}
+	if (last.message.stopReason !== "stop" || last.message.errorMessage) {
+		throw new Error(
+			`incomplete final assistant response: stopReason ${last.message.stopReason}${last.message.errorMessage ? ", error " + last.message.errorMessage : ""}`,
 		);
 	}
 	const userRec = userRecs[0];

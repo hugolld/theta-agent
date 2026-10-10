@@ -10,7 +10,7 @@ export default function (pi: ExtensionAPI) {
 		description: "Show Theta agent status and roadmap",
 		handler: async (_args, ctx) => {
 			ctx.ui.notify(
-				"Theta — M1 complete: the theta launcher and the Tier-1 research-loop skill library (0.0.2 publication pending)",
+				"Theta — M1 complete: the theta launcher and the Tier-1 research-loop skill library",
 				"info",
 			);
 			ctx.ui.notify(

@@ -256,6 +256,7 @@ function buildSession(t, repo, overrides = {}) {
 			type: "message",
 			message: {
 				role: "assistant",
+				stopReason: "stop",
 				content: [{ type: "text", text: "summary response\n" }],
 			},
 		}),
@@ -462,6 +463,41 @@ test("auditSession fails on corrupt, mismatched, or stale evidence", (t) => {
 		() => auditIn(repo, () => auditSession(belowFloor, repo)),
 		/below the supported 0\.99 floor/,
 	);
+
+	const lengthCapped = buildSession(t, repo);
+	fs.appendFileSync(
+		path.join(lengthCapped, "session.jsonl"),
+		JSON.stringify({
+			type: "message",
+			message: {
+				role: "assistant",
+				stopReason: "length",
+				content: [{ type: "text", text: "partial response\n" }],
+			},
+		}) + "\n",
+	);
+	assert.throws(
+		() => auditIn(repo, () => auditSession(lengthCapped, repo)),
+		/incomplete final assistant response/,
+	);
+
+	const errored = buildSession(t, repo);
+	fs.appendFileSync(
+		path.join(errored, "session.jsonl"),
+		JSON.stringify({
+			type: "message",
+			message: {
+				role: "assistant",
+				stopReason: "error",
+				errorMessage: "provider 500",
+				content: [],
+			},
+		}) + "\n",
+	);
+	assert.throws(
+		() => auditIn(repo, () => auditSession(errored, repo)),
+		/incomplete final assistant response/,
+	);
 });
 
 test("auditSession rejects host aliases under inventory names", (t) => {
@@ -499,6 +535,7 @@ test("auditSession rejects host aliases under inventory names", (t) => {
 			type: "message",
 			message: {
 				role: "assistant",
+				stopReason: "stop",
 				content: [{ type: "text", text: "summary response\n" }],
 			},
 		}),
