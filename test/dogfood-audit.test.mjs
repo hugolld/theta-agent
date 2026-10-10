@@ -613,6 +613,15 @@ test("auditSession accepts a sanitized real pi transcript (golden)", (t) => {
 	if (/\/Users\/|\/opt\/homebrew/.test(rawFixture)) {
 		throw new Error("golden fixture contains machine-specific absolute paths");
 	}
+	const hostPiLib = fs.mkdtempSync(path.join(os.tmpdir(), "golden-pi-lib-"));
+	t.after(() => fs.rmSync(hostPiLib, { recursive: true, force: true }));
+	for (const rel of [
+		"@earendil-works/pi-coding-agent/README.md",
+		"@earendil-works/pi-coding-agent/docs",
+		"@earendil-works/pi-coding-agent/examples",
+	]) {
+		fs.mkdirSync(path.join(hostPiLib, rel), { recursive: true });
+	}
 	const real = fs.realpathSync(repo);
 	let golden = rawFixture.replaceAll("__REPO__", real);
 	// Materialize the host-skill files the real session had advertised: pi
@@ -625,7 +634,9 @@ test("auditSession accepts a sanitized real pi transcript (golden)", (t) => {
 		fs.mkdirSync(path.dirname(hostSkill), { recursive: true });
 		fs.writeFileSync(hostSkill, "host skill content\n");
 	}
-	golden = golden.replaceAll("__HOST_SKILLS__", path.join(hostRoot, "skills"));
+	golden = golden
+		.replaceAll("__HOST_SKILLS__", path.join(hostRoot, "skills"))
+		.replaceAll("__HOST_PI_LIB__", path.join(hostPiLib, "@earendil-works/pi-coding-agent"));
 	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "dogfood-session-"));
 	t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
 	fs.writeFileSync(path.join(dir, "session.jsonl"), golden);
