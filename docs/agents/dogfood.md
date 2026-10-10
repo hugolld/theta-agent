@@ -83,10 +83,19 @@ node -e '
 ' "$sd"
 ```
 
-For a spot-check, prompt a real task that routes into the named skill, then require a read of the skill's `SKILL.md` from this checkout: a `read` tool call whose path argument equals the checkout's copy exactly, paired by `toolCallId` with a `toolResult` that reports no error. Path mentions in `bash` commands, writes, prose, or thinking are not use.
+The spot-check is a second full one-shot in its own session dir, prompted with a real task that routes into the named skill — never a prompt that merely asks about it:
 
 ```sh
-f=$(ls "$sd"/*.jsonl | head -1)   # the audit above enforces exactly one file
+sd2=$(mktemp -d)
+node bin/theta.mjs --dev --provider zai-coding-cn --model glm-5.3-flash \
+  --session-dir "$sd2" --print "<real task routing into the skill>" 2> "$sd2/stderr.txt" < /dev/null
+echo $? > "$sd2/exit-status"
+```
+
+Audit `$sd2` with the same command as above (substitute it for `$sd`): the routing session must boot clean and advertise the full library too. Then require a read of the skill's `SKILL.md` from this checkout: a `read` tool call whose path argument equals the checkout's copy exactly, paired by `toolCallId` with a `toolResult` that reports no error. Path mentions in `bash` commands, writes, prose, or thinking are not use.
+
+```sh
+f=$(ls "$sd2"/*.jsonl | head -1)   # the audit on $sd2 enforces exactly one file
 node -e '
   const fs = require("fs");
   const [file, skill] = process.argv.slice(1);
