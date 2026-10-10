@@ -303,6 +303,7 @@ test("auditSession attests skill use when paired and errors otherwise", (t) => {
 	const partial = buildSession(t, repo, {
 		toolResultIsError: false,
 		partialRead: true,
+		resultText: "partial\n",
 	});
 	assert.throws(
 		() => auditIn(repo, () => auditSession(partial, repo, "skills/literature-review/SKILL.md")),

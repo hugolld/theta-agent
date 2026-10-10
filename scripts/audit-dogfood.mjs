@@ -331,10 +331,10 @@ export function auditSession(dir, rootArg, skill) {
 		// pi may advertise and read lexical paths through symlinked resources;
 		// canonicalize the read path first, so a lexical path through a
 		// symlinked checkout still matches, then compare canonically — an
-		// unresolvable or external path cannot vouch for the target. A partial
-		// read (offset/limit) proves ingestion of a fragment, not the skill,
-		// and the recorded result text must equal the current file contents —
-		// a lying model cannot otherwise produce the file's bytes.
+		// unresolvable or external path cannot vouch for the target. Read
+		// arguments (offset/limit) are not judged: the recorded result text
+		// must equal the current file contents, so only a read of the whole
+		// file can satisfy the check no matter what arguments were passed.
 		const hit = calls.some((t) => {
 			const r = results.get(t.id);
 			if (
@@ -343,9 +343,7 @@ export function auditSession(dir, rootArg, skill) {
 					r &&
 					r.toolName === "read" &&
 					r.isError === false &&
-					t.arguments?.path &&
-					t.arguments.offset === undefined &&
-					t.arguments.limit === undefined
+					t.arguments?.path
 				)
 			) {
 				return false;
