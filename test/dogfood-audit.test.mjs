@@ -151,8 +151,10 @@ function makeTempRepo(t) {
 	run("git init -q");
 	run("git config user.email test@example.com");
 	run("git config user.name test");
+	run("git config commit.gpgsign false");
+	run("git config core.hooksPath /dev/null");
 	run("git add -A");
-	run("git commit -qm init");
+	run("git -c commit.gpgsign=false commit -qm init");
 	return repo;
 }
 
@@ -207,7 +209,14 @@ function buildSession(t, repo, overrides = {}) {
 	if (overrides.toolResultIsError !== undefined) {
 		const target = `${repo}/skills/literature-review/SKILL.md`;
 		const callArguments = { path: target };
-		if (overrides.partialRead) callArguments.limit = 1;
+		if (overrides.partialRead) {
+			callArguments.offset = 1;
+			callArguments.limit = 1;
+		} else if (!overrides.noReadRange) {
+			// pi passes explicit offset/limit even for full-file reads
+			callArguments.offset = 1;
+			callArguments.limit = 2000;
+		}
 		records.push(
 			JSON.stringify({
 				type: "message",
@@ -353,7 +362,7 @@ test("auditSession flags a checkout skill symlinked outside the repo", (t) => {
 	// a real checkout would have the committed symlink; commit so the
 	// clean-tree gate passes and the canonicalization checks are exercised
 	execSync("git add -A", { cwd: repo });
-	execSync("git commit -qm rogue", { cwd: repo });
+	execSync("git -c commit.gpgsign=false commit -qm rogue", { cwd: repo });
 	const dir = buildSession(t, repo, { advertisedNames: ["literature-review", "rogue"] });
 	assert.throws(
 		() => auditIn(repo, () => auditSession(dir, repo)),

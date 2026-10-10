@@ -67,7 +67,7 @@ echo $? > "$sd2/exit-status"
 kill $watchdog 2>/dev/null
 ```
 
-Audit `$sd2` with the same one command, passing the skill path as a second argument — one invocation runs every check above on that session and then, only if all of them passed, requires a read of the skill's `SKILL.md` from this checkout against the same in-memory transcript: a `read` tool call whose path argument equals the checkout's copy exactly, with no `offset` or `limit` (a fragment proves ingestion of a fragment, not the skill), paired by `toolCallId` with a `toolResult` whose text equals the current file contents. The skill argument must resolve to an advertised checkout SKILL.md — traversal or any non-skill path is rejected. Path mentions in `bash` commands, writes, prose, or thinking are not use. Nothing can slip between the checks — one auditor, one attestation.
+Audit `$sd2` with the same one command, passing the skill path as a second argument — one invocation runs every check above on that session and then, only if all of them passed, requires a read of the skill's `SKILL.md` from this checkout against the same in-memory transcript: a `read` tool call whose path canonicalizes to the checkout's copy exactly, paired by `toolCallId` with a `toolResult` that reports no error and whose text equals the current file contents — `offset` and `limit` are not judged, because a fragment cannot reproduce the full file's bytes. The skill argument must resolve to an advertised checkout SKILL.md — traversal or any non-skill path is rejected. Path mentions in `bash` commands, writes, prose, or thinking are not use. Nothing can slip between the checks — one auditor, one attestation.
 
 ```sh
 node scripts/audit-dogfood.mjs "$sd2" "skills/literature-review/SKILL.md"
