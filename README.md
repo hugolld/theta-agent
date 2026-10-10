@@ -51,7 +51,8 @@ pi install npm:theta-agent
 ```
 
 Requires theta-agent ≥ 0.0.2 on the registry; earlier versions predate the
-launcher.
+launcher. If the registry is not there yet, run Theta from a checkout
+instead — see [Try it](#try-it).
 
 ## Try it
 

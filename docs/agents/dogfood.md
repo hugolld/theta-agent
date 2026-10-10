@@ -25,7 +25,7 @@ cat "$sd/exit-status"    # boot-clean needs this to be 0
 
 The pi session transcript is the record. Pi advertises the skill library in the session's system records — assert against those records only. Grepping the whole file proves nothing: the user prompt and tool activity can carry a skill name into a session where nothing was advertised.
 
-The oracle is the checked-in `test/expected-skills.json` inventory, not the `skills/` tree, so a dirty checkout cannot shrink the expectation silently. Exit 0 means every inventory skill was advertised; printed output or any non-zero exit fails the criterion. The root comes from `fs.realpathSync`, so a symlinked checkout still matches the paths pi advertised. Every transcript line must parse — a corrupt or truncated file fails loudly instead of quietly shrinking the evidence — and advertised locations are XML-decoded before comparison, so escaped entities in a checkout path cannot hide a skill.
+The oracle is the checked-in `test/expected-skills.json` inventory, not the `skills/` tree, so a dirty checkout cannot shrink the expectation silently. The audit reads only the structured `<available_skills>` entries of the system records — host skills and project context share that prompt, so raw text in it can vouch for nothing. Locations are XML-decoded (including `&apos;`) and compared exactly. Every transcript line must parse — a corrupt or truncated file fails loudly instead of quietly shrinking the evidence. Exit 0 means every inventory skill was advertised; printed output or any non-zero exit fails the criterion. The root comes from `fs.realpathSync`, so a symlinked checkout still matches the advertised paths.
 
 ```sh
 node -e '
@@ -48,14 +48,22 @@ node -e '
   const sys = recs
     .filter(r => r.message?.role === "system")
     .map(r => JSON.stringify(r.message))
-    .join("")
-    .replace(/&(amp|lt|gt|quot|#39);/g, (_, e) =>
-      ({ amp: "&", lt: "<", gt: ">", quot: "\"", "#39": "\x27" })[e]);
+    .join("");
+  const section = sys.match(/<available_skills>([\s\S]*?)<\/available_skills>/);
+  if (!section) {
+    console.error("no available_skills section in system records");
+    process.exit(1);
+  }
+  const decode = s => s.replace(/&(amp|lt|gt|quot|apos|#39);/g,
+    (_, e) => ({ amp: "&", lt: "<", gt: ">", quot: "\"", apos: "\x27", "#39": "\x27" })[e]);
+  const locations = new Set(
+    [...section[1].matchAll(/<location>([\s\S]*?)<\/location>/g)].map(m => decode(m[1])));
   const inv = JSON.parse(fs.readFileSync("test/expected-skills.json", "utf8"));
   const names = inv.vendored.map(e => e.name).concat(inv["self-authored"]);
   let fail = false;
   for (const n of names) {
-    if (!sys.includes(root + "/skills/" + n + "/SKILL.md")) {
+    const p = root + "/skills/" + n + "/SKILL.md";
+    if (!locations.has(p)) {
       console.error("NOT advertised: " + n);
       fail = true;
     }
