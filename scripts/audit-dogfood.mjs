@@ -231,6 +231,31 @@ export function auditSession(dir, rootArg, skill) {
 		throw new Error(`expected exactly 1 user record, found ${userRecs.length}`);
 	}
 	const userIndex = recs.indexOf(userRecs[0]);
+	// Record order is part of the evidence: the session identity, the model
+	// selection, and the skill advertisement must all be recorded before the
+	// prompt they answer — a spliced transcript advertising skills after
+	// seeing the task fails here.
+	const orderOf = (pred) => {
+		const idx = recs.findIndex(pred);
+		return idx === -1 ? Number.POSITIVE_INFINITY : idx;
+	};
+	const sessionOrder = orderOf((r) => r.type === "session");
+	const modelOrder = orderOf((r) => r.type === "model_change");
+	const skillsOrder = orderOf(
+		(r) =>
+			r.message?.role === "system" &&
+			r.message?.sections !== undefined &&
+			"skills" in r.message.sections,
+	);
+	if (
+		sessionOrder > userIndex ||
+		modelOrder > userIndex ||
+		skillsOrder > userIndex
+	) {
+		throw new Error(
+			"transcript order violation: session, model_change, and skills records must precede the user prompt",
+		);
+	}
 	// A completed one-shot ends with the assistant's response: a transcript
 	// truncated at a record boundary cannot attest a full session. A final
 	// assistant record that still carries a tool request, a length-truncated
@@ -353,9 +378,12 @@ export function auditSession(dir, rootArg, skill) {
 	}
 	const expected = new Set(names.map((n) => `${skillRoot}/${n}/SKILL.md`));
 	// An advertised record is an extra when its lexical location or its
-	// canonical target lies inside the checkout without being inventory —
-	// canonicalizing alone would hide a checkout symlink pointing outside,
-	// and host-level skills outside the checkout are the environment.
+	// canonical target lies at or inside the checkout without being
+	// inventory — canonicalizing alone would hide a checkout symlink
+	// pointing outside, and host-level skills outside the checkout are the
+	// environment. Every advertised location must also resolve to a real
+	// SKILL.md file: a record pointing at the checkout root itself is
+	// checkout-affiliated, not a host skill.
 	const extras = [...canonical.entries()]
 		.filter(([n, p]) => {
 			if (expected.has(p)) return false;
@@ -363,10 +391,18 @@ export function auditSession(dir, rootArg, skill) {
 				advertisements.find((r) => r.name === n)?.location ?? "";
 			return (
 				rootAliases.some((r) => lexical.startsWith(r + path.sep)) ||
+				p === root ||
 				p.startsWith(root + path.sep)
 			);
 		})
 		.map(([n]) => n);
+	for (const [n, p] of canonical) {
+		if (path.basename(p) !== "SKILL.md" || !fs.statSync(p).isFile()) {
+			throw new Error(
+				`advertised location for ${n} is not a SKILL.md file: ${p}`,
+			);
+		}
+	}
 	if (extras.length > 0) {
 		throw new Error(`UNEXPECTED advertised skills:\n${extras.join("\n")}`);
 	}
