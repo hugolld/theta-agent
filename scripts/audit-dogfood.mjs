@@ -384,16 +384,19 @@ export function auditSession(dir, rootArg, skill) {
 		// A routed prompt must not name the selected skill or its file:
 		// steering the model there is instruction, not routing. The name is
 		// derived from the target's parent directory, not from the argument
-		// string, and compared case-insensitively across spellings.
+		// string, and the comparison strips case, separators, and punctuation
+		// from both sides — so LiteratureReview, literature_review,
+		// "literature review", and SKILL.md all match their canonical forms.
+		const normalize = (s) =>
+			s.toLowerCase().normalize("NFKC").replace(/[^a-z0-9]/g, "");
+		const promptNorm = normalize(promptWanted);
 		const skillName = path.basename(path.dirname(target));
 		const promptVariants = [
-			skillName,
-			skillName.replace(/-/g, " "),
-			skillName.replace(/-/g, "_"),
-			path.basename(target),
-			target,
-		].map((v) => v.toLowerCase());
-		if (promptVariants.some((v) => promptWanted.toLowerCase().includes(v))) {
+			normalize(skillName),
+			normalize(path.basename(target)),
+			normalize(target),
+		];
+		if (promptVariants.some((v) => v && promptNorm.includes(v))) {
 			throw new Error(
 				"spot-check prompt names the selected skill or its file — a routed task must reach it on its own",
 			);

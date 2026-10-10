@@ -342,6 +342,18 @@ test("auditSession attests skill use when paired and errors otherwise", (t) => {
 		() => auditIn(repo, () => auditSession(wrongTool, repo, "skills/literature-review/SKILL.md")),
 		/NOT used/,
 	);
+	const camelSteer = buildSession(t, repo, {
+		toolResultIsError: false,
+		transcriptPrompt: "Use LiteratureReview and open its instructions",
+	});
+	fs.writeFileSync(
+		path.join(camelSteer, "prompt.txt"),
+		"Use LiteratureReview and open its instructions",
+	);
+	assert.throws(
+		() => auditIn(repo, () => auditSession(camelSteer, repo, "skills/literature-review/SKILL.md")),
+		/names the selected skill/,
+	);
 });
 
 test("auditSession fails on missing and unresolvable advertised skills", (t) => {
