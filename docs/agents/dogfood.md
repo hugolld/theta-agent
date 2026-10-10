@@ -8,7 +8,8 @@ From the checkout:
 
 ```sh
 sd=$(mktemp -d)
-git status --porcelain | grep -q . && { echo "working tree dirty — commit first"; exit 1; }
+st=$(git status --porcelain) || { echo "git status failed"; exit 1; }
+[ -n "$st" ] && { echo "working tree dirty — commit first"; exit 1; }
 git rev-parse HEAD > "$sd/pre-head"
 node -p "require('crypto').createHash('sha256').update(require('fs').readFileSync('package.json')).digest('hex')" > "$sd/manifest-sha256"
 pi --version > "$sd/pi-version"
@@ -26,7 +27,6 @@ kill $watchdog 2>/dev/null
 - Close stdin (`< /dev/null`): `pi --print` waits for stdin EOF even with a prompt argument, and a shell that leaves the pipe open hangs the session silently (found in the issue #8 close-out dogfood — 50 minutes, zero output, zero CPU).
 - Gate before launch: a dirty tree refuses the run, and the pre-run HEAD and `package.json` digest are captured into the session dir — the audit fails if either moved afterwards, so evidence cannot be rebound to a different tree.
 - Bound the run: the watchdog sends SIGTERM at 5 minutes — the launcher forwards it to `pi` — and escalates to SIGKILL 15 seconds later if `pi` stalled through it, leaving a `watchdog` sentinel the audit rejects. No coreutils needed.
-- Record the runtime: `pi --version` and `node --version` land in the session dir and the attestation names them, so evidence says what it ran on.
 - Record the runtime: `pi --version` and `node --version` land in the session dir and the attestation names them, so evidence says what it ran on.
 - Run inside an isolated `--session-dir`: the fresh temp dir holds exactly this run's transcript, so the audit below can never pick up another session (a newest-by-mtime lookup races every other pi session on the machine).
 - Keep the prompt neutral: a prompt that names a skill adds nothing, and a neutral one keeps the spot-check honest.
@@ -147,7 +147,8 @@ The spot-check is a second full one-shot in its own session dir, prompted with a
 
 ```sh
 sd2=$(mktemp -d)
-git status --porcelain | grep -q . && { echo "working tree dirty — commit first"; exit 1; }
+st=$(git status --porcelain) || { echo "git status failed"; exit 1; }
+[ -n "$st" ] && { echo "working tree dirty — commit first"; exit 1; }
 git rev-parse HEAD > "$sd2/pre-head"
 node -p "require('crypto').createHash('sha256').update(require('fs').readFileSync('package.json')).digest('hex')" > "$sd2/manifest-sha256"
 pi --version > "$sd2/pi-version"
