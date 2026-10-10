@@ -90,6 +90,36 @@ export function auditSession(dir, root, skill) {
 	if (files.length !== 1) {
 		throw new Error(`expected exactly 1 session file, found ${files.length}`);
 	}
+	if (fs.existsSync(`${dir}/watchdog`)) {
+		throw new Error("watchdog fired: run exceeded 300s");
+	}
+	let bootExit;
+	let bootErr;
+	let piVersion;
+	let nodeVersion;
+	try {
+		bootExit = fs.readFileSync(`${dir}/exit-status`, "utf8").trim();
+		bootErr = fs.readFileSync(`${dir}/stderr.txt`).length;
+		piVersion = fs.readFileSync(`${dir}/pi-version`, "utf8").trim().replace(/^v/, "");
+		nodeVersion = fs
+			.readFileSync(`${dir}/node-version`, "utf8")
+			.trim()
+			.replace(/^v/, "");
+		fs.readFileSync(`${dir}/prompt.txt`, "utf8");
+	} catch {
+		throw new Error(
+			"missing process-evidence files (exit-status, stderr.txt, pi-version, node-version, prompt.txt)",
+		);
+	}
+	if (!ge(piVersion, "0.99")) {
+		throw new Error(`pi ${piVersion} is below the supported 0.99 floor`);
+	}
+	if (!ge(nodeVersion, "22")) {
+		throw new Error(`node ${nodeVersion} is below the supported 22 floor`);
+	}
+	if (bootExit !== "0" || bootErr !== 0) {
+		throw new Error(`boot not clean: exit ${bootExit}, stderr ${bootErr} bytes`);
+	}
 	const text = fs.readFileSync(`${dir}/${files[0]}`, "utf8");
 	const lines = text.trim().split("\n").filter(Boolean);
 	const recs = lines.map((l) => {
@@ -99,9 +129,6 @@ export function auditSession(dir, root, skill) {
 			throw new Error(`corrupt transcript: ${e.message}`);
 		}
 	});
-	if (fs.existsSync(`${dir}/watchdog`)) {
-		throw new Error("watchdog fired: run exceeded 300s");
-	}
 	const sysRecs = recs.filter((r) => r.message?.role === "system");
 	const skillsRecs = sysRecs.filter(
 		(r) => typeof r.message?.sections?.skills === "string",
@@ -125,32 +152,6 @@ export function auditSession(dir, root, skill) {
 		: (typeof userRec?.message?.content === "string" ? userRec.message.content : null);
 	if (userText !== promptWanted) {
 		throw new Error("prompt mismatch: the session did not run the recorded prompt");
-	}
-	let bootExit;
-	let bootErr;
-	let piVersion;
-	let nodeVersion;
-	try {
-		bootExit = fs.readFileSync(`${dir}/exit-status`, "utf8").trim();
-		bootErr = fs.readFileSync(`${dir}/stderr.txt`).length;
-		piVersion = fs.readFileSync(`${dir}/pi-version`, "utf8").trim().replace(/^v/, "");
-		nodeVersion = fs
-			.readFileSync(`${dir}/node-version`, "utf8")
-			.trim()
-			.replace(/^v/, "");
-	} catch {
-		throw new Error(
-			"missing process-evidence files (exit-status, stderr.txt, pi-version, node-version, prompt.txt)",
-		);
-	}
-	if (!ge(piVersion, "0.99")) {
-		throw new Error(`pi ${piVersion} is below the supported 0.99 floor`);
-	}
-	if (!ge(nodeVersion, "22")) {
-		throw new Error(`node ${nodeVersion} is below the supported 22 floor`);
-	}
-	if (bootExit !== "0" || bootErr !== 0) {
-		throw new Error(`boot not clean: exit ${bootExit}, stderr ${bootErr} bytes`);
 	}
 	const wantModel = fs.readFileSync(`${dir}/expected-model`, "utf8").trim().split(/\s+/);
 	const changes = recs.filter((r) => r.type === "model_change");

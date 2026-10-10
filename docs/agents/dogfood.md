@@ -19,7 +19,7 @@ node --version > "$sd/node-version"
 node bin/theta.mjs --dev --provider zai-coding-cn --model glm-5.3-flash \
   --session-dir "$sd" --print "<prompt>" 2> "$sd/stderr.txt" < /dev/null &
 pid=$!
-( sleep 300 && echo fired > "$sd/watchdog" && kill $pid 2>/dev/null && sleep 15 && kill -9 $pid 2>/dev/null ) & watchdog=$!
+( sleep 300; echo fired > "$sd/watchdog" 2>/dev/null; kill $pid 2>/dev/null; sleep 15; kill -9 $pid 2>/dev/null ) & watchdog=$!
 wait $pid
 echo $? > "$sd/exit-status"
 kill $watchdog 2>/dev/null
@@ -61,7 +61,7 @@ node --version > "$sd2/node-version"
 node bin/theta.mjs --dev --provider zai-coding-cn --model glm-5.3-flash \
   --session-dir "$sd2" --print "<real task routing into the skill>" 2> "$sd2/stderr.txt" < /dev/null &
 pid=$!
-( sleep 300 && echo fired > "$sd2/watchdog" && kill $pid 2>/dev/null && sleep 15 && kill -9 $pid 2>/dev/null ) & watchdog=$!
+( sleep 300; echo fired > "$sd2/watchdog" 2>/dev/null; kill $pid 2>/dev/null; sleep 15; kill -9 $pid 2>/dev/null ) & watchdog=$!
 wait $pid
 echo $? > "$sd2/exit-status"
 kill $watchdog 2>/dev/null
