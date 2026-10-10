@@ -11,6 +11,7 @@ sd=$(mktemp -d)
 st=$(git status --porcelain) || { echo "git status failed"; exit 1; }
 [ -n "$st" ] && { echo "working tree dirty — commit first"; exit 1; }
 git rev-parse HEAD > "$sd/pre-head"
+printf '%s' "<prompt>" > "$sd/prompt.txt"
 node -p "require('crypto').createHash('sha256').update(require('fs').readFileSync('package.json')).digest('hex')" > "$sd/manifest-sha256"
 pi --version > "$sd/pi-version"
 node --version > "$sd/node-version"
@@ -26,7 +27,7 @@ kill $watchdog 2>/dev/null
 - Pass provider and model explicitly: pi's default model can 401 with an invalid bearer token.
 - Close stdin (`< /dev/null`): `pi --print` waits for stdin EOF even with a prompt argument, and a shell that leaves the pipe open hangs the session silently (found in the issue #8 close-out dogfood — 50 minutes, zero output, zero CPU).
 - Gate before launch: a dirty tree refuses the run, and the pre-run HEAD and `package.json` digest are captured into the session dir — the audit fails if either moved afterwards, so evidence cannot be rebound to a different tree.
-- Bound the run: the watchdog sends SIGTERM at 5 minutes — the launcher forwards it to `pi` — and escalates to SIGKILL 15 seconds later if `pi` stalled through it, leaving a `watchdog` sentinel the audit rejects. No coreutils needed.
+- Bound the run: the watchdog sends SIGTERM at 5 minutes — the launcher forwards it to `pi` — and 15 seconds later SIGKILLs the launcher if it still hangs, leaving a `watchdog` sentinel the audit rejects. A `pi` stalled through both signals may keep running detached, but the run fails either way. No coreutils needed.
 - Record the runtime: `pi --version` and `node --version` land in the session dir and the attestation names them, so evidence says what it ran on.
 - Run inside an isolated `--session-dir`: the fresh temp dir holds exactly this run's transcript, so the audit below can never pick up another session (a newest-by-mtime lookup races every other pi session on the machine).
 - Keep the prompt neutral: a prompt that names a skill adds nothing, and a neutral one keeps the spot-check honest.
@@ -55,8 +56,9 @@ node -e '
   try {
     bootExit = fs.readFileSync(dir + "/exit-status", "utf8").trim();
     bootErr = fs.readFileSync(dir + "/stderr.txt").length;
+    fs.readFileSync(dir + "/prompt.txt", "utf8");
   } catch {
-    console.error("missing process-evidence files (exit-status, stderr.txt)");
+    console.error("missing process-evidence files (exit-status, stderr.txt, prompt.txt)");
     process.exit(1);
   }
   if (bootExit !== "0" || bootErr !== 0) {
@@ -76,6 +78,15 @@ node -e '
   const sysRecs = recs.filter(r => r.message?.role === "system");
   if (sysRecs.length !== 1) {
     console.error("expected exactly 1 system record, found " + sysRecs.length);
+    process.exit(1);
+  }
+  const promptWanted = fs.readFileSync(dir + "/prompt.txt", "utf8");
+  const userRec = recs.find(r => r.message?.role === "user");
+  const userText = Array.isArray(userRec?.message?.content)
+    ? userRec.message.content.filter(c => c?.type === "text").map(c => c.text).join("")
+    : userRec?.message?.content;
+  if (userText !== promptWanted) {
+    console.error("prompt mismatch: the session did not run the recorded prompt");
     process.exit(1);
   }
   const skillsText = sysRecs[0].message?.sections?.skills ?? "";
@@ -143,13 +154,14 @@ node -e '
 ' "$sd"
 ```
 
-The spot-check is a second full one-shot in its own session dir, prompted with a real task that routes into the named skill — never a prompt that merely asks about it:
+The spot-check is a second full one-shot in its own session dir, prompted with a real task that routes into the named skill — never a prompt that merely asks about it. The prompt is written into the session dir, and the audit verifies the session ran exactly that prompt, so the routing judgment is made on recorded evidence:
 
 ```sh
 sd2=$(mktemp -d)
 st=$(git status --porcelain) || { echo "git status failed"; exit 1; }
 [ -n "$st" ] && { echo "working tree dirty — commit first"; exit 1; }
 git rev-parse HEAD > "$sd2/pre-head"
+printf '%s' "<real task routing into the skill>" > "$sd2/prompt.txt"
 node -p "require('crypto').createHash('sha256').update(require('fs').readFileSync('package.json')).digest('hex')" > "$sd2/manifest-sha256"
 pi --version > "$sd2/pi-version"
 node --version > "$sd2/node-version"
