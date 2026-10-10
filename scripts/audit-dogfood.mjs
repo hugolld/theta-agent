@@ -316,6 +316,9 @@ export function auditSession(dir, rootArg, skill) {
 		`inventory ${sha("test/expected-skills.json")}`;
 	if (skill !== undefined) {
 		const target = resolveAdvertisedSkill(root, skill, expected);
+		// The skill bytes as they exist at audit time (after the clean-tree
+		// gate): the paired read result must contain exactly these contents.
+		const skillBytes = fs.readFileSync(target, "utf8").replace(/\n$/, "");
 		const calls = [];
 		const results = new Map();
 		for (const r of recs) {
@@ -328,7 +331,10 @@ export function auditSession(dir, rootArg, skill) {
 		// pi may advertise and read lexical paths through symlinked resources;
 		// canonicalize the read path first, so a lexical path through a
 		// symlinked checkout still matches, then compare canonically — an
-		// unresolvable or external path cannot vouch for the target.
+		// unresolvable or external path cannot vouch for the target. A partial
+		// read (offset/limit) proves ingestion of a fragment, not the skill,
+		// and the recorded result text must equal the current file contents —
+		// a lying model cannot otherwise produce the file's bytes.
 		const hit = calls.some((t) => {
 			const r = results.get(t.id);
 			if (
@@ -337,16 +343,25 @@ export function auditSession(dir, rootArg, skill) {
 					r &&
 					r.toolName === "read" &&
 					r.isError === false &&
-					t.arguments?.path
+					t.arguments?.path &&
+					t.arguments.offset === undefined &&
+					t.arguments.limit === undefined
 				)
 			) {
 				return false;
 			}
 			try {
-				return fs.realpathSync(t.arguments.path) === target;
+				if (fs.realpathSync(t.arguments.path) !== target) return false;
 			} catch {
 				return false;
 			}
+			const resultText = Array.isArray(r.content)
+				? r.content
+						.filter((c) => c?.type === "text")
+						.map((c) => c.text)
+						.join("")
+				: (typeof r.content === "string" ? r.content : "");
+			return resultText.replace(/\n$/, "") === skillBytes;
 		});
 		if (!hit) {
 			throw new Error("NOT used");

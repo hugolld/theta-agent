@@ -206,6 +206,8 @@ function buildSession(t, repo, overrides = {}) {
 	];
 	if (overrides.toolResultIsError !== undefined) {
 		const target = `${repo}/skills/literature-review/SKILL.md`;
+		const callArguments = { path: target };
+		if (overrides.partialRead) callArguments.limit = 1;
 		records.push(
 			JSON.stringify({
 				type: "message",
@@ -216,7 +218,7 @@ function buildSession(t, repo, overrides = {}) {
 							type: "toolCall",
 							id: "call_test",
 							name: "read",
-							arguments: { path: target },
+							arguments: callArguments,
 						},
 					],
 				},
@@ -230,7 +232,12 @@ function buildSession(t, repo, overrides = {}) {
 					toolCallId: "call_test",
 					toolName: overrides.toolName ?? "read",
 					isError: overrides.toolResultIsError,
-					content: [{ type: "text", text: "skill content\n" }],
+					content: [
+						{
+							type: "text",
+							text: overrides.resultText ?? "skill content\n",
+						},
+					],
 				},
 			}),
 		);
@@ -291,6 +298,22 @@ test("auditSession attests skill use when paired and errors otherwise", (t) => {
 	const bad = buildSession(t, repo, { toolResultIsError: true });
 	assert.throws(
 		() => auditIn(repo, () => auditSession(bad, repo, "skills/literature-review/SKILL.md")),
+		/NOT used/,
+	);
+	const partial = buildSession(t, repo, {
+		toolResultIsError: false,
+		partialRead: true,
+	});
+	assert.throws(
+		() => auditIn(repo, () => auditSession(partial, repo, "skills/literature-review/SKILL.md")),
+		/NOT used/,
+	);
+	const fabricated = buildSession(t, repo, {
+		toolResultIsError: false,
+		resultText: "fabricated content\n",
+	});
+	assert.throws(
+		() => auditIn(repo, () => auditSession(fabricated, repo, "skills/literature-review/SKILL.md")),
 		/NOT used/,
 	);
 	const wrongTool = buildSession(t, repo, {

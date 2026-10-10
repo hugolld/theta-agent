@@ -46,20 +46,20 @@ The auditor is a tested repository script, `scripts/audit-dogfood.mjs` (unit tes
 node scripts/audit-dogfood.mjs "$sd"
 ```
 
-The spot-check is a second full one-shot in its own session dir, prompted with a real task that routes into the named skill — never a prompt that merely asks about it. The prompt is written into the session dir, and the audit verifies the session ran exactly that prompt, so the routing judgment is made on recorded evidence:
+The spot-check is a second full one-shot in its own session dir, prompted with a real task that routes through the named skill and reads the skill's **full** SKILL.md — never a prompt that merely asks about it, and never one that invites a partial read. The prompt is written into the session dir, and the audit verifies the session ran exactly that prompt, so the routing judgment is made on recorded evidence:
 
 ```sh
 sd2=$(mktemp -d)
 st=$(git status --porcelain --untracked-files=all) || { echo "git status failed"; exit 1; }
 [ -n "$st" ] && { echo "working tree dirty — commit first"; exit 1; }
 git rev-parse HEAD > "$sd2/pre-head"
-printf '%s' "<real task routing into the skill>" > "$sd2/prompt.txt"
+printf '%s' "<real task routing into the skill, reading its full SKILL.md>" > "$sd2/prompt.txt"
 printf '%s\n' "zai-coding-cn glm-5.3-flash" > "$sd2/expected-model"
 node -p "require('crypto').createHash('sha256').update(require('fs').readFileSync('package.json')).digest('hex')" > "$sd2/manifest-sha256"
 pi --version > "$sd2/pi-version"
 node --version > "$sd2/node-version"
 node bin/theta.mjs --dev --provider zai-coding-cn --model glm-5.3-flash \
-  --session-dir "$sd2" --print "<real task routing into the skill>" 2> "$sd2/stderr.txt" < /dev/null &
+  --session-dir "$sd2" --print "<real task routing into the skill, reading its full SKILL.md>" 2> "$sd2/stderr.txt" < /dev/null &
 pid=$!
 ( sleep 300; echo fired > "$sd2/watchdog" 2>/dev/null; kill $pid 2>/dev/null; sleep 15; kill -9 $pid 2>/dev/null ) & watchdog=$!
 wait $pid
@@ -67,7 +67,7 @@ echo $? > "$sd2/exit-status"
 kill $watchdog 2>/dev/null
 ```
 
-Audit `$sd2` with the same one command, passing the skill path as a second argument — one invocation runs every check above on that session and then, only if all of them passed, requires a read of the skill's `SKILL.md` from this checkout against the same in-memory transcript: a `read` tool call whose path argument equals the checkout's copy exactly, paired by `toolCallId` with a `toolResult` that reports no error. The skill argument must resolve to an advertised checkout SKILL.md — traversal or any non-skill path is rejected. Path mentions in `bash` commands, writes, prose, or thinking are not use. Nothing can slip between the checks — one auditor, one attestation.
+Audit `$sd2` with the same one command, passing the skill path as a second argument — one invocation runs every check above on that session and then, only if all of them passed, requires a read of the skill's `SKILL.md` from this checkout against the same in-memory transcript: a `read` tool call whose path argument equals the checkout's copy exactly, with no `offset` or `limit` (a fragment proves ingestion of a fragment, not the skill), paired by `toolCallId` with a `toolResult` whose text equals the current file contents. The skill argument must resolve to an advertised checkout SKILL.md — traversal or any non-skill path is rejected. Path mentions in `bash` commands, writes, prose, or thinking are not use. Nothing can slip between the checks — one auditor, one attestation.
 
 ```sh
 node scripts/audit-dogfood.mjs "$sd2" "skills/literature-review/SKILL.md"
