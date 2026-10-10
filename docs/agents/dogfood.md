@@ -17,7 +17,7 @@ node --version > "$sd/node-version"
 node bin/theta.mjs --dev --provider zai-coding-cn --model glm-5.3-flash \
   --session-dir "$sd" --print "<prompt>" 2> "$sd/stderr.txt" < /dev/null &
 pid=$!
-( sleep 300 && kill $pid 2>/dev/null && sleep 15 && kill -9 $pid 2>/dev/null && echo fired > "$sd/watchdog" ) & watchdog=$!
+( sleep 300 && echo fired > "$sd/watchdog" && kill $pid 2>/dev/null && sleep 15 && kill -9 $pid 2>/dev/null ) & watchdog=$!
 wait $pid
 echo $? > "$sd/exit-status"
 kill $watchdog 2>/dev/null
@@ -36,7 +36,7 @@ kill $watchdog 2>/dev/null
 
 The pi session transcript is the record. Pi advertises the skill library in the session's system records — assert against those records only. Grepping the whole file proves nothing: the user prompt and tool activity can carry a skill name into a session where nothing was advertised.
 
-The oracle is the checked-in `test/expected-skills.json` inventory, not the `skills/` tree, so a dirty checkout cannot shrink the expectation silently. The check runs both ways: every inventory skill must be advertised, and no **extra** checkout skill may appear — a dirty `package.json` that adds a skill source cannot slip in. The audit reads only the `skills` section of the single system record (`message.sections.skills` — the field pi maintains; a one-shot session has exactly one system record, and any other count fails loudly) — host skills and project context share the system prompt, so raw text elsewhere in it can vouch for nothing. Locations are XML-decoded (including `&apos;`) and compared exactly. Every transcript line must parse — a corrupt or truncated file fails loudly instead of quietly shrinking the evidence. The same audit re-verifies the boot-clean process files: a non-zero `exit-status`, a non-empty `stderr.txt`, or missing files fails before the transcript is even parsed. The whole working tree must be clean (clear scratch venvs and `__pycache__` first, below) — runtime inputs included — so the cited HEAD is what was audited. On success it prints a full attestation: the Git HEAD, SHA-256 digests of the transcript and both process files, the recorded pi and node versions, and the audited inventory digest — the evidence names exactly what it attests; keep that output with the run's record. Printed output on failure, or any non-zero exit, fails the criterion. The root comes from `fs.realpathSync`, so a symlinked checkout still matches the advertised paths.
+The oracle is the checked-in `test/expected-skills.json` inventory, not the `skills/` tree, so a dirty checkout cannot shrink the expectation silently. The check runs both ways: every inventory skill must be advertised, and no **extra** checkout skill may appear — a dirty `package.json` that adds a skill source cannot slip in. The audit reads only the `skills` section of the single system record (`message.sections.skills` — the field pi maintains; a one-shot session has exactly one system record, and any other count fails loudly) — host skills and project context share the system prompt, so raw text elsewhere in it can vouch for nothing. Locations are XML-decoded (including `&apos;`) and compared exactly. Every transcript line must parse — a corrupt or truncated file fails loudly instead of quietly shrinking the evidence. The same audit re-verifies the boot-clean process files: a non-zero `exit-status`, a non-empty `stderr.txt`, or missing files fails before the transcript is even parsed. The tracked working tree must be clean at pre-launch and audit time (clear scratch venvs and `__pycache__` first, below), so the cited HEAD is what was audited. On success it prints a full attestation: the Git HEAD, SHA-256 digests of the transcript and both process files, the recorded pi and node versions, and the audited inventory digest — the evidence names exactly what it attests; keep that output with the run's record. Printed output on failure, or any non-zero exit, fails the criterion. The root comes from `fs.realpathSync`, so a symlinked checkout still matches the advertised paths.
 
 ```sh
 node -e '
@@ -156,7 +156,7 @@ node --version > "$sd2/node-version"
 node bin/theta.mjs --dev --provider zai-coding-cn --model glm-5.3-flash \
   --session-dir "$sd2" --print "<real task routing into the skill>" 2> "$sd2/stderr.txt" < /dev/null &
 pid=$!
-( sleep 300 && kill $pid 2>/dev/null && sleep 15 && kill -9 $pid 2>/dev/null && echo fired > "$sd2/watchdog" ) & watchdog=$!
+( sleep 300 && echo fired > "$sd2/watchdog" && kill $pid 2>/dev/null && sleep 15 && kill -9 $pid 2>/dev/null ) & watchdog=$!
 wait $pid
 echo $? > "$sd2/exit-status"
 kill $watchdog 2>/dev/null
