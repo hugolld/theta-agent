@@ -184,6 +184,12 @@ export function auditSession(dir, rootArg, skill) {
 			throw new Error(`corrupt transcript: ${e.message}`);
 		}
 	});
+	const sessionRecs = recs.filter((r) => r.type === "session");
+	if (sessionRecs.length !== 1) {
+		throw new Error(
+			`expected exactly 1 session record, found ${sessionRecs.length}`,
+		);
+	}
 	const sysRecs = recs.filter((r) => r.message?.role === "system");
 	// Count records that carry a skills section at all — a later null patch
 	// removes the advertisement and must fail loudly, not pass silently.
@@ -231,10 +237,13 @@ export function auditSession(dir, rootArg, skill) {
 	const inv = JSON.parse(fs.readFileSync("test/expected-skills.json", "utf8"));
 	const skillRoot = manifestSkillRoot(root);
 	const names = inv.vendored.map((e) => e.name).concat(inv["self-authored"]);
-	// Advertisement identity is the name/location pair: pi may advertise
-	// lexical paths through symlinked resources, so each advertised location
-	// is canonicalized before comparison. An advertised location that does
-	// not resolve on disk is an inconsistency and fails the audit.
+	// Advertisement identity is the name/location pair: an inventory skill
+	// must be advertised at its own checkout location (lexical containment
+	// under the manifest skill root) — canonicalization is an additional
+	// containment check, not a substitute, so a host alias cannot impersonate
+	// a checkout skill. Canonicalization also rejects locations that do not
+	// resolve on disk.
+	const inventoryNames = new Set(names);
 	const canonical = new Map();
 	for (const rec of advertisements) {
 		if (canonical.has(rec.name)) {
@@ -245,6 +254,22 @@ export function auditSession(dir, rootArg, skill) {
 		} catch {
 			throw new Error(
 				`advertised location does not resolve on disk: ${rec.location}`,
+			);
+		}
+		if (
+			inventoryNames.has(rec.name) &&
+			!fs.realpathSync(rec.location).startsWith(skillRoot + path.sep)
+		) {
+			throw new Error(
+				`inventory skill ${rec.name} advertised from outside the checkout: ${rec.location}`,
+			);
+		}
+		if (
+			!inventoryNames.has(rec.name) &&
+			canonical.get(rec.name).startsWith(root + path.sep)
+		) {
+			throw new Error(
+				`host skill ${rec.name} resolves inside the checkout: ${rec.location}`,
 			);
 		}
 	}

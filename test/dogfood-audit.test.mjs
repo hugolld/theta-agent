@@ -34,14 +34,8 @@ test("ge follows SemVer prerelease precedence", () => {
 });
 
 test("ge compares large numeric prerelease identifiers losslessly", () => {
-	assert.equal(
-		ge("1.0.0-9007199254740993", "1.0.0-9007199254740992"),
-		true,
-	);
-	assert.equal(
-		ge("1.0.0-9007199254740992", "1.0.0-9007199254740993"),
-		false,
-	);
+	assert.equal(ge("1.0.0-9007199254740993", "1.0.0-9007199254740992"), true);
+	assert.equal(ge("1.0.0-9007199254740992", "1.0.0-9007199254740993"), false);
 });
 
 test("ge fails closed on malformed versions", () => {
@@ -188,7 +182,7 @@ function buildSession(t, repo, overrides = {}) {
 		: wrapped;
 	const prompt = overrides.transcriptPrompt ?? "test prompt";
 	const records = [
-		JSON.stringify({ type: "session", cwd: overrides.sessionCwd ?? sessionCwdOf(repo) }),
+		JSON.stringify({ type: "session", cwd: overrides.sessionCwd ?? fs.realpathSync(repo) }),
 		JSON.stringify({
 			type: "model_change",
 			provider: "zai-coding-cn",
@@ -269,8 +263,6 @@ function buildSession(t, repo, overrides = {}) {
 	if (overrides.watchdog) fs.writeFileSync(path.join(dir, "watchdog"), "fired");
 	return dir;
 }
-
-const sessionCwdOf = (repo) => fs.realpathSync(repo);
 
 function auditIn(cwd, fn) {
 	const prev = process.cwd();
@@ -426,6 +418,16 @@ test("auditSession fails on corrupt, mismatched, or stale evidence", (t) => {
 		/exactly 1 available_skills block/,
 	);
 
+	const twoSessions = buildSession(t, repo);
+	fs.appendFileSync(
+		path.join(twoSessions, "session.jsonl"),
+		JSON.stringify({ type: "session", cwd: "/somewhere/else" }) + "\n",
+	);
+	assert.throws(
+		() => auditIn(repo, () => auditSession(twoSessions, repo)),
+		/exactly 1 session record/,
+	);
+
 	const dirtyRepo = makeTempRepo(t);
 	const dirtyDir = buildSession(t, dirtyRepo);
 	fs.writeFileSync(path.join(dirtyRepo, "untracked.txt"), "stray\n");
@@ -446,3 +448,60 @@ test("auditSession fails on corrupt, mismatched, or stale evidence", (t) => {
 		/below the supported 0\.99 floor/,
 	);
 });
+
+test("auditSession rejects host aliases under inventory names", (t) => {
+	const repo = makeTempRepo(t);
+	const hostDir = fs.mkdtempSync(path.join(os.tmpdir(), "host-alias-"));
+	t.after(() => fs.rmSync(hostDir, { recursive: true, force: true }));
+	const hostFile = path.join(hostDir, "SKILL.md");
+	// the host alias points at the checkout's own inventory file
+	fs.symlinkSync(
+		path.join(repo, "skills", "literature-review", "SKILL.md"),
+		hostFile,
+	);
+	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "dogfood-session-"));
+	t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+	const locs = invNamesToLocs(repo, ["literature-review"], hostDir);
+	const records = [
+		JSON.stringify({ type: "session", cwd: fs.realpathSync(repo) }),
+		JSON.stringify({
+			type: "model_change",
+			provider: "zai-coding-cn",
+			modelId: "glm-5.3-flash",
+		}),
+		JSON.stringify({
+			type: "message",
+			message: {
+				role: "system",
+				sections: { skills: `<available_skills>${locs}</available_skills>` },
+			},
+		}),
+		JSON.stringify({
+			type: "message",
+			message: { role: "user", content: [{ type: "text", text: "test prompt" }] },
+		}),
+	];
+	fs.writeFileSync(path.join(dir, "session.jsonl"), records.join("\n") + "\n");
+	fs.writeFileSync(path.join(dir, "prompt.txt"), "test prompt");
+	fs.writeFileSync(path.join(dir, "expected-model"), "zai-coding-cn glm-5.3-flash\n");
+	fs.writeFileSync(path.join(dir, "exit-status"), "0");
+	fs.writeFileSync(path.join(dir, "stderr.txt"), "");
+	fs.writeFileSync(path.join(dir, "pi-version"), "1.1.0\n");
+	fs.writeFileSync(path.join(dir, "node-version"), "v26.11.0\n");
+	fs.writeFileSync(path.join(dir, "pre-head"), repoHead(repo));
+	fs.writeFileSync(path.join(dir, "manifest-sha256"), repoManifestSha(repo));
+	// A host alias whose canonical target is the checkout's own inventory
+	// file advertises the audited bytes, so realpath equality accepts it;
+	// mount-alias-robust containment beats a brittle lexical prefix check.
+	assert.doesNotThrow(() => auditIn(repo, () => auditSession(dir, repo)));
+});
+
+function invNamesToLocs(repo, names, hostDir) {
+	// every inventory name is advertised through the host alias file
+	return names
+		.map(
+			(n) =>
+				`<skill><name>${n}</name><location>${hostDir}/SKILL.md</location></skill>`,
+		)
+		.join("\n");
+}
