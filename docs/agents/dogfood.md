@@ -10,15 +10,16 @@ From the checkout:
 sd=$(mktemp -d)
 node bin/theta.mjs --dev --provider zai-coding-cn --model glm-5.3-flash \
   --session-dir "$sd" --print "<prompt>" 2> "$sd/stderr.txt" < /dev/null
-echo $?                  # boot-clean: 0
-wc -c < "$sd/stderr.txt" # boot-clean: 0
+echo $? > "$sd/exit-status"
+wc -c < "$sd/stderr.txt" # boot-clean also needs this to be 0
+cat "$sd/exit-status"    # boot-clean needs this to be 0
 ```
 
 - Pass provider and model explicitly: pi's default model can 401 with an invalid bearer token.
 - Close stdin (`< /dev/null`): `pi --print` waits for stdin EOF even with a prompt argument, and a shell that leaves the pipe open hangs the session silently (found in the issue #8 close-out dogfood — 50 minutes, zero output, zero CPU).
 - Run inside an isolated `--session-dir`: the fresh temp dir holds exactly this run's transcript, so the audit below can never pick up another session (a newest-by-mtime lookup races every other pi session on the machine).
 - Keep the prompt neutral: a prompt that names a skill adds nothing, and a neutral one keeps the spot-check honest.
-- Boot-clean is process evidence: exit status 0 and a 0-byte `stderr.txt`, captured in the run and kept next to the transcript it gates.
+- Boot-clean is process evidence: `exit-status` must hold 0 and `stderr.txt` must be 0 bytes. Both persist in the session dir next to the transcript, so a later audit can re-verify them.
 
 ## Ground-truth the evidence
 

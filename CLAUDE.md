@@ -21,7 +21,7 @@ Current state: 0.0.2 — the M1 launcher (stage A of T9, PR #1) is merged: a thi
 - When a change supersedes text in a steering doc (`CLAUDE.md`, `GLOSSARY.md`, `docs/adr/`), the same strike edits that text.
 - `.npmrc` pins the official registry (the machine default is npmmirror).
 - No build step; tests use Node's built-in node:test runner (pi loads extension TS via jiti). Verify changes with `npm test`, `npm run lint`, and `npm run typecheck`; check shipped files with `npm pack --dry-run`.
-- Dogfood acceptance criteria are met on pi session-transcript evidence, never the model's self-report. Procedure: `docs/agents/dogfood.md`.
+- Dogfood acceptance criteria are met on captured evidence — session transcripts for the skill criteria, recorded exit status and stderr for clean boot — never the model's self-report. Procedure: `docs/agents/dogfood.md`.
 
 ## Git workflow — one "coding strike" per task
 

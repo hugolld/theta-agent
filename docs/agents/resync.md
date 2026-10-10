@@ -15,4 +15,4 @@ ADR 0001 sets the policy: re-syncs happen at milestone boundaries, driven by ups
 5. Recompute `tree-sha256` for every changed tree in `test/expected-skills.json`. The algorithm is `treeDigest` in `test/skills-library.test.mjs`; replicate it exactly — any mismatch fails CI loudly.
 6. Update the README "Vendored skills" list and its release/commit line. Then sweep prose count claims elsewhere — the README Status paragraph, CLAUDE.md's current-state text — so no hard count drifts.
 7. Pin the release in a comment on the parent spec issue; record skip decisions there, with reasons.
-8. Full battery: `npm test`, `npm run lint`, `npm run typecheck`, `npm pack --dry-run`; live dogfood per `docs/agents/dogfood.md` with transcript evidence.
+8. Full battery: `npm test`, `npm run lint`, `npm run typecheck`, `npm pack --dry-run`; live dogfood per `docs/agents/dogfood.md` with the transcript and process evidence that recipe captures.
