@@ -400,7 +400,8 @@ export function auditSession(dir, rootArg, skill) {
 		`node ${nodeVersion}\n` +
 		`provider ${wantModel[0]}\n` +
 		`model ${wantModel[1]}\n` +
-		`inventory ${shaText(inventoryText)}`;
+		`inventory ${shaText(inventoryText)}\n` +
+		`prompt ${shaText(promptWanted)}`;
 	if (skill !== undefined) {
 		const target = resolveAdvertisedSkill(root, skill, expected);
 		// The skill bytes are read exactly once: the paired read result must

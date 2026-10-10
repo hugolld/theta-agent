@@ -1,6 +1,6 @@
 # Dogfooding theta
 
-`theta --dev` boots pi with this package preloaded from a local checkout. The skill-list and skill-opened criteria are accepted on **operator-attested structural evidence**: recorded transcript and process artifacts whose internal consistency the auditor checks — never on the model's self-report alone. A model asked "is skill X available?" can answer confidently from files it merely sees on disk. The tracer PR (#9) recorded a met criterion that way; PR #10 found the skills were not loading at all. Clean boot is different: it is **process evidence** — exit status and stderr, captured at run time (see the recipe below), because no transcript can reconstruct them. One trust boundary to state plainly: the session directory is operator-supplied and writable by the running model. The auditor checks the structural consistency of the recorded session against the tree, and the operator vouches for capture. It does not defend against a model or skill script that deliberately tampers with the session artifacts — containing that would require a parent-controlled supervisor, which this recipe intentionally is not.
+`theta --dev` boots pi with this package preloaded from a local checkout. The skill-list and skill-opened criteria are accepted on **operator-attested structural evidence**: recorded transcript and process artifacts whose internal consistency the auditor checks — never on the model's self-report alone. A model asked "is skill X available?" can answer confidently from files it merely sees on disk. The tracer PR (#9) recorded a met criterion that way; PR #10 found the skills were not loading at all. Clean boot is different: it is **process evidence** — exit status and stderr, captured at run time (see the recipe below), because no transcript can reconstruct them. One trust boundary to state plainly: the session directory is operator-supplied and writable by the running model. The auditor checks the structural consistency of the recorded session against the tree, and the operator vouches for both capture and prompt quality — the neutrality of a routed task is a human judgment the gate cannot mechanically prove. The gate does not defend against a model or skill script that deliberately tampers with the session artifacts — containing that would require a parent-controlled supervisor, which this recipe intentionally is not.
 
 ## Run a one-shot session
 
@@ -73,7 +73,7 @@ Audit `$sd2` with the same one command, passing the skill path as a second argum
 node scripts/audit-dogfood.mjs "$sd2" "skills/literature-review/SKILL.md"
 ```
 
-On success the attestation carries every `clean` line plus `selected-file-opened` with the resolved skill path and the SKILL.md content digest; keep it with the run's record.
+On success the attestation carries every `clean` line plus `selected-file-opened` with the resolved skill path and the SKILL.md content digest — and the recorded prompt's digest, so the routed task itself is part of the durable record; keep it with the run's record.
 
 ## Clean up after
 
