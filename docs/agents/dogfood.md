@@ -7,12 +7,15 @@
 From the checkout:
 
 ```sh
+sd=$(mktemp -d)
 node bin/theta.mjs --dev --provider zai-coding-cn --model glm-5.3-flash \
-  --print "<prompt>" < /dev/null
+  --session-dir "$sd" --print "<prompt>" < /dev/null
 ```
 
 - Pass provider and model explicitly: pi's default model can 401 with an invalid bearer token.
 - Close stdin (`< /dev/null`): `pi --print` waits for stdin EOF even with a prompt argument, and a shell that leaves the pipe open hangs the session silently (found in the issue #8 close-out dogfood — 50 minutes, zero output, zero CPU).
+- Run inside an isolated `--session-dir`: the fresh temp dir holds exactly this run's transcript, so the audit below can never pick up another session (a newest-by-mtime lookup races every other pi session on the machine).
+- Keep the prompt neutral: a prompt that names a skill adds nothing, and a neutral one keeps the spot-check honest.
 - Boot-clean evidence is exit 0 with empty stderr.
 
 ## Ground-truth the evidence
@@ -20,13 +23,13 @@ node bin/theta.mjs --dev --provider zai-coding-cn --model glm-5.3-flash \
 The pi session transcript is the record. Pi advertises the skill library in the session's system record — grep inside that record only. Grepping the whole file proves nothing: the user prompt and tool activity can carry a skill name into a session where nothing was advertised.
 
 ```sh
-f=$(ls -t ~/.pi/agent/sessions/*/*.jsonl | head -1)  # capture the moment the run returns
-grep -m1 '"role":"system"' "$f" | grep -c "skills/paper-lookup"   # 1 iff pi advertised it
+f=$(ls "$sd"/*.jsonl | head -1)
+for d in skills/*/; do
+  grep -m1 '"role":"system"' "$f" | grep -q "$PWD/${d}SKILL.md" || echo "NOT advertised: $d"
+done
 ```
 
-- Capture the session file the moment the run returns: `ls -t` picks the newest across **all** pi sessions on the machine, and any later session would win.
-- Match the skill's path (`skills/<name>`), not the bare name, and assert every library name, each ≥1 — the issue #8 close-out run confirmed all 20 paths appear in the system record.
-- Keep the prompt neutral for the advertisement check: a prompt that names a skill adds nothing, and a neutral one keeps the spot-check honest too.
+Each line anchors the skill's absolute path in this `--dev` checkout (`$PWD/skills/<name>/SKILL.md`), so the evidence ties to this checkout and not to an installed copy. The expected set comes from `skills/*/` at run time, so it cannot go stale. Silence means every skill was advertised.
 
 For a spot-check, prompt a real task that routes into the named skill, then confirm in the transcript that the skill's files or scripts were actually used — grep for the skill's path or a script name. A reply that merely describes the skill is not evidence.
 

@@ -50,6 +50,9 @@ Linux first, Windows later.
 pi install npm:theta-agent
 ```
 
+Not yet live: the registry still serves the 0.0.1 name reservation. The
+commands on this page work from 0.0.2.
+
 ## Try it
 
 theta rides on the [pi](https://pi.dev) coding agent, and pi is a peer
@@ -62,7 +65,8 @@ npm i -g theta-agent
 theta
 ```
 
-That launches pi with the Theta package preloaded. `theta --dev` loads Theta from a local checkout — either the launcher's own repo, or the directory you name with `$THETA_DEV_ROOT` (theta never loads an arbitrary current directory this way). Theta targets pi ≥ 0.99; if `theta` reports `pi not found`, install pi with the command above and retry.
+Works from 0.0.2 — the registry still serves the 0.0.1 name reservation
+until the owner publishes. That launches pi with the Theta package preloaded. `theta --dev` loads Theta from a local checkout — either the launcher's own repo, or the directory you name with `$THETA_DEV_ROOT` (theta never loads an arbitrary current directory this way). Theta targets pi ≥ 0.99; if `theta` reports `pi not found`, install pi with the command above and retry.
 
 ## Vendored skills
 
