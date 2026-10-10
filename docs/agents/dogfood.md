@@ -8,12 +8,15 @@ From the checkout:
 
 ```sh
 sd=$(mktemp -d)
+git status --porcelain | grep -q . && { echo "working tree dirty — commit first"; exit 1; }
+git rev-parse HEAD > "$sd/pre-head"
+node -p "require('crypto').createHash('sha256').update(require('fs').readFileSync('package.json')).digest('hex')" > "$sd/manifest-sha256"
 pi --version > "$sd/pi-version"
 node --version > "$sd/node-version"
 node bin/theta.mjs --dev --provider zai-coding-cn --model glm-5.3-flash \
   --session-dir "$sd" --print "<prompt>" 2> "$sd/stderr.txt" < /dev/null &
 pid=$!
-( sleep 300 && kill $pid 2>/dev/null ) & watchdog=$!
+( sleep 300 && kill $pid 2>/dev/null && sleep 15 && kill -9 $pid 2>/dev/null && echo fired > "$sd/watchdog" ) & watchdog=$!
 wait $pid
 echo $? > "$sd/exit-status"
 kill $watchdog 2>/dev/null
@@ -21,7 +24,9 @@ kill $watchdog 2>/dev/null
 
 - Pass provider and model explicitly: pi's default model can 401 with an invalid bearer token.
 - Close stdin (`< /dev/null`): `pi --print` waits for stdin EOF even with a prompt argument, and a shell that leaves the pipe open hangs the session silently (found in the issue #8 close-out dogfood — 50 minutes, zero output, zero CPU).
-- Bound the run: the watchdog kills a stalled session at 5 minutes (status 143 fails the audit) — no coreutils needed. The launcher forwards SIGTERM to its `pi` child; do not switch it to `kill -9`, which would orphan `pi` mid-stall.
+- Gate before launch: a dirty tree refuses the run, and the pre-run HEAD and `package.json` digest are captured into the session dir — the audit fails if either moved afterwards, so evidence cannot be rebound to a different tree.
+- Bound the run: the watchdog sends SIGTERM at 5 minutes — the launcher forwards it to `pi` — and escalates to SIGKILL 15 seconds later if `pi` stalled through it, leaving a `watchdog` sentinel the audit rejects. No coreutils needed.
+- Record the runtime: `pi --version` and `node --version` land in the session dir and the attestation names them, so evidence says what it ran on.
 - Record the runtime: `pi --version` and `node --version` land in the session dir and the attestation names them, so evidence says what it ran on.
 - Run inside an isolated `--session-dir`: the fresh temp dir holds exactly this run's transcript, so the audit below can never pick up another session (a newest-by-mtime lookup races every other pi session on the machine).
 - Keep the prompt neutral: a prompt that names a skill adds nothing, and a neutral one keeps the spot-check honest.
@@ -64,6 +69,10 @@ node -e '
       process.exit(1);
     }
   });
+  if (fs.existsSync(dir + "/watchdog")) {
+    console.error("watchdog fired: run exceeded 300s");
+    process.exit(1);
+  }
   const sysRecs = recs.filter(r => r.message?.role === "system");
   if (sysRecs.length !== 1) {
     console.error("expected exactly 1 system record, found " + sysRecs.length);
@@ -109,6 +118,18 @@ node -e '
     process.exit(1);
   }
   const head = execSync("git rev-parse HEAD").toString().trim();
+  const preHead = fs.readFileSync(dir + "/pre-head", "utf8").trim();
+  if (head !== preHead) {
+    console.error("HEAD moved since the run: " + preHead + " -> " + head);
+    process.exit(1);
+  }
+  const manifestSha = fs.readFileSync(dir + "/manifest-sha256", "utf8").trim();
+  const curManifest = crypto.createHash("sha256")
+    .update(fs.readFileSync("package.json")).digest("hex");
+  if (curManifest !== manifestSha) {
+    console.error("package.json changed since the run");
+    process.exit(1);
+  }
   const sha = p =>
     crypto.createHash("sha256").update(fs.readFileSync(p)).digest("hex");
   console.log("clean " + head +
@@ -126,12 +147,15 @@ The spot-check is a second full one-shot in its own session dir, prompted with a
 
 ```sh
 sd2=$(mktemp -d)
+git status --porcelain | grep -q . && { echo "working tree dirty — commit first"; exit 1; }
+git rev-parse HEAD > "$sd2/pre-head"
+node -p "require('crypto').createHash('sha256').update(require('fs').readFileSync('package.json')).digest('hex')" > "$sd2/manifest-sha256"
 pi --version > "$sd2/pi-version"
 node --version > "$sd2/node-version"
 node bin/theta.mjs --dev --provider zai-coding-cn --model glm-5.3-flash \
   --session-dir "$sd2" --print "<real task routing into the skill>" 2> "$sd2/stderr.txt" < /dev/null &
 pid=$!
-( sleep 300 && kill $pid 2>/dev/null ) & watchdog=$!
+( sleep 300 && kill $pid 2>/dev/null && sleep 15 && kill -9 $pid 2>/dev/null && echo fired > "$sd2/watchdog" ) & watchdog=$!
 wait $pid
 echo $? > "$sd2/exit-status"
 kill $watchdog 2>/dev/null
