@@ -163,7 +163,7 @@ function buildSession(t, overrides = {}) {
 		path.join(dir, "session.jsonl"),
 		records.join("\n") + "\n",
 	);
-	fs.writeFileSync(path.join(dir, "prompt.txt"), thePrompt);
+	fs.writeFileSync(path.join(dir, "prompt.txt"), prompt);
 	fs.writeFileSync(
 		path.join(dir, "expected-model"),
 		"zai-coding-cn glm-5.3-flash\n",
