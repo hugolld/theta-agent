@@ -478,7 +478,7 @@ test("auditSession fails on corrupt, mismatched, or stale evidence", (t) => {
 	);
 	assert.throws(
 		() => auditIn(repo, () => auditSession(lengthCapped, repo)),
-		/incomplete final assistant response/,
+		/incomplete final assistant response: stopReason length/,
 	);
 
 	const errored = buildSession(t, repo);
@@ -496,7 +496,7 @@ test("auditSession fails on corrupt, mismatched, or stale evidence", (t) => {
 	);
 	assert.throws(
 		() => auditIn(repo, () => auditSession(errored, repo)),
-		/incomplete final assistant response/,
+		/non-empty assistant response — truncated session/,
 	);
 });
 

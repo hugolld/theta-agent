@@ -212,15 +212,22 @@ export function auditSession(dir, rootArg, skill) {
 	// A completed one-shot ends with the assistant's response: a transcript
 	// truncated at a record boundary cannot attest a full session. A final
 	// assistant record that still carries a tool request, a length-truncated
-	// stop reason, or an error is not a completed response.
+	// stop reason, an error, or no text at all is not a completed response.
 	const last = recs[recs.length - 1];
 	const lastContent = last?.message?.content;
 	const endsWithToolCall =
 		Array.isArray(lastContent) &&
 		lastContent.some((c) => c?.type === "toolCall");
-	if (last?.message?.role !== "assistant" || endsWithToolCall) {
+	const lastText = Array.isArray(lastContent)
+		? lastContent.filter((c) => c?.type === "text").map((c) => c.text).join("")
+		: (typeof lastContent === "string" ? lastContent : "");
+	if (
+		last?.message?.role !== "assistant" ||
+		endsWithToolCall ||
+		lastText === ""
+	) {
 		throw new Error(
-			"transcript does not end with an assistant response — truncated session",
+			"transcript does not end with a non-empty assistant response — truncated session",
 		);
 	}
 	if (last.message.stopReason !== "stop" || last.message.errorMessage) {

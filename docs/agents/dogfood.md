@@ -46,7 +46,7 @@ The auditor is a tested repository script, `scripts/audit-dogfood.mjs` (unit tes
 node scripts/audit-dogfood.mjs "$sd"
 ```
 
-The spot-check is a second full one-shot in its own session dir, prompted with a real task that routes through the named skill — never a prompt that merely asks about the skill or names its file (a routed model reads the SKILL.md on its own; the audit rejects prompts that name it). The prompt is written into the session dir, and the audit verifies the session ran exactly that prompt, so the routing judgment is made on recorded evidence:
+The spot-check is a second full one-shot in its own session dir, prompted with a real task in the skill's domain — never a prompt that names the skill or its file. What it attests is that the **selected file was opened in a real session**: the model reached the SKILL.md on its own, unprompted by name. It does not claim deeper autonomous routing — a global instruction could still steer a read — and the audit rejects prompts that name the skill or file so the recorded evidence stays meaningful. The prompt is written into the session dir, and the audit verifies the session ran exactly that prompt:
 
 ```sh
 sd2=$(mktemp -d)
@@ -67,7 +67,7 @@ echo $? > "$sd2/exit-status"
 kill $watchdog 2>/dev/null
 ```
 
-Audit `$sd2` with the same one command, passing the skill path as a second argument — one invocation runs every check above on that session and then, only if all of them passed, requires a read of the skill's `SKILL.md` from this checkout against the same in-memory transcript: a `read` tool call whose path canonicalizes to the checkout's copy exactly, paired by `toolCallId` with a `toolResult` that reports no error and whose text equals the current file contents — `offset` and `limit` are not judged, because a fragment cannot reproduce the full file's bytes. The skill argument must resolve to an advertised checkout SKILL.md — traversal or any non-skill path is rejected. Path mentions in `bash` commands, writes, prose, or thinking are not use. Nothing can slip between the checks — one auditor, one attestation.
+Audit `$sd2` with the same one command, passing the skill path as a second argument — one invocation runs every check above on that session and then, only if all of them passed, requires a read of the skill's `SKILL.md` from this checkout against the same in-memory transcript: a `read` tool call whose path canonicalizes to the checkout's copy exactly, paired by `toolCallId` with a `toolResult` that reports no error and whose text equals the current file contents — `offset` and `limit` are not judged, because a fragment cannot reproduce the full file's bytes. The attested fact is **selected file opened in a real session**, not autonomous routing. The skill argument must resolve to an advertised checkout SKILL.md — traversal or any non-skill path is rejected. Path mentions in `bash` commands, writes, prose, or thinking are not use. Nothing can slip between the checks — one auditor, one attestation.
 
 ```sh
 node scripts/audit-dogfood.mjs "$sd2" "skills/literature-review/SKILL.md"
