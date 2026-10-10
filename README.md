@@ -44,7 +44,7 @@ Linux first, Windows later.
 - [ ] M7 — standalone `theta` shell on pi's headless core (macOS/Linux)
 - [ ] M8 — installers & release channel: Homebrew, deb/AUR, Windows
 
-## Install (once functional)
+## Install
 
 ```sh
 pi install npm:theta-agent

@@ -17,12 +17,16 @@ node bin/theta.mjs --dev --provider zai-coding-cn --model glm-5.3-flash \
 
 ## Ground-truth the evidence
 
-The pi session transcript is the record. Grep the newest session file for the skill names the criterion names:
+The pi session transcript is the record. Pi advertises the skill library in the session's system record — grep inside that record only. Grepping the whole file proves nothing: the user prompt and tool activity can carry a skill name into a session where nothing was advertised.
 
 ```sh
-f=$(ls -t ~/.pi/agent/sessions/*/*.jsonl | head -1)
-grep -c "paper-lookup" "$f"    # a skill name appears iff pi advertised it
+f=$(ls -t ~/.pi/agent/sessions/*/*.jsonl | head -1)  # capture the moment the run returns
+grep -m1 '"role":"system"' "$f" | grep -c "skills/paper-lookup"   # 1 iff pi advertised it
 ```
+
+- Capture the session file the moment the run returns: `ls -t` picks the newest across **all** pi sessions on the machine, and any later session would win.
+- Match the skill's path (`skills/<name>`), not the bare name, and assert every library name, each ≥1 — the issue #8 close-out run confirmed all 20 paths appear in the system record.
+- Keep the prompt neutral for the advertisement check: a prompt that names a skill adds nothing, and a neutral one keeps the spot-check honest too.
 
 For a spot-check, prompt a real task that routes into the named skill, then confirm in the transcript that the skill's files or scripts were actually used — grep for the skill's path or a script name. A reply that merely describes the skill is not evidence.
 
