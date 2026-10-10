@@ -66,9 +66,11 @@ export function decodeXmlEntities(s) {
 	);
 }
 
-// The advertised skill locations live in exactly one <available_skills> block
+// The advertised skill records live in exactly one <available_skills> block
 // inside the skills section pi maintains (message.sections.skills). A second
-// block could hide advertisement drift, so any other count throws.
+// block could hide advertisement drift, so any other count throws. Each
+// record must carry both a name and a location — advertisement identity is
+// the pair, not the path alone.
 export function extractLocations(skillsText) {
 	const blocks = skillsText.match(/<available_skills>[\s\S]*?<\/available_skills>/g);
 	if (!blocks || blocks.length !== 1) {
@@ -76,11 +78,20 @@ export function extractLocations(skillsText) {
 			`expected exactly 1 available_skills block, found ${blocks ? blocks.length : 0}`,
 		);
 	}
-	return new Set(
-		[...blocks[0].matchAll(/<location>([\s\S]*?)<\/location>/g)].map((m) =>
-			decodeXmlEntities(m[1]),
-		),
-	);
+	const out = [];
+	for (const record of blocks[0].match(/<skill>[\s\S]*?<\/skill>/g) ?? []) {
+		const name = decodeXmlEntities(
+			record.match(/<name>([\s\S]*?)<\/name>/)?.[1] ?? "",
+		);
+		const location = decodeXmlEntities(
+			record.match(/<location>([\s\S]*?)<\/location>/)?.[1] ?? "",
+		);
+		if (!name || !location) {
+			throw new Error("malformed skill advertisement record (missing name or location)");
+		}
+		out.push({ name, location });
+	}
+	return out;
 }
 
 // Resolves the spot-check's skill argument to an absolute checkout path and
@@ -107,7 +118,8 @@ export function resolveAdvertisedSkill(root, skill, expected) {
 // HEAD and returns the attestation. Throws on any failure; `skill` (a
 // checkout-relative SKILL.md path) additionally requires a successful read
 // tool call on that exact file.
-export function auditSession(dir, root, skill) {
+export function auditSession(dir, rootArg, skill) {
+	const root = fs.realpathSync(rootArg);
 	const files = fs.readdirSync(dir).filter((f) => f.endsWith(".jsonl"));
 	if (files.length !== 1) {
 		throw new Error(`expected exactly 1 session file, found ${files.length}`);
@@ -150,7 +162,15 @@ export function auditSession(dir, root, skill) {
 	if (bootExit !== "0" || bootErr !== 0) {
 		throw new Error(`boot not clean: exit ${bootExit}, stderr ${bootErr} bytes`);
 	}
-	const text = fs.readFileSync(`${dir}/${files[0]}`, "utf8");
+	// The transcript is hashed as raw file bytes and decoded strictly: lossy
+	// UTF-8 replacement or normalization would let byte-corrupt evidence pass.
+	const transcriptBuf = fs.readFileSync(`${dir}/${files[0]}`);
+	let text;
+	try {
+		text = new TextDecoder("utf-8", { fatal: true }).decode(transcriptBuf);
+	} catch (e) {
+		throw new Error(`corrupt transcript: ${e.message}`);
+	}
 	// Strip only the trailing newline terminator: blank interior lines are
 	// malformed JSONL and fail closed in the parse below.
 	const lines = text.replace(/\n$/, "").split("\n");
@@ -204,71 +224,61 @@ export function auditSession(dir, root, skill) {
 		typeof skillsRecs[0].message.sections.skills === "string"
 			? skillsRecs[0].message.sections.skills
 			: "";
-	const locations = extractLocations(skillsText);
-	if (!locations) {
-		throw new Error("no available_skills section in system records");
-	}
+	const advertisements = extractLocations(skillsText);
 	const inv = JSON.parse(fs.readFileSync("test/expected-skills.json", "utf8"));
 	const skillRoot = manifestSkillRoot(root);
 	const names = inv.vendored.map((e) => e.name).concat(inv["self-authored"]);
-	// pi may advertise lexical paths through symlinked resources; canonicalize
-	// every advertised location before comparing, so content outside the
-	// checkout cannot pose as contained evidence. An advertised location that
-	// does not resolve on disk is an inconsistency and fails the audit.
-	const realAdvertised = new Set();
-	const unresolvable = [];
-	for (const l of locations) {
-		try {
-			realAdvertised.add(fs.realpathSync(l));
-		} catch {
-			unresolvable.push(l);
+	// Advertisement identity is the name/location pair: pi may advertise
+	// lexical paths through symlinked resources, so each advertised location
+	// is canonicalized before comparison. An advertised location that does
+	// not resolve on disk is an inconsistency and fails the audit.
+	const canonical = new Map();
+	for (const rec of advertisements) {
+		if (canonical.has(rec.name)) {
+			throw new Error(`duplicate advertised skill name: ${rec.name}`);
 		}
-	}
-	if (unresolvable.length > 0) {
-		throw new Error(
-			`advertised locations do not resolve on disk:\n${unresolvable.join("\n")}`,
-		);
+		try {
+			canonical.set(rec.name, fs.realpathSync(rec.location));
+		} catch {
+			throw new Error(
+				`advertised location does not resolve on disk: ${rec.location}`,
+			);
+		}
 	}
 	const missing = [];
 	for (const n of names) {
 		const p = `${skillRoot}/${n}/SKILL.md`;
-		if (!realAdvertised.has(p)) missing.push(n);
+		if (canonical.get(n) !== p) missing.push(n);
 	}
 	if (missing.length > 0) {
 		throw new Error(`NOT advertised: ${missing.join(", ")}`);
 	}
 	const expected = new Set(names.map((n) => `${skillRoot}/${n}/SKILL.md`));
-	// An advertised location is an extra when its lexical path or its
+	// An advertised record is an extra when its lexical location or its
 	// canonical target lies inside the checkout without being inventory —
-	// canonicalizing alone would hide a checkout symlink pointing outside.
-	// Host-level skills outside the checkout are the environment.
-	const extras = [...locations].filter((l) => {
-		const lexicalInside = l.startsWith(root + path.sep);
-		let canonical = null;
-		try {
-			canonical = fs.realpathSync(l);
-		} catch {
-			return false;
-		}
-		const canonicalInside = canonical.startsWith(root + path.sep);
-		return (lexicalInside || canonicalInside) && !expected.has(canonical);
-	});
+	// canonicalizing alone would hide a checkout symlink pointing outside,
+	// and host-level skills outside the checkout are the environment.
+	const extras = [...canonical.entries()]
+		.filter(([n, p]) => {
+			if (expected.has(p)) return false;
+			const lexical = byName.get(n)?.location ?? "";
+			return (
+				lexical.startsWith(root + path.sep) || p.startsWith(root + path.sep)
+			);
+		})
+		.map(([n]) => n);
 	if (extras.length > 0) {
 		throw new Error(`UNEXPECTED advertised skills:\n${extras.join("\n")}`);
 	}
 	// A duplicate alias (one inventory skill also reachable through a second
 	// in-checkout symlink) collapses in the canonical set, so the count of
-	// checkout-affiliated lexical locations must match the inventory exactly.
-	const checkoutLexical = [...locations].filter((l) => {
-		try {
-			return fs.realpathSync(l).startsWith(skillRoot + "/");
-		} catch {
-			return false;
-		}
-	});
-	if (checkoutLexical.length !== names.length) {
+	// checkout-affiliated records must match the inventory exactly.
+	const checkoutRecords = advertisements.filter((rec) =>
+		canonical.get(rec.name)?.startsWith(root + path.sep),
+	);
+	if (checkoutRecords.length !== names.length) {
 		throw new Error(
-			`expected ${names.length} checkout skill advertisements, found ${checkoutLexical.length}`,
+			`expected ${names.length} checkout skill advertisements, found ${checkoutRecords.length}`,
 		);
 	}
 	const dirty = execSync("git status --porcelain --untracked-files=all").toString().trim();
@@ -291,7 +301,7 @@ export function auditSession(dir, root, skill) {
 	const shaText = (s) => createHash("sha256").update(s).digest("hex");
 	let out =
 		`clean ${head}\n` +
-		`transcript ${shaText(text)}\n` +
+		`transcript ${createHash("sha256").update(transcriptBuf).digest("hex")}\n` +
 		`exit-status ${shaText(bootExitRaw)}\n` +
 		`stderr ${shaText(bootErrBuf)}\n` +
 		`pi ${piVersion}\n` +

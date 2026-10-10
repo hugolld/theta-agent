@@ -71,16 +71,18 @@ test("decodeXmlEntities decodes pi's entity set", () => {
 	);
 });
 
-test("extractLocations returns decoded locations and rejects other counts", () => {
+test("extractLocations returns decoded records and rejects other counts", () => {
 	const text =
 		"<available_skills><skill><name>a</name>" +
 		"<location>/x/skills/a/SKILL.md</location>" +
+		"</skill>" +
+		"<skill><name>b&apos;s</name>" +
 		"<location>/x/skills/b&apos;s/SKILL.md</location>" +
 		"</skill></available_skills>";
-	const locs = extractLocations(text);
-	assert.equal(locs.size, 2);
-	assert.ok(locs.has("/x/skills/a/SKILL.md"));
-	assert.ok(locs.has("/x/skills/b's/SKILL.md"));
+	const recs = extractLocations(text);
+	assert.equal(recs.length, 2);
+	assert.deepEqual(recs[0], { name: "a", location: "/x/skills/a/SKILL.md" });
+	assert.deepEqual(recs[1], { name: "b's", location: "/x/skills/b's/SKILL.md" });
 	assert.throws(
 		() => extractLocations("no section here"),
 		/exactly 1 available_skills block, found 0/,
@@ -92,6 +94,10 @@ test("extractLocations returns decoded locations and rejects other counts", () =
 					"<available_skills><skill><name>ghost</name><location>/x/ghost/SKILL.md</location></skill></available_skills>",
 			),
 		/exactly 1 available_skills block, found 2/,
+	);
+	assert.throws(
+		() => extractLocations("<available_skills><skill><name>a</name></skill></available_skills>"),
+		/missing name or location/,
 	);
 });
 
@@ -180,7 +186,7 @@ function buildSession(t, repo, overrides = {}) {
 		: wrapped;
 	const prompt = overrides.transcriptPrompt ?? "test prompt";
 	const records = [
-		JSON.stringify({ type: "session", cwd: overrides.sessionCwd ?? repo }),
+		JSON.stringify({ type: "session", cwd: overrides.sessionCwd ?? sessionCwdOf(repo) }),
 		JSON.stringify({
 			type: "model_change",
 			provider: "zai-coding-cn",
@@ -248,6 +254,8 @@ function buildSession(t, repo, overrides = {}) {
 	return dir;
 }
 
+const sessionCwdOf = (repo) => fs.realpathSync(repo);
+
 function auditIn(cwd, fn) {
 	const prev = process.cwd();
 	process.chdir(cwd);
@@ -305,7 +313,7 @@ test("auditSession fails on missing and unresolvable advertised skills", (t) => 
 	const ghost = buildSession(t, repo, { advertisedNames: ["ghost-skill"] });
 	assert.throws(
 		() => auditIn(repo, () => auditSession(ghost, repo)),
-		/do not resolve on disk/,
+		/does not resolve on disk/,
 	);
 });
 
@@ -318,6 +326,10 @@ test("auditSession flags a checkout skill symlinked outside the repo", (t) => {
 	// checkout would commit it (git stores the symlink), and pi follows it
 	// while advertising the lexical in-repo path.
 	fs.symlinkSync(outside, path.join(repo, "skills", "rogue"), "dir");
+	// a real checkout would have the committed symlink; commit so the
+	// clean-tree gate passes and the canonicalization checks are exercised
+	execSync("git add -A", { cwd: repo });
+	execSync("git commit -qm rogue", { cwd: repo });
 	const dir = buildSession(t, repo, { advertisedNames: ["literature-review", "rogue"] });
 	assert.throws(
 		() => auditIn(repo, () => auditSession(dir, repo)),
