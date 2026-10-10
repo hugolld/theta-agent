@@ -1,6 +1,6 @@
 # Dogfooding theta
 
-`theta --dev` boots pi with this package preloaded from a local checkout. Acceptance criteria that name it (clean boot, the full skill list, a skill opened in a real session) are accepted on **transcript evidence** — never on the model's self-report. A model asked "is skill X available?" can answer confidently from files it merely sees on disk. The tracer PR (#9) recorded a met criterion that way; PR #10 found the skills were not loading at all.
+`theta --dev` boots pi with this package preloaded from a local checkout. The skill-list and skill-opened criteria are accepted on **transcript evidence** — never on the model's self-report. A model asked "is skill X available?" can answer confidently from files it merely sees on disk. The tracer PR (#9) recorded a met criterion that way; PR #10 found the skills were not loading at all. Clean boot is different: it is **process evidence** — exit status and stderr, captured at run time (see the recipe below), because no transcript can reconstruct them.
 
 ## Run a one-shot session
 
@@ -9,20 +9,22 @@ From the checkout:
 ```sh
 sd=$(mktemp -d)
 node bin/theta.mjs --dev --provider zai-coding-cn --model glm-5.3-flash \
-  --session-dir "$sd" --print "<prompt>" < /dev/null
+  --session-dir "$sd" --print "<prompt>" 2> "$sd/stderr.txt" < /dev/null
+echo $?                  # boot-clean: 0
+wc -c < "$sd/stderr.txt" # boot-clean: 0
 ```
 
 - Pass provider and model explicitly: pi's default model can 401 with an invalid bearer token.
 - Close stdin (`< /dev/null`): `pi --print` waits for stdin EOF even with a prompt argument, and a shell that leaves the pipe open hangs the session silently (found in the issue #8 close-out dogfood — 50 minutes, zero output, zero CPU).
 - Run inside an isolated `--session-dir`: the fresh temp dir holds exactly this run's transcript, so the audit below can never pick up another session (a newest-by-mtime lookup races every other pi session on the machine).
 - Keep the prompt neutral: a prompt that names a skill adds nothing, and a neutral one keeps the spot-check honest.
-- Boot-clean evidence is exit 0 with empty stderr.
+- Boot-clean is process evidence: exit status 0 and a 0-byte `stderr.txt`, captured in the run and kept next to the transcript it gates.
 
 ## Ground-truth the evidence
 
 The pi session transcript is the record. Pi advertises the skill library in the session's system records — assert against those records only. Grepping the whole file proves nothing: the user prompt and tool activity can carry a skill name into a session where nothing was advertised.
 
-The oracle is the checked-in `test/expected-skills.json` inventory, not the `skills/` tree, so a dirty checkout cannot shrink the expectation silently. Exit 0 means every inventory skill was advertised; printed output or any non-zero exit fails the criterion. The root comes from `fs.realpathSync`, so a symlinked checkout still matches the paths pi advertised.
+The oracle is the checked-in `test/expected-skills.json` inventory, not the `skills/` tree, so a dirty checkout cannot shrink the expectation silently. Exit 0 means every inventory skill was advertised; printed output or any non-zero exit fails the criterion. The root comes from `fs.realpathSync`, so a symlinked checkout still matches the paths pi advertised. Every transcript line must parse — a corrupt or truncated file fails loudly instead of quietly shrinking the evidence — and advertised locations are XML-decoded before comparison, so escaped entities in a checkout path cannot hide a skill.
 
 ```sh
 node -e '
@@ -34,13 +36,20 @@ node -e '
     console.error("expected exactly 1 session file, found " + files.length);
     process.exit(1);
   }
-  const recs = fs.readFileSync(dir + "/" + files[0], "utf8").trim().split("\n")
-    .map(l => { try { return JSON.parse(l); } catch { return null; } })
-    .filter(Boolean);
+  const lines = fs.readFileSync(dir + "/" + files[0], "utf8")
+    .trim().split("\n").filter(Boolean);
+  const recs = lines.map(l => {
+    try { return JSON.parse(l); } catch (e) {
+      console.error("corrupt transcript: " + e.message);
+      process.exit(1);
+    }
+  });
   const sys = recs
     .filter(r => r.message?.role === "system")
     .map(r => JSON.stringify(r.message))
-    .join("");
+    .join("")
+    .replace(/&(amp|lt|gt|quot|#39);/g, (_, e) =>
+      ({ amp: "&", lt: "<", gt: ">", quot: "\"", "#39": "\x27" })[e]);
   const inv = JSON.parse(fs.readFileSync("test/expected-skills.json", "utf8"));
   const names = inv.vendored.map(e => e.name).concat(inv["self-authored"]);
   let fail = false;
@@ -62,9 +71,14 @@ node -e '
   const fs = require("fs");
   const [file, skill] = process.argv.slice(1);
   const root = fs.realpathSync(".");
-  const recs = fs.readFileSync(file, "utf8").trim().split("\n")
-    .map(l => { try { return JSON.parse(l); } catch { return null; } })
-    .filter(Boolean);
+  const lines = fs.readFileSync(file, "utf8")
+    .trim().split("\n").filter(Boolean);
+  const recs = lines.map(l => {
+    try { return JSON.parse(l); } catch (e) {
+      console.error("corrupt transcript: " + e.message);
+      process.exit(1);
+    }
+  });
   const calls = [];
   const results = new Map();
   for (const r of recs) {
