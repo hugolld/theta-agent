@@ -46,20 +46,20 @@ The auditor is a tested repository script, `scripts/audit-dogfood.mjs` (unit tes
 node scripts/audit-dogfood.mjs "$sd"
 ```
 
-The spot-check is a second full one-shot in its own session dir, prompted with a real task that routes through the named skill and reads the skill's **full** SKILL.md — never a prompt that merely asks about it, and never one that invites a partial read. The prompt is written into the session dir, and the audit verifies the session ran exactly that prompt, so the routing judgment is made on recorded evidence:
+The spot-check is a second full one-shot in its own session dir, prompted with a real task that routes through the named skill — never a prompt that merely asks about the skill or names its file (a routed model reads the SKILL.md on its own; the audit rejects prompts that name it). The prompt is written into the session dir, and the audit verifies the session ran exactly that prompt, so the routing judgment is made on recorded evidence:
 
 ```sh
 sd2=$(mktemp -d)
 st=$(git status --porcelain --untracked-files=all) || { echo "git status failed"; exit 1; }
 [ -n "$st" ] && { echo "working tree dirty — commit first"; exit 1; }
 git rev-parse HEAD > "$sd2/pre-head"
-printf '%s' "<real task routing into the skill, reading its full SKILL.md>" > "$sd2/prompt.txt"
+printf '%s' "<real task routing into the skill>" > "$sd2/prompt.txt"
 printf '%s\n' "zai-coding-cn glm-5.3-flash" > "$sd2/expected-model"
 node -p "require('crypto').createHash('sha256').update(require('fs').readFileSync('package.json')).digest('hex')" > "$sd2/manifest-sha256"
 pi --version > "$sd2/pi-version"
 node --version > "$sd2/node-version"
 node bin/theta.mjs --dev --provider zai-coding-cn --model glm-5.3-flash \
-  --session-dir "$sd2" --print "<real task routing into the skill, reading its full SKILL.md>" 2> "$sd2/stderr.txt" < /dev/null &
+  --session-dir "$sd2" --print "<real task routing into the skill>" 2> "$sd2/stderr.txt" < /dev/null &
 pid=$!
 ( sleep 300; echo fired > "$sd2/watchdog" 2>/dev/null; kill $pid 2>/dev/null; sleep 15; kill -9 $pid 2>/dev/null ) & watchdog=$!
 wait $pid

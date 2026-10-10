@@ -234,7 +234,11 @@ export function auditSession(dir, rootArg, skill) {
 			? skillsRecs[0].message.sections.skills
 			: "";
 	const advertisements = extractLocations(skillsText);
-	const inv = JSON.parse(fs.readFileSync("test/expected-skills.json", "utf8"));
+	const inventoryText = fs.readFileSync(
+		`${root}/test/expected-skills.json`,
+		"utf8",
+	);
+	const inv = JSON.parse(inventoryText);
 	const skillRoot = manifestSkillRoot(root);
 	const names = inv.vendored.map((e) => e.name).concat(inv["self-authored"]);
 	// Advertisement identity is the name/location pair: an inventory skill
@@ -315,21 +319,28 @@ export function auditSession(dir, rootArg, skill) {
 			`expected ${names.length} checkout skill advertisements, found ${checkoutRecords.length}`,
 		);
 	}
-	const dirty = execSync("git status --porcelain --untracked-files=all").toString().trim();
+	const dirty = execSync("git status --porcelain --untracked-files=all", {
+		cwd: root,
+	}).toString().trim();
 	if (dirty) {
 		throw new Error(`working tree dirty:\n${dirty}`);
 	}
-	const head = execSync("git rev-parse HEAD").toString().trim();
+	const head = execSync("git rev-parse HEAD", { cwd: root }).toString().trim();
 	const preHead = fs.readFileSync(`${dir}/pre-head`, "utf8").trim();
 	if (head !== preHead) {
 		throw new Error(`HEAD moved since the run: ${preHead} -> ${head}`);
 	}
 	const manifestSha = fs.readFileSync(`${dir}/manifest-sha256`, "utf8").trim();
 	const curManifest = createHash("sha256")
-		.update(fs.readFileSync("package.json"))
+		.update(fs.readFileSync(`${root}/package.json`))
 		.digest("hex");
 	if (curManifest !== manifestSha) {
 		throw new Error("package.json changed since the run");
+	}
+	if (promptWanted.includes("SKILL.md")) {
+		throw new Error(
+			"spot-check prompt names the SKILL.md file — a routed task must not read the file on direct instruction",
+		);
 	}
 	const sha = (p) => createHash("sha256").update(fs.readFileSync(p)).digest("hex");
 	const shaText = (s) => createHash("sha256").update(s).digest("hex");
@@ -342,7 +353,7 @@ export function auditSession(dir, rootArg, skill) {
 		`node ${nodeVersion}\n` +
 		`provider ${wantModel[0]}\n` +
 		`model ${wantModel[1]}\n` +
-		`inventory ${sha("test/expected-skills.json")}`;
+		`inventory ${shaText(inventoryText)}`;
 	if (skill !== undefined) {
 		const target = resolveAdvertisedSkill(root, skill, expected);
 		// The skill bytes as they exist at audit time (after the clean-tree
