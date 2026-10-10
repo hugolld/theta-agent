@@ -436,9 +436,23 @@ export function auditSession(dir, rootArg, skill) {
 			const m = r.message;
 			recordIndex += 1;
 			if (!m) continue;
+			// tool calls are assistant requests: one embedded in a system,
+			// user, or toolResult record is transcript corruption.
+			if (m.role !== "assistant" && Array.isArray(m.content)) {
+				for (const t of m.content) {
+					if (t?.type === "toolCall") {
+						throw new Error(
+							`toolCall in ${m.role} record — transcript corruption`,
+						);
+					}
+				}
+			}
 			if (Array.isArray(m.content))
 				for (const t of m.content) {
 					if (t?.type !== "toolCall") continue;
+					if (typeof t.id !== "string" || t.id === "") {
+						throw new Error(`toolCall without a usable id: ${JSON.stringify(t.id)}`);
+					}
 					if (callOrder.has(t.id)) {
 						throw new Error(`duplicate toolCall id: ${t.id}`);
 					}
@@ -446,6 +460,11 @@ export function auditSession(dir, rootArg, skill) {
 					calls.push(t);
 				}
 			if (m.role === "toolResult") {
+				if (typeof m.toolCallId !== "string" || m.toolCallId === "") {
+					throw new Error(
+						`toolResult without a usable toolCallId: ${JSON.stringify(m.toolCallId)}`,
+					);
+				}
 				if (results.has(m.toolCallId)) {
 					throw new Error(`duplicate toolResult for ${m.toolCallId}`);
 				}
