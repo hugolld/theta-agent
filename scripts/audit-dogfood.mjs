@@ -185,19 +185,22 @@ export function auditSession(dir, root, skill) {
 	const names = inv.vendored.map((e) => e.name).concat(inv["self-authored"]);
 	// pi may advertise lexical paths through symlinked resources; canonicalize
 	// every advertised location before comparing, so content outside the
-	// checkout cannot pose as contained evidence. Unresolvable locations
-	// fail closed by omission.
-	const realAdvertised = new Set(
-		[...locations]
-			.map((l) => {
-				try {
-					return fs.realpathSync(l);
-				} catch {
-					return null;
-				}
-			})
-			.filter(Boolean),
-	);
+	// checkout cannot pose as contained evidence. An advertised location that
+	// does not resolve on disk is an inconsistency and fails the audit.
+	const realAdvertised = new Set();
+	const unresolvable = [];
+	for (const l of locations) {
+		try {
+			realAdvertised.add(fs.realpathSync(l));
+		} catch {
+			unresolvable.push(l);
+		}
+	}
+	if (unresolvable.length > 0) {
+		throw new Error(
+			`advertised locations do not resolve on disk:\n${unresolvable.join("\n")}`,
+		);
+	}
 	const missing = [];
 	for (const n of names) {
 		const p = `${skillRoot}/${n}/SKILL.md`;

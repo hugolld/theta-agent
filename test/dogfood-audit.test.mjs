@@ -205,7 +205,7 @@ test("auditSession attests skill use when paired and errors otherwise", (t) => {
 	);
 });
 
-test("auditSession fails on missing and extra advertised skills", (t) => {
+test("auditSession fails on missing and unresolvable advertised skills", (t) => {
 	assert.throws(
 		() => auditSession(buildSession(t, { advertisedNames: inventoryNames.slice(1) }), realRoot),
 		/NOT advertised: literature-review/,
@@ -216,7 +216,7 @@ test("auditSession fails on missing and extra advertised skills", (t) => {
 				buildSession(t, { advertisedNames: [...inventoryNames, "extra-skill"] }),
 				realRoot,
 			),
-		/UNEXPECTED advertised skills/,
+		/do not resolve on disk/,
 	);
 });
 
