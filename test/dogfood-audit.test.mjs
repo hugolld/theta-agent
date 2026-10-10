@@ -578,3 +578,52 @@ function invNamesToLocs(repo, names, hostDir) {
 		)
 		.join("\n");
 }
+
+// Golden fixture: a sanitized REAL pi transcript (run at the pinned pi
+// version, paths rewritten to the fixture repo) must pass the boot audit —
+// this pins the parser against real-pi schema drift, not just hand-authored
+// records.
+test("auditSession accepts a sanitized real pi transcript (golden)", (t) => {
+	const repo = fs.mkdtempSync(path.join(os.tmpdir(), "dogfood-golden-"));
+	t.after(() => fs.rmSync(repo, { recursive: true, force: true }));
+	fs.cpSync(path.resolve("skills"), path.join(repo, "skills"), {
+		recursive: true,
+	});
+	fs.mkdirSync(path.join(repo, "test"), { recursive: true });
+	fs.copyFileSync(
+		path.resolve("test", "expected-skills.json"),
+		path.join(repo, "test", "expected-skills.json"),
+	);
+	fs.writeFileSync(
+		path.join(repo, "package.json"),
+		JSON.stringify({ pi: { skills: ["./skills"] } }),
+	);
+	const run = (cmd) => execSync(cmd, { cwd: repo }).toString();
+	run("git init -q");
+	run("git config user.email test@example.com");
+	run("git config user.name test");
+	run("git add -A");
+	run("git -c commit.gpgsign=false commit -qm init");
+
+	const real = fs.realpathSync(repo);
+	const golden = fs
+		.readFileSync("test/fixtures/real-pi-transcript.jsonl", "utf8")
+		.replaceAll("__REPO__", real);
+	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "dogfood-session-"));
+	t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+	fs.writeFileSync(path.join(dir, "session.jsonl"), golden);
+	fs.writeFileSync(path.join(dir, "prompt.txt"), "test prompt");
+	fs.writeFileSync(
+		path.join(dir, "expected-model"),
+		"zai-coding-cn glm-5.3-flash\n",
+	);
+	fs.writeFileSync(path.join(dir, "exit-status"), "0");
+	fs.writeFileSync(path.join(dir, "stderr.txt"), "");
+	fs.writeFileSync(path.join(dir, "pi-version"), "1.1.0\n");
+	fs.writeFileSync(path.join(dir, "node-version"), "v26.11.0\n");
+	fs.writeFileSync(path.join(dir, "pre-head"), repoHead(repo));
+	fs.writeFileSync(path.join(dir, "manifest-sha256"), repoManifestSha(repo));
+	const out = auditIn(repo, () => auditSession(dir, repo));
+	assert.match(out, /^clean /);
+	assert.match(out, /provider zai-coding-cn/);
+});
