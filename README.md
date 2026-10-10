@@ -57,21 +57,31 @@ instead — see [Try it](#try-it).
 ## Try it
 
 theta rides on the [pi](https://pi.dev) coding agent, and pi is a peer
-dependency — a global install of theta-agent does not bring `pi` along. Install
-pi first, then theta:
+dependency — install it first. The zero-registry path is a checkout:
 
 ```sh
+git clone https://github.com/hugolld/theta-agent
+cd theta-agent
 npm i -g @earendil-works/pi-coding-agent
+node bin/theta.mjs --dev
+```
+
+`node bin/theta.mjs --dev` launches pi with this checkout preloaded;
+from a checkout you can also name another directory with
+`$THETA_DEV_ROOT` (theta never loads an arbitrary current directory
+this way). Theta targets pi ≥ 0.99; if the launcher reports
+`pi not found`, install pi with the command above and retry.
+
+Once theta-agent ≥ 0.0.2 is on the registry (earlier versions predate
+the launcher — if the registry is not there yet, stay on the checkout
+path above), the installed form is:
+
+```sh
 npm i -g theta-agent
 theta
 ```
 
-Requires theta-agent ≥ 0.0.2 on the registry. That launches pi with the
-Theta package preloaded. `theta --dev` loads Theta from a local checkout —
-either the launcher's own repo, or the directory you name with
-`$THETA_DEV_ROOT` (theta never loads an arbitrary current directory this
-way). Theta targets pi ≥ 0.99; if `theta` reports `pi not found`, install
-pi with the command above and retry.
+That launches pi with the Theta package preloaded.
 
 ## Vendored skills
 
