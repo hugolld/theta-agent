@@ -90,8 +90,9 @@ node -e '
     }
   }
   const manifest = JSON.parse(fs.readFileSync("package.json", "utf8"));
+  const path = require("path");
   const skillRoots = (manifest.pi?.skills ?? ["./skills"]).map(s =>
-    root + "/" + s.replace(/^\.\//, "").replace(/\/$/, ""));
+    path.resolve(root, s));
   const expected = new Set(names.map(n => root + "/skills/" + n + "/SKILL.md"));
   const extras = [...locations].filter(l =>
     skillRoots.some(r => l.startsWith(r + "/")) && !expected.has(l));
