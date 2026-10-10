@@ -32,6 +32,9 @@ test("ge fails closed on malformed versions", () => {
 	assert.equal(ge("0.99.", "0.99"), false);
 	assert.equal(ge("0.99.0-beta", "0.99"), false);
 	assert.equal(ge("not-a-version", "0.99"), false);
+	assert.equal(ge("01.0.0", "0.99"), false);
+	assert.equal(ge("1.0.0-alpha..beta", "0.99"), false);
+	assert.equal(ge("1.0.0-01", "0.99"), false);
 });
 
 test("decodeXmlEntities decodes pi's entity set", () => {

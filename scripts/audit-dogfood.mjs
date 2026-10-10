@@ -7,11 +7,11 @@ import { createHash } from "node:crypto";
 // SemVer comparison: true when a >= b. Prereleases follow SemVer precedence
 // (a release outranks its own prerelease; numeric identifiers compare
 // numerically and rank below alphanumeric ones). Malformed versions —
-// including trailing dots and bare prerelease tags — fail closed.
+// leading zeros, empty or malformed prerelease identifiers — fail closed.
 export function ge(a, b) {
 	const parse = (v) => {
 		const m =
-			/^v?(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$/.exec(
+			/^v?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|[1-9A-Za-z-]+)(?:\.(?:0|[1-9]\d*|[1-9A-Za-z-]+))*))?(?:\+[0-9A-Za-z.-]+)?$/.exec(
 				v,
 			);
 		if (!m) return null;
@@ -130,8 +130,10 @@ export function auditSession(dir, root, skill) {
 		}
 	});
 	const sysRecs = recs.filter((r) => r.message?.role === "system");
+	// Count records that carry a skills section at all — a later null patch
+	// removes the advertisement and must fail loudly, not pass silently.
 	const skillsRecs = sysRecs.filter(
-		(r) => typeof r.message?.sections?.skills === "string",
+		(r) => r.message?.sections !== undefined && "skills" in r.message.sections,
 	);
 	if (skillsRecs.length !== 1) {
 		throw new Error(
@@ -163,7 +165,10 @@ export function auditSession(dir, root, skill) {
 			`model mismatch: ran ${changes[0].provider}/${changes[0].modelId}, expected ${wantModel[0]}/${wantModel[1]}`,
 		);
 	}
-	const skillsText = skillsRecs[0].message.sections.skills;
+	const skillsText =
+		typeof skillsRecs[0].message.sections.skills === "string"
+			? skillsRecs[0].message.sections.skills
+			: "";
 	const locations = extractLocations(skillsText);
 	if (!locations) {
 		throw new Error("no available_skills section in system records");
@@ -186,7 +191,7 @@ export function auditSession(dir, root, skill) {
 	if (extras.length > 0) {
 		throw new Error(`UNEXPECTED advertised skills:\n${extras.join("\n")}`);
 	}
-	const dirty = execSync("git status --porcelain").toString().trim();
+	const dirty = execSync("git status --porcelain --untracked-files=all").toString().trim();
 	if (dirty) {
 		throw new Error(`working tree dirty:\n${dirty}`);
 	}
@@ -227,7 +232,7 @@ export function auditSession(dir, root, skill) {
 		const hit = calls.some((t) => {
 			const r = results.get(t.id);
 			return (
-				t.name === "read" && t.arguments?.path === target && r && r.isError !== true
+				t.name === "read" && t.arguments?.path === target && r && r.isError === false
 			);
 		});
 		if (!hit) {
@@ -239,7 +244,7 @@ export function auditSession(dir, root, skill) {
 }
 
 function manifestSkillRoot(root) {
-	const manifest = JSON.parse(fs.readFileSync("package.json", "utf8"));
+	const manifest = JSON.parse(fs.readFileSync(`${root}/package.json`, "utf8"));
 	const raw = manifest.pi?.skills ?? ["./skills"];
 	if (
 		!Array.isArray(raw) ||
@@ -249,7 +254,11 @@ function manifestSkillRoot(root) {
 	) {
 		throw new Error("audit supports a single plain-directory pi.skills entry");
 	}
-	return path.resolve(root, raw[0]);
+	const resolved = path.resolve(root, raw[0]);
+	if (resolved !== root && !resolved.startsWith(root + path.sep)) {
+		throw new Error(`pi.skills entry must resolve inside the checkout, got: ${raw[0]}`);
+	}
+	return resolved;
 }
 
 function main(argv) {
