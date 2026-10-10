@@ -423,6 +423,14 @@ export function auditSession(dir, rootArg, skill) {
 			normalize(path.basename(target)),
 			normalize(target),
 		];
+		// Cross-script lookalikes (Cyrillic і for Latin i) survive NFKC, so
+		// the recorded prompt must be pure ASCII: the operator's task is
+		// English text, and anything else fails closed.
+		if (/[^\x00-\x7F]/.test(promptWanted)) {
+			throw new Error(
+				"spot-check prompt contains non-ASCII characters — cross-script lookalikes are not auditable",
+			);
+		}
 		if (promptVariants.some((v) => v && promptNorm.includes(v))) {
 			throw new Error(
 				"spot-check prompt names the selected skill or its file — a routed task must reach it on its own",

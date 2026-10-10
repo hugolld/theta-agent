@@ -346,6 +346,18 @@ test("auditSession attests skill use when paired and errors otherwise", (t) => {
 		() => auditIn(repo, () => auditSession(wrongTool, repo, "skills/literature-review/SKILL.md")),
 		/selected file never opened/,
 	);
+	const confusable = buildSession(t, repo, {
+		toolResultIsError: false,
+		transcriptPrompt: "Use lіterature-review and open its instructions",
+	});
+	fs.writeFileSync(
+		path.join(confusable, "prompt.txt"),
+		"Use lіterature-review and open its instructions",
+	);
+	assert.throws(
+		() => auditIn(repo, () => auditSession(confusable, repo, "skills/literature-review/SKILL.md")),
+		/non-ASCII characters/,
+	);
 	const camelSteer = buildSession(t, repo, {
 		toolResultIsError: false,
 		transcriptPrompt: "Use LiteratureReview and open its instructions",
