@@ -311,11 +311,11 @@ test("auditSession attests skill use when paired and errors otherwise", (t) => {
 	const out = auditIn(repo, () =>
 		auditSession(good, repo, "skills/literature-review/SKILL.md"),
 	);
-	assert.match(out, /used .*\/skills\/literature-review\/SKILL\.md/);
+	assert.match(out, /selected-file-opened .*\/skills\/literature-review\/SKILL\.md/);
 	const bad = buildSession(t, repo, { toolResultIsError: true });
 	assert.throws(
 		() => auditIn(repo, () => auditSession(bad, repo, "skills/literature-review/SKILL.md")),
-		/NOT used/,
+		/selected file never opened/,
 	);
 	const partial = buildSession(t, repo, {
 		toolResultIsError: false,
@@ -324,7 +324,7 @@ test("auditSession attests skill use when paired and errors otherwise", (t) => {
 	});
 	assert.throws(
 		() => auditIn(repo, () => auditSession(partial, repo, "skills/literature-review/SKILL.md")),
-		/NOT used/,
+		/selected file never opened/,
 	);
 	const fabricated = buildSession(t, repo, {
 		toolResultIsError: false,
@@ -332,7 +332,7 @@ test("auditSession attests skill use when paired and errors otherwise", (t) => {
 	});
 	assert.throws(
 		() => auditIn(repo, () => auditSession(fabricated, repo, "skills/literature-review/SKILL.md")),
-		/NOT used/,
+		/selected file never opened/,
 	);
 	const wrongTool = buildSession(t, repo, {
 		toolResultIsError: false,
@@ -340,7 +340,7 @@ test("auditSession attests skill use when paired and errors otherwise", (t) => {
 	});
 	assert.throws(
 		() => auditIn(repo, () => auditSession(wrongTool, repo, "skills/literature-review/SKILL.md")),
-		/NOT used/,
+		/selected file never opened/,
 	);
 	const camelSteer = buildSession(t, repo, {
 		toolResultIsError: false,

@@ -414,18 +414,38 @@ export function auditSession(dir, rootArg, skill) {
 			);
 		}
 		const calls = [];
+		const callIds = new Set();
 		const results = new Map();
 		for (const r of recs) {
 			const m = r.message;
 			if (!m) continue;
 			if (Array.isArray(m.content))
-				for (const t of m.content) if (t?.type === "toolCall") calls.push(t);
+				for (const t of m.content) {
+					if (t?.type !== "toolCall") continue;
+					if (callIds.has(t.id)) {
+						throw new Error(`duplicate toolCall id: ${t.id}`);
+					}
+					callIds.add(t.id);
+					calls.push(t);
+				}
 			if (m.role === "toolResult") {
 				if (results.has(m.toolCallId)) {
 					throw new Error(`duplicate toolResult for ${m.toolCallId}`);
 				}
 				results.set(m.toolCallId, m);
 			}
+		}
+		// Every call needs exactly one matching result and every result a
+		// call: a spliced or incomplete tool graph cannot attest skill use.
+		const orphans = [...results.keys()].filter((id) => !callIds.has(id));
+		const unanswered = calls.filter((t) => !results.has(t.id));
+		if (orphans.length > 0) {
+			throw new Error(`orphan toolResults without calls:\n${orphans.join("\n")}`);
+		}
+		if (unanswered.length > 0) {
+			throw new Error(
+				`tool calls without results:\n${unanswered.map((t) => t.id).join("\n")}`,
+			);
 		}
 		// pi may advertise and read lexical paths through symlinked resources;
 		// canonicalize the read path first, so a lexical path through a
@@ -461,9 +481,9 @@ export function auditSession(dir, rootArg, skill) {
 			return resultText === skillText;
 		});
 		if (!hit) {
-			throw new Error("NOT used");
+			throw new Error("selected file never opened");
 		}
-		out += `\nused ${target}\nskill-content ${createHash("sha256").update(skillBuf).digest("hex")}`;
+		out += `\nselected-file-opened ${target}\nskill-content ${createHash("sha256").update(skillBuf).digest("hex")}`;
 	}
 	// Final state recheck: the audited bytes and the cited HEAD must still
 	// describe the tree at attestation time.

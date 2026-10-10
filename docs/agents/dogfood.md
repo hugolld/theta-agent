@@ -73,7 +73,7 @@ Audit `$sd2` with the same one command, passing the skill path as a second argum
 node scripts/audit-dogfood.mjs "$sd2" "skills/literature-review/SKILL.md"
 ```
 
-On success the attestation carries every `clean` line plus `used` with the resolved skill path and the SKILL.md content digest; keep it with the run's record.
+On success the attestation carries every `clean` line plus `selected-file-opened` with the resolved skill path and the SKILL.md content digest; keep it with the run's record.
 
 ## Clean up after
 
