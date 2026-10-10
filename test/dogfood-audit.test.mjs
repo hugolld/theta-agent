@@ -490,10 +490,12 @@ test("auditSession rejects host aliases under inventory names", (t) => {
 	fs.writeFileSync(path.join(dir, "node-version"), "v26.11.0\n");
 	fs.writeFileSync(path.join(dir, "pre-head"), repoHead(repo));
 	fs.writeFileSync(path.join(dir, "manifest-sha256"), repoManifestSha(repo));
-	// A host alias whose canonical target is the checkout's own inventory
-	// file advertises the audited bytes, so realpath equality accepts it;
-	// mount-alias-robust containment beats a brittle lexical prefix check.
-	assert.doesNotThrow(() => auditIn(repo, () => auditSession(dir, repo)));
+	// A host alias under an inventory name does not prove the package loaded
+	// the skill from its own manifest — it must be rejected.
+	assert.throws(
+		() => auditIn(repo, () => auditSession(dir, repo)),
+		/advertised from outside the checkout/,
+	);
 });
 
 function invNamesToLocs(repo, names, hostDir) {

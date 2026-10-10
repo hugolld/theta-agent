@@ -238,12 +238,14 @@ export function auditSession(dir, rootArg, skill) {
 	const skillRoot = manifestSkillRoot(root);
 	const names = inv.vendored.map((e) => e.name).concat(inv["self-authored"]);
 	// Advertisement identity is the name/location pair: an inventory skill
-	// must be advertised at its own checkout location (lexical containment
-	// under the manifest skill root) — canonicalization is an additional
-	// containment check, not a substitute, so a host alias cannot impersonate
-	// a checkout skill. Canonicalization also rejects locations that do not
-	// resolve on disk.
+	// must be advertised at an allowed spelling of its own checkout location
+	// — the manifest path resolved against either spelling of the checkout
+	// root (mount aliases). Canonicalization is an additional containment
+	// check, not a substitute: an arbitrary external alias cannot impersonate
+	// a checkout skill, and locations that do not resolve on disk are
+	// rejected.
 	const inventoryNames = new Set(names);
+	const manifestEntry = manifestSkillEntry(root);
 	const canonical = new Map();
 	for (const rec of advertisements) {
 		if (canonical.has(rec.name)) {
@@ -256,13 +258,15 @@ export function auditSession(dir, rootArg, skill) {
 				`advertised location does not resolve on disk: ${rec.location}`,
 			);
 		}
-		if (
-			inventoryNames.has(rec.name) &&
-			!fs.realpathSync(rec.location).startsWith(skillRoot + path.sep)
-		) {
-			throw new Error(
-				`inventory skill ${rec.name} advertised from outside the checkout: ${rec.location}`,
+		if (inventoryNames.has(rec.name)) {
+			const allowed = rootAliases.map(
+				(r) => `${path.resolve(r, manifestEntry)}/${rec.name}/SKILL.md`,
 			);
+			if (!allowed.includes(rec.location)) {
+				throw new Error(
+					`inventory skill ${rec.name} advertised from outside the checkout: ${rec.location}`,
+				);
+			}
 		}
 		if (
 			!inventoryNames.has(rec.name) &&
@@ -394,7 +398,7 @@ export function auditSession(dir, rootArg, skill) {
 	return out;
 }
 
-function manifestSkillRoot(root) {
+function manifestSkillEntry(root) {
 	const manifest = JSON.parse(fs.readFileSync(`${root}/package.json`, "utf8"));
 	const raw = manifest.pi?.skills ?? ["./skills"];
 	if (
@@ -414,7 +418,11 @@ function manifestSkillRoot(root) {
 	if (realResolved !== realRoot && !realResolved.startsWith(realRoot + path.sep)) {
 		throw new Error(`pi.skills entry must resolve inside the checkout, got: ${raw[0]}`);
 	}
-	return realResolved;
+	return raw[0];
+}
+
+function manifestSkillRoot(root) {
+	return path.resolve(root, manifestSkillEntry(root));
 }
 
 function main(argv) {
