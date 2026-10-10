@@ -117,17 +117,25 @@ export function auditSession(dir, root, skill) {
 	}
 	let bootExit;
 	let bootErr;
+	let bootExitRaw;
+	let bootErrBuf;
 	let piVersion;
 	let nodeVersion;
+	let promptWanted;
+	// Read each evidence file exactly once: the same bytes are validated here
+	// and hashed into the attestation, so a later mutation cannot produce a
+	// successful attestation whose hashes identify invalid evidence.
 	try {
-		bootExit = fs.readFileSync(`${dir}/exit-status`, "utf8").trim();
-		bootErr = fs.readFileSync(`${dir}/stderr.txt`).length;
+		bootExitRaw = fs.readFileSync(`${dir}/exit-status`, "utf8");
+		bootErrBuf = fs.readFileSync(`${dir}/stderr.txt`);
+		bootExit = bootExitRaw.trim();
+		bootErr = bootErrBuf.length;
 		piVersion = fs.readFileSync(`${dir}/pi-version`, "utf8").trim().replace(/^v/, "");
 		nodeVersion = fs
 			.readFileSync(`${dir}/node-version`, "utf8")
 			.trim()
 			.replace(/^v/, "");
-		fs.readFileSync(`${dir}/prompt.txt`, "utf8");
+		promptWanted = fs.readFileSync(`${dir}/prompt.txt`, "utf8");
 	} catch {
 		throw new Error(
 			"missing process-evidence files (exit-status, stderr.txt, pi-version, node-version, prompt.txt)",
@@ -143,7 +151,9 @@ export function auditSession(dir, root, skill) {
 		throw new Error(`boot not clean: exit ${bootExit}, stderr ${bootErr} bytes`);
 	}
 	const text = fs.readFileSync(`${dir}/${files[0]}`, "utf8");
-	const lines = text.trim().split("\n").filter(Boolean);
+	// Strip only the trailing newline terminator: blank interior lines are
+	// malformed JSONL and fail closed in the parse below.
+	const lines = text.replace(/\n$/, "").split("\n");
 	const recs = lines.map((l) => {
 		try {
 			return JSON.parse(l);
@@ -166,8 +176,11 @@ export function auditSession(dir, root, skill) {
 	if (!sess || sess.cwd !== root) {
 		throw new Error(`session cwd mismatch: expected ${root}`);
 	}
-	const promptWanted = fs.readFileSync(`${dir}/prompt.txt`, "utf8");
-	const userRec = recs.find((r) => r.message?.role === "user");
+	const userRecs = recs.filter((r) => r.message?.role === "user");
+	if (userRecs.length !== 1) {
+		throw new Error(`expected exactly 1 user record, found ${userRecs.length}`);
+	}
+	const userRec = userRecs[0];
 	const userText = Array.isArray(userRec?.message?.content)
 		? userRec.message.content
 				.filter((c) => c?.type === "text")
@@ -243,6 +256,21 @@ export function auditSession(dir, root, skill) {
 	if (extras.length > 0) {
 		throw new Error(`UNEXPECTED advertised skills:\n${extras.join("\n")}`);
 	}
+	// A duplicate alias (one inventory skill also reachable through a second
+	// in-checkout symlink) collapses in the canonical set, so the count of
+	// checkout-affiliated lexical locations must match the inventory exactly.
+	const checkoutLexical = [...locations].filter((l) => {
+		try {
+			return fs.realpathSync(l).startsWith(skillRoot + "/");
+		} catch {
+			return false;
+		}
+	});
+	if (checkoutLexical.length !== names.length) {
+		throw new Error(
+			`expected ${names.length} checkout skill advertisements, found ${checkoutLexical.length}`,
+		);
+	}
 	const dirty = execSync("git status --porcelain --untracked-files=all").toString().trim();
 	if (dirty) {
 		throw new Error(`working tree dirty:\n${dirty}`);
@@ -260,11 +288,12 @@ export function auditSession(dir, root, skill) {
 		throw new Error("package.json changed since the run");
 	}
 	const sha = (p) => createHash("sha256").update(fs.readFileSync(p)).digest("hex");
+	const shaText = (s) => createHash("sha256").update(s).digest("hex");
 	let out =
 		`clean ${head}\n` +
-		`transcript ${createHash("sha256").update(text).digest("hex")}\n` +
-		`exit-status ${sha(`${dir}/exit-status`)}\n` +
-		`stderr ${sha(`${dir}/stderr.txt`)}\n` +
+		`transcript ${shaText(text)}\n` +
+		`exit-status ${shaText(bootExitRaw)}\n` +
+		`stderr ${shaText(bootErrBuf)}\n` +
 		`pi ${piVersion}\n` +
 		`node ${nodeVersion}\n` +
 		`provider ${wantModel[0]}\n` +
@@ -282,9 +311,9 @@ export function auditSession(dir, root, skill) {
 			if (m.role === "toolResult") results.set(m.toolCallId, m);
 		}
 		// pi may advertise and read lexical paths through symlinked resources;
-		// canonicalize the read path so either spelling matches the target —
-		// but the recorded read must target a checkout path, or an external
-		// alias could vouch for content the checkout never served.
+		// canonicalize the read path first, so a lexical path through a
+		// symlinked checkout still matches, then compare canonically — an
+		// unresolvable or external path cannot vouch for the target.
 		const hit = calls.some((t) => {
 			const r = results.get(t.id);
 			if (
@@ -296,9 +325,6 @@ export function auditSession(dir, root, skill) {
 					t.arguments?.path
 				)
 			) {
-				return false;
-			}
-			if (!t.arguments.path.startsWith(root + path.sep)) {
 				return false;
 			}
 			try {
