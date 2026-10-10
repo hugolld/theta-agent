@@ -29,9 +29,9 @@ built as a [pi package](https://pi.dev) rather than a monolithic fork:
   light local sandbox for small tasks
 - **Models**: any of pi's 48 providers — bring your own key
 
-Theta ships today as a pi package. The staged plan (M7–M8) grows it into a
-standalone `theta` application with pi embedded as the core engine — macOS and
-Linux first, Windows later.
+Theta works today as a pi package from a checkout. The staged plan (M7–M8)
+grows it into a standalone `theta` application with pi embedded as the core
+engine — macOS and Linux first, Windows later.
 
 ## Roadmap
 
@@ -50,8 +50,8 @@ Linux first, Windows later.
 pi install npm:theta-agent
 ```
 
-Not yet live: the registry still serves the 0.0.1 name reservation. The
-commands on this page work from 0.0.2.
+Requires theta-agent ≥ 0.0.2 on the registry; earlier versions predate the
+launcher.
 
 ## Try it
 
@@ -65,8 +65,12 @@ npm i -g theta-agent
 theta
 ```
 
-Works from 0.0.2 — the registry still serves the 0.0.1 name reservation
-until the owner publishes. That launches pi with the Theta package preloaded. `theta --dev` loads Theta from a local checkout — either the launcher's own repo, or the directory you name with `$THETA_DEV_ROOT` (theta never loads an arbitrary current directory this way). Theta targets pi ≥ 0.99; if `theta` reports `pi not found`, install pi with the command above and retry.
+Requires theta-agent ≥ 0.0.2 on the registry. That launches pi with the
+Theta package preloaded. `theta --dev` loads Theta from a local checkout —
+either the launcher's own repo, or the directory you name with
+`$THETA_DEV_ROOT` (theta never loads an arbitrary current directory this
+way). Theta targets pi ≥ 0.99; if `theta` reports `pi not found`, install
+pi with the command above and retry.
 
 ## Vendored skills
 
