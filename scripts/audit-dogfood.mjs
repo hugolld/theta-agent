@@ -522,5 +522,6 @@ if (
 	process.argv[1] !== undefined &&
 	fileURLToPath(import.meta.url) === path.resolve(process.argv[1])
 ) {
-	process.exit(main(process.argv.slice(2)));
+	// process.exit truncates piped stdout on macOS; exitCode lets Node flush.
+	process.exitCode = main(process.argv.slice(2));
 }
