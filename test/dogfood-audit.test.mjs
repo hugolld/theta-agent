@@ -65,7 +65,7 @@ test("decodeXmlEntities decodes pi's entity set", () => {
 	);
 });
 
-test("extractLocations returns decoded locations or null", () => {
+test("extractLocations returns decoded locations and rejects other counts", () => {
 	const text =
 		"<available_skills><skill><name>a</name>" +
 		"<location>/x/skills/a/SKILL.md</location>" +
@@ -75,7 +75,18 @@ test("extractLocations returns decoded locations or null", () => {
 	assert.equal(locs.size, 2);
 	assert.ok(locs.has("/x/skills/a/SKILL.md"));
 	assert.ok(locs.has("/x/skills/b's/SKILL.md"));
-	assert.equal(extractLocations("no section here"), null);
+	assert.throws(
+		() => extractLocations("no section here"),
+		/exactly 1 available_skills block, found 0/,
+	);
+	assert.throws(
+		() =>
+			extractLocations(
+				text +
+					"<available_skills><skill><name>ghost</name><location>/x/ghost/SKILL.md</location></skill></available_skills>",
+			),
+		/exactly 1 available_skills block, found 2/,
+	);
 });
 
 test("resolveAdvertisedSkill rejects traversal and non-skill paths", () => {
@@ -144,20 +155,24 @@ function buildSession(t, repo, overrides = {}) {
 	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "dogfood-session-"));
 	t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
 	const names = overrides.advertisedNames ?? ["literature-review"];
-	let locs = names
+	let entries = names
 		.map(
 			(n) =>
 				`<skill><name>${n}</name><location>${repo}/skills/${n}/SKILL.md</location></skill>`,
 		)
 		.join("\n");
-	const prompt = overrides.transcriptPrompt ?? "test prompt";
 	if (!overrides.noHostSkill) {
 		const hostDir = fs.mkdtempSync(path.join(os.tmpdir(), "host-skill-"));
 		t.after(() => fs.rmSync(hostDir, { recursive: true, force: true }));
 		const hostFile = path.join(hostDir, "SKILL.md");
 		fs.writeFileSync(hostFile, "host skill content\n");
-		locs += `\n<skill><name>host-skill</name><location>${hostFile}</location></skill>`;
+		entries += `\n<skill><name>host-skill</name><location>${hostFile}</location></skill>`;
 	}
+	const wrapped = `<available_skills>${entries}</available_skills>`;
+	const skillsText = overrides.secondSkillsBlock
+		? `${wrapped}<available_skills><skill><name>ghost</name><location>/tmp/ghost/SKILL.md</location></skill></available_skills>`
+		: wrapped;
+	const prompt = overrides.transcriptPrompt ?? "test prompt";
 	const records = [
 		JSON.stringify({ type: "session", cwd: overrides.sessionCwd ?? repo }),
 		JSON.stringify({
@@ -169,7 +184,7 @@ function buildSession(t, repo, overrides = {}) {
 			type: "message",
 			message: {
 				role: "system",
-				sections: { skills: `<available_skills>${locs}</available_skills>` },
+				sections: { skills: skillsText },
 			},
 		}),
 		JSON.stringify({
@@ -201,7 +216,7 @@ function buildSession(t, repo, overrides = {}) {
 				message: {
 					role: "toolResult",
 					toolCallId: "call_test",
-					toolName: "read",
+					toolName: overrides.toolName ?? "read",
 					isError: overrides.toolResultIsError,
 					content: [{ type: "text", text: "skill content\n" }],
 				},
@@ -262,6 +277,14 @@ test("auditSession attests skill use when paired and errors otherwise", (t) => {
 	const bad = buildSession(t, repo, { toolResultIsError: true });
 	assert.throws(
 		() => auditIn(repo, () => auditSession(bad, repo, "skills/literature-review/SKILL.md")),
+		/NOT used/,
+	);
+	const wrongTool = buildSession(t, repo, {
+		toolResultIsError: false,
+		toolName: "other",
+	});
+	assert.throws(
+		() => auditIn(repo, () => auditSession(wrongTool, repo, "skills/literature-review/SKILL.md")),
 		/NOT used/,
 	);
 });
@@ -328,6 +351,12 @@ test("auditSession fails on corrupt, mismatched, or stale evidence", (t) => {
 	assert.throws(
 		() => auditIn(repo, () => auditSession(timedOut, repo)),
 		/watchdog fired/,
+	);
+
+	const twoBlocks = buildSession(t, repo, { secondSkillsBlock: true });
+	assert.throws(
+		() => auditIn(repo, () => auditSession(twoBlocks, repo)),
+		/exactly 1 available_skills block/,
 	);
 
 	const dirtyRepo = makeTempRepo(t);

@@ -66,13 +66,18 @@ export function decodeXmlEntities(s) {
 	);
 }
 
-// The advertised skill locations live in one <available_skills> block inside
-// the skills section pi maintains (message.sections.skills).
+// The advertised skill locations live in exactly one <available_skills> block
+// inside the skills section pi maintains (message.sections.skills). A second
+// block could hide advertisement drift, so any other count throws.
 export function extractLocations(skillsText) {
-	const section = skillsText.match(/<available_skills>([\s\S]*?)<\/available_skills>/);
-	if (!section) return null;
+	const blocks = skillsText.match(/<available_skills>[\s\S]*?<\/available_skills>/g);
+	if (!blocks || blocks.length !== 1) {
+		throw new Error(
+			`expected exactly 1 available_skills block, found ${blocks ? blocks.length : 0}`,
+		);
+	}
 	return new Set(
-		[...section[1].matchAll(/<location>([\s\S]*?)<\/location>/g)].map((m) =>
+		[...blocks[0].matchAll(/<location>([\s\S]*?)<\/location>/g)].map((m) =>
 			decodeXmlEntities(m[1]),
 		),
 	);
@@ -267,10 +272,23 @@ export function auditSession(dir, root, skill) {
 			if (m.role === "toolResult") results.set(m.toolCallId, m);
 		}
 		// pi may advertise and read lexical paths through symlinked resources;
-		// canonicalize the read path so either spelling matches the target.
+		// canonicalize the read path so either spelling matches the target —
+		// but the recorded read must target a checkout path, or an external
+		// alias could vouch for content the checkout never served.
 		const hit = calls.some((t) => {
 			const r = results.get(t.id);
-			if (!(t.name === "read" && r && r.isError === false && t.arguments?.path)) {
+			if (
+				!(
+					t.name === "read" &&
+					r &&
+					r.toolName === "read" &&
+					r.isError === false &&
+					t.arguments?.path
+				)
+			) {
+				return false;
+			}
+			if (!t.arguments.path.startsWith(root + path.sep)) {
 				return false;
 			}
 			try {
