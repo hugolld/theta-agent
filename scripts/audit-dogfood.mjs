@@ -414,30 +414,33 @@ export function auditSession(dir, rootArg, skill) {
 			);
 		}
 		const calls = [];
-		const callIds = new Set();
+		const callOrder = new Map();
 		const results = new Map();
+		let recordIndex = 0;
 		for (const r of recs) {
 			const m = r.message;
+			recordIndex += 1;
 			if (!m) continue;
 			if (Array.isArray(m.content))
 				for (const t of m.content) {
 					if (t?.type !== "toolCall") continue;
-					if (callIds.has(t.id)) {
+					if (callOrder.has(t.id)) {
 						throw new Error(`duplicate toolCall id: ${t.id}`);
 					}
-					callIds.add(t.id);
+					callOrder.set(t.id, recordIndex);
 					calls.push(t);
 				}
 			if (m.role === "toolResult") {
 				if (results.has(m.toolCallId)) {
 					throw new Error(`duplicate toolResult for ${m.toolCallId}`);
 				}
-				results.set(m.toolCallId, m);
+				results.set(m.toolCallId, { recordIndex, message: m });
 			}
 		}
-		// Every call needs exactly one matching result and every result a
-		// call: a spliced or incomplete tool graph cannot attest skill use.
-		const orphans = [...results.keys()].filter((id) => !callIds.has(id));
+		// The tool graph must be temporally consistent: every call needs
+		// exactly one later matching result, every result an earlier call —
+		// a spliced transcript pairing a result with a later call fails.
+		const orphans = [...results.keys()].filter((id) => !callOrder.has(id));
 		const unanswered = calls.filter((t) => !results.has(t.id));
 		if (orphans.length > 0) {
 			throw new Error(`orphan toolResults without calls:\n${orphans.join("\n")}`);
@@ -447,6 +450,12 @@ export function auditSession(dir, rootArg, skill) {
 				`tool calls without results:\n${unanswered.map((t) => t.id).join("\n")}`,
 			);
 		}
+		for (const t of calls) {
+			const r = results.get(t.id);
+			if (r && r.recordIndex < callOrder.get(t.id)) {
+				throw new Error(`toolResult for ${t.id} precedes its toolCall`);
+			}
+		}
 		// pi may advertise and read lexical paths through symlinked resources;
 		// canonicalize the read path first, so a lexical path through a
 		// symlinked checkout still matches, then compare canonically — an
@@ -455,7 +464,8 @@ export function auditSession(dir, rootArg, skill) {
 		// must equal the current file contents, so only a read of the whole
 		// file can satisfy the check no matter what arguments were passed.
 		const hit = calls.some((t) => {
-			const r = results.get(t.id);
+			const paired = results.get(t.id);
+			const r = paired?.message;
 			if (
 				!(
 					t.name === "read" &&

@@ -604,16 +604,20 @@ test("auditSession accepts a sanitized real pi transcript (golden)", (t) => {
 	run("git add -A");
 	run("git -c commit.gpgsign=false commit -qm init");
 
+	const rawFixture = fs.readFileSync(
+		"test/fixtures/real-pi-transcript.jsonl",
+		"utf8",
+	);
+	// The portability guard inspects the raw fixture bytes before any
+	// substitution: machine-specific absolute paths must never be committed.
+	if (/\/Users\/|\/opt\/homebrew/.test(rawFixture)) {
+		throw new Error("golden fixture contains machine-specific absolute paths");
+	}
 	const real = fs.realpathSync(repo);
-	let golden = fs
-		.readFileSync("test/fixtures/real-pi-transcript.jsonl", "utf8")
-		.replaceAll("__REPO__", real);
+	let golden = rawFixture.replaceAll("__REPO__", real);
 	// Materialize the host-skill files the real session had advertised: pi
 	// runs with the operator's host skills, and the fixture must carry no
 	// machine-specific absolute paths.
-	if (golden.includes("/Users/")) {
-		throw new Error("golden fixture contains machine-specific /Users/ paths");
-	}
 	const hostRoot = fs.mkdtempSync(path.join(os.tmpdir(), "golden-host-"));
 	t.after(() => fs.rmSync(hostRoot, { recursive: true, force: true }));
 	for (const m of golden.matchAll(/__HOST_SKILLS__\/([^"']+?\/SKILL\.md)/g)) {
