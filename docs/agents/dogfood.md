@@ -23,7 +23,7 @@ echo $? > "$sd/exit-status"
 
 The pi session transcript is the record. Pi advertises the skill library in the session's system records — assert against those records only. Grepping the whole file proves nothing: the user prompt and tool activity can carry a skill name into a session where nothing was advertised.
 
-The oracle is the checked-in `test/expected-skills.json` inventory, not the `skills/` tree, so a dirty checkout cannot shrink the expectation silently. The audit reads only the `skills` section of the system records (`message.sections.skills` — the field pi maintains) — host skills and project context share the system prompt, so raw text elsewhere in it can vouch for nothing. Locations are XML-decoded (including `&apos;`) and compared exactly. Every transcript line must parse — a corrupt or truncated file fails loudly instead of quietly shrinking the evidence. The same audit re-verifies the boot-clean process files: a non-zero `exit-status`, a non-empty `stderr.txt`, or missing files fails before the transcript is even parsed. On success it prints one binding line — the Git HEAD plus SHA-256 digests of the transcript and the inventory it audited — so the evidence names exactly what it attests; keep that line with the run's record. Printed output on failure, or any non-zero exit, fails the criterion. The root comes from `fs.realpathSync`, so a symlinked checkout still matches the advertised paths.
+The oracle is the checked-in `test/expected-skills.json` inventory, not the `skills/` tree, so a dirty checkout cannot shrink the expectation silently. The audit reads only the `skills` section of the system records (`message.sections.skills` — the field pi maintains) — host skills and project context share the system prompt, so raw text elsewhere in it can vouch for nothing. Locations are XML-decoded (including `&apos;`) and compared exactly. Every transcript line must parse — a corrupt or truncated file fails loudly instead of quietly shrinking the evidence. The same audit re-verifies the boot-clean process files: a non-zero `exit-status`, a non-empty `stderr.txt`, or missing files fails before the transcript is even parsed. On success it prints a full SHA-256 attestation — the Git HEAD plus digests of the transcript, both process files, and the audited inventory — so the evidence names exactly what it attests; keep that output with the run's record. Printed output on failure, or any non-zero exit, fails the criterion. The root comes from `fs.realpathSync`, so a symlinked checkout still matches the advertised paths.
 
 ```sh
 node -e '
@@ -84,9 +84,12 @@ node -e '
   const crypto = require("crypto");
   const head = execSync("git rev-parse HEAD").toString().trim();
   const sha = p =>
-    crypto.createHash("sha256").update(fs.readFileSync(p)).digest("hex").slice(0, 12);
-  console.log("clean " + head + " transcript:" + sha(dir + "/" + files[0]) +
-    " inventory:" + sha("test/expected-skills.json"));
+    crypto.createHash("sha256").update(fs.readFileSync(p)).digest("hex");
+  console.log("clean " + head +
+    "\ntranscript " + sha(dir + "/" + files[0]) +
+    "\nexit-status " + sha(dir + "/exit-status") +
+    "\nstderr " + sha(dir + "/stderr.txt") +
+    "\ninventory " + sha("test/expected-skills.json"));
   process.exit(0);
 ' "$sd"
 ```
