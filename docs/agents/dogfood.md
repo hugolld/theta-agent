@@ -25,13 +25,36 @@ The pi session transcript is the record. Pi advertises the skill library in the 
 ```sh
 f=$(ls "$sd"/*.jsonl | head -1)
 for d in skills/*/; do
-  grep -m1 '"role":"system"' "$f" | grep -q "$PWD/${d}SKILL.md" || echo "NOT advertised: $d"
+  grep -m1 '"role":"system"' "$f" | grep -Fq "$PWD/${d}SKILL.md" || echo "NOT advertised: $d"
 done
 ```
 
 Each line anchors the skill's absolute path in this `--dev` checkout (`$PWD/skills/<name>/SKILL.md`), so the evidence ties to this checkout and not to an installed copy. The expected set comes from `skills/*/` at run time, so it cannot go stale. Silence means every skill was advertised.
 
-For a spot-check, prompt a real task that routes into the named skill, then confirm in the transcript that the skill's files or scripts were actually used — grep for the skill's path or a script name. A reply that merely describes the skill is not evidence.
+For a spot-check, prompt a real task that routes into the named skill, then require a tool to have run on the skill's files: a `toolCall` whose arguments carry the skill's checkout path, paired by `toolCallId` with a `toolResult` that reports no error. The system record alone cannot prove use — it advertises every path — and a reply that merely describes the skill is not evidence.
+
+```sh
+node -e '
+  const fs = require("fs");
+  const [file, root, skill] = process.argv.slice(1);
+  const recs = fs.readFileSync(file, "utf8").trim().split("\n")
+    .map(l => { try { return JSON.parse(l); } catch { return null; } })
+    .filter(Boolean);
+  const calls = [], results = new Map();
+  for (const r of recs) {
+    const m = r.message; if (!m) continue;
+    if (Array.isArray(m.content))
+      for (const t of m.content) if (t?.type === "toolCall") calls.push(t);
+    if (m.role === "toolResult") results.set(m.toolCallId, m);
+  }
+  const hit = calls.some(t => {
+    const r = results.get(t.id);
+    return r && r.isError !== true &&
+      JSON.stringify(t.arguments ?? {}).includes(root + "/" + skill);
+  });
+  console.log(hit ? "used" : "NOT used");
+' "$f" "$PWD" "skills/literature-review/SKILL.md"
+```
 
 ## Clean up after
 
