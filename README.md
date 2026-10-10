@@ -47,11 +47,12 @@ engine — macOS and Linux first, Windows later.
 ## Install
 
 ```sh
-pi install npm:theta-agent
+pi install npm:theta-agent@0.0.2
 ```
 
 Requires theta-agent ≥ 0.0.2 on the registry; earlier versions predate the
-launcher. If the registry is not there yet, run Theta from a checkout
+launcher, and a version-pinned install fails loudly until 0.0.2 is
+visible. If the registry is not there yet, run Theta from a checkout
 instead — see [Try it](#try-it).
 
 ## Try it
@@ -77,7 +78,7 @@ the launcher — if the registry is not there yet, stay on the checkout
 path above), the installed form is:
 
 ```sh
-npm i -g theta-agent
+npm i -g theta-agent@0.0.2
 theta
 ```
 
