@@ -11,21 +11,19 @@ sd=$(mktemp -d)
 node bin/theta.mjs --dev --provider zai-coding-cn --model glm-5.3-flash \
   --session-dir "$sd" --print "<prompt>" 2> "$sd/stderr.txt" < /dev/null
 echo $? > "$sd/exit-status"
-wc -c < "$sd/stderr.txt" # boot-clean also needs this to be 0
-cat "$sd/exit-status"    # boot-clean needs this to be 0
 ```
 
 - Pass provider and model explicitly: pi's default model can 401 with an invalid bearer token.
 - Close stdin (`< /dev/null`): `pi --print` waits for stdin EOF even with a prompt argument, and a shell that leaves the pipe open hangs the session silently (found in the issue #8 close-out dogfood — 50 minutes, zero output, zero CPU).
 - Run inside an isolated `--session-dir`: the fresh temp dir holds exactly this run's transcript, so the audit below can never pick up another session (a newest-by-mtime lookup races every other pi session on the machine).
 - Keep the prompt neutral: a prompt that names a skill adds nothing, and a neutral one keeps the spot-check honest.
-- Boot-clean is process evidence: `exit-status` must hold 0 and `stderr.txt` must be 0 bytes. Both persist in the session dir next to the transcript, so a later audit can re-verify them.
+- Boot-clean is process evidence: `exit-status` must hold 0 and `stderr.txt` must be 0 bytes. Both persist in the session dir next to the transcript, and the audit below re-verifies them fail-closed.
 
 ## Ground-truth the evidence
 
 The pi session transcript is the record. Pi advertises the skill library in the session's system records — assert against those records only. Grepping the whole file proves nothing: the user prompt and tool activity can carry a skill name into a session where nothing was advertised.
 
-The oracle is the checked-in `test/expected-skills.json` inventory, not the `skills/` tree, so a dirty checkout cannot shrink the expectation silently. The audit reads only the structured `<available_skills>` entries of the system records — host skills and project context share that prompt, so raw text in it can vouch for nothing. Locations are XML-decoded (including `&apos;`) and compared exactly. Every transcript line must parse — a corrupt or truncated file fails loudly instead of quietly shrinking the evidence. Exit 0 means every inventory skill was advertised; printed output or any non-zero exit fails the criterion. The root comes from `fs.realpathSync`, so a symlinked checkout still matches the advertised paths.
+The oracle is the checked-in `test/expected-skills.json` inventory, not the `skills/` tree, so a dirty checkout cannot shrink the expectation silently. The audit reads only the structured `<available_skills>` entries of the system records — host skills and project context share that prompt, so raw text in it can vouch for nothing. Locations are XML-decoded (including `&apos;`) and compared exactly. Every transcript line must parse — a corrupt or truncated file fails loudly instead of quietly shrinking the evidence. The same audit re-verifies the boot-clean process files: a non-zero `exit-status`, a non-empty `stderr.txt`, or missing files fails before the transcript is even parsed. Exit 0 means every inventory skill was advertised and the boot was clean; printed output or any non-zero exit fails the criterion. The root comes from `fs.realpathSync`, so a symlinked checkout still matches the advertised paths.
 
 ```sh
 node -e '
@@ -39,6 +37,19 @@ node -e '
   }
   const lines = fs.readFileSync(dir + "/" + files[0], "utf8")
     .trim().split("\n").filter(Boolean);
+  let bootExit;
+  let bootErr;
+  try {
+    bootExit = fs.readFileSync(dir + "/exit-status", "utf8").trim();
+    bootErr = fs.readFileSync(dir + "/stderr.txt").length;
+  } catch {
+    console.error("missing process-evidence files (exit-status, stderr.txt)");
+    process.exit(1);
+  }
+  if (bootExit !== "0" || bootErr !== 0) {
+    console.error("boot not clean: exit " + bootExit + ", stderr " + bootErr + " bytes");
+    process.exit(1);
+  }
   const recs = lines.map(l => {
     try { return JSON.parse(l); } catch (e) {
       console.error("corrupt transcript: " + e.message);
