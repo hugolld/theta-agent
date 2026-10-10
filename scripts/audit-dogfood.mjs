@@ -23,7 +23,7 @@ export function ge(a, b) {
 			return null;
 		}
 		return {
-			core: [Number(m[1]), Number(m[2]), Number(m[3])],
+			core: [BigInt(m[1]), BigInt(m[2]), BigInt(m[3])],
 			pre: m[4] === undefined ? null : m[4].split("."),
 		};
 	};
@@ -210,9 +210,15 @@ export function auditSession(dir, rootArg, skill) {
 		throw new Error(`expected exactly 1 user record, found ${userRecs.length}`);
 	}
 	// A completed one-shot ends with the assistant's response: a transcript
-	// truncated at a record boundary cannot attest a full session.
+	// truncated at a record boundary cannot attest a full session. A final
+	// assistant record that still carries a tool request is a truncated
+	// mid-tool turn, not a completed response.
 	const last = recs[recs.length - 1];
-	if (last?.message?.role !== "assistant") {
+	const lastContent = last?.message?.content;
+	const endsWithToolCall =
+		Array.isArray(lastContent) &&
+		lastContent.some((c) => c?.type === "toolCall");
+	if (last?.message?.role !== "assistant" || endsWithToolCall) {
 		throw new Error(
 			"transcript does not end with an assistant response — truncated session",
 		);
@@ -345,27 +351,6 @@ export function auditSession(dir, rootArg, skill) {
 	if (curManifest !== manifestSha) {
 		throw new Error("package.json changed since the run");
 	}
-	if (promptWanted.includes("SKILL.md")) {
-		throw new Error(
-			"spot-check prompt names the SKILL.md file — a routed task must not read the file on direct instruction",
-		);
-	}
-	if (skill !== undefined) {
-		// A routed prompt must not name the selected skill either: steering
-		// the model to the skill by name is instruction, not routing.
-		const skillName = skill.split("/")[0].replace(/[-_]/g, " ");
-		const lowered = promptWanted.toLowerCase();
-		if (
-			lowered.includes(skillName) ||
-			lowered.includes(skill.split("/")[0].replace(/[-_]/g, "_")) ||
-			lowered.includes(skill.split("/")[0])
-		) {
-			throw new Error(
-				"spot-check prompt names the selected skill — a routed task must reach it on its own",
-			);
-		}
-	}
-	const sha = (p) => createHash("sha256").update(fs.readFileSync(p)).digest("hex");
 	const shaText = (s) => createHash("sha256").update(s).digest("hex");
 	let out =
 		`clean ${head}\n` +
@@ -379,9 +364,28 @@ export function auditSession(dir, rootArg, skill) {
 		`inventory ${shaText(inventoryText)}`;
 	if (skill !== undefined) {
 		const target = resolveAdvertisedSkill(root, skill, expected);
-		// The skill bytes as they exist at audit time (after the clean-tree
-		// gate): the paired read result must equal exactly these contents.
-		const skillBytes = fs.readFileSync(target, "utf8");
+		// The skill bytes are read exactly once: the paired read result must
+		// equal these validated bytes, and the attested digest hashes the same
+		// buffer — no second read can separate validated from attested bytes.
+		const skillBuf = fs.readFileSync(target);
+		const skillText = skillBuf.toString("utf8");
+		// A routed prompt must not name the selected skill or its file:
+		// steering the model there is instruction, not routing. The name is
+		// derived from the target's parent directory, not from the argument
+		// string, and compared case-insensitively across spellings.
+		const skillName = path.basename(path.dirname(target));
+		const promptVariants = [
+			skillName,
+			skillName.replace(/-/g, " "),
+			skillName.replace(/-/g, "_"),
+			path.basename(target),
+			target,
+		].map((v) => v.toLowerCase());
+		if (promptVariants.some((v) => promptWanted.toLowerCase().includes(v))) {
+			throw new Error(
+				"spot-check prompt names the selected skill or its file — a routed task must reach it on its own",
+			);
+		}
 		const calls = [];
 		const results = new Map();
 		for (const r of recs) {
@@ -427,12 +431,24 @@ export function auditSession(dir, rootArg, skill) {
 						.map((c) => c.text)
 						.join("")
 				: (typeof r.content === "string" ? r.content : "");
-			return resultText === skillBytes;
+			return resultText === skillText;
 		});
 		if (!hit) {
 			throw new Error("NOT used");
 		}
-		out += `\nused ${target}\nskill-content ${sha(target)}`;
+		out += `\nused ${target}\nskill-content ${createHash("sha256").update(skillBuf).digest("hex")}`;
+	}
+	// Final state recheck: the audited bytes and the cited HEAD must still
+	// describe the tree at attestation time.
+	const dirtyFinal = execSync("git status --porcelain --untracked-files=all", {
+		cwd: root,
+	}).toString().trim();
+	if (dirtyFinal) {
+		throw new Error(`working tree dirty at attestation time:\n${dirtyFinal}`);
+	}
+	const headFinal = execSync("git rev-parse HEAD", { cwd: root }).toString().trim();
+	if (headFinal !== head) {
+		throw new Error(`HEAD moved during audit: ${head} -> ${headFinal}`);
 	}
 	return out;
 }

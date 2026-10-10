@@ -38,6 +38,11 @@ test("ge compares large numeric prerelease identifiers losslessly", () => {
 	assert.equal(ge("1.0.0-9007199254740992", "1.0.0-9007199254740993"), false);
 });
 
+test("ge compares large numeric core components losslessly", () => {
+	assert.equal(ge("9007199254740993.0.0", "9007199254740992.0.0"), true);
+	assert.equal(ge("9007199254740992.0.0", "9007199254740993.0.0"), false);
+});
+
 test("ge fails closed on malformed versions", () => {
 	assert.equal(ge("0.99.", "0.99"), false);
 	assert.equal(ge("0.99.0-beta", "0.99"), false);
