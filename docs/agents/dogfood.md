@@ -23,7 +23,7 @@ echo $? > "$sd/exit-status"
 
 The pi session transcript is the record. Pi advertises the skill library in the session's system records — assert against those records only. Grepping the whole file proves nothing: the user prompt and tool activity can carry a skill name into a session where nothing was advertised.
 
-The oracle is the checked-in `test/expected-skills.json` inventory, not the `skills/` tree, so a dirty checkout cannot shrink the expectation silently. The audit reads only the structured `<available_skills>` entries of the system records — host skills and project context share that prompt, so raw text in it can vouch for nothing. Locations are XML-decoded (including `&apos;`) and compared exactly. Every transcript line must parse — a corrupt or truncated file fails loudly instead of quietly shrinking the evidence. The same audit re-verifies the boot-clean process files: a non-zero `exit-status`, a non-empty `stderr.txt`, or missing files fails before the transcript is even parsed. Exit 0 means every inventory skill was advertised and the boot was clean; printed output or any non-zero exit fails the criterion. The root comes from `fs.realpathSync`, so a symlinked checkout still matches the advertised paths.
+The oracle is the checked-in `test/expected-skills.json` inventory, not the `skills/` tree, so a dirty checkout cannot shrink the expectation silently. The audit reads only the `skills` section of the system records (`message.sections.skills` — the field pi maintains) — host skills and project context share the system prompt, so raw text elsewhere in it can vouch for nothing. Locations are XML-decoded (including `&apos;`) and compared exactly. Every transcript line must parse — a corrupt or truncated file fails loudly instead of quietly shrinking the evidence. The same audit re-verifies the boot-clean process files: a non-zero `exit-status`, a non-empty `stderr.txt`, or missing files fails before the transcript is even parsed. Exit 0 means every inventory skill was advertised and the boot was clean; printed output or any non-zero exit fails the criterion. The root comes from `fs.realpathSync`, so a symlinked checkout still matches the advertised paths.
 
 ```sh
 node -e '
@@ -56,11 +56,11 @@ node -e '
       process.exit(1);
     }
   });
-  const sys = recs
+  const skillsText = recs
     .filter(r => r.message?.role === "system")
-    .map(r => JSON.stringify(r.message))
+    .map(r => r.message?.sections?.skills ?? "")
     .join("");
-  const section = sys.match(/<available_skills>([\s\S]*?)<\/available_skills>/);
+  const section = skillsText.match(/<available_skills>([\s\S]*?)<\/available_skills>/);
   if (!section) {
     console.error("no available_skills section in system records");
     process.exit(1);
