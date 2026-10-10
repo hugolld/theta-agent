@@ -110,9 +110,14 @@ node -e '
     }
   }
   const manifest = JSON.parse(fs.readFileSync("package.json", "utf8"));
+  const raw = manifest.pi?.skills ?? ["./skills"];
+  if (!Array.isArray(raw) || raw.length !== 1 ||
+      typeof raw[0] !== "string" || /[*?[\]{}]/.test(raw[0])) {
+    console.error("audit supports a single plain-directory pi.skills entry");
+    process.exit(1);
+  }
   const path = require("path");
-  const skillRoots = (manifest.pi?.skills ?? ["./skills"]).map(s =>
-    path.resolve(root, s));
+  const skillRoots = [path.resolve(root, raw[0])];
   const expected = new Set(names.map(n => root + "/skills/" + n + "/SKILL.md"));
   const extras = [...locations].filter(l =>
     skillRoots.some(r => l.startsWith(r + "/")) && !expected.has(l));
