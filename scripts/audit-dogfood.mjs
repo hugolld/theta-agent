@@ -210,7 +210,11 @@ export function auditSession(dir, root, skill) {
 		throw new Error(`NOT advertised: ${missing.join(", ")}`);
 	}
 	const expected = new Set(names.map((n) => `${skillRoot}/${n}/SKILL.md`));
-	const extras = [...realAdvertised].filter((l) => !expected.has(l));
+	// Only advertised skills inside the checkout are extras; host-level skills
+	// (pi also advertises the user's own global skills) are the environment.
+	const extras = [...realAdvertised].filter(
+		(l) => l.startsWith(root + path.sep) && !expected.has(l),
+	);
 	if (extras.length > 0) {
 		throw new Error(`UNEXPECTED advertised skills:\n${extras.join("\n")}`);
 	}

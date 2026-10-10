@@ -107,12 +107,21 @@ function buildSession(t, overrides = {}) {
 	t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
 	const root = realRoot;
 	const advertised = overrides.advertisedNames ?? inventoryNames;
-	const locs = advertised
+	let locs = advertised
 		.map(
 			(n) =>
 				`<skill><name>${n}</name><location>${root}/skills/${n}/SKILL.md</location></skill>`,
 		)
 		.join("\n");
+	// pi also advertises the user's host-level skills from outside the
+	// checkout; they are the environment, not extras.
+	if (!overrides.noHostSkills) {
+		const hostDir = fs.mkdtempSync(path.join(os.tmpdir(), "host-skill-"));
+		t.after(() => fs.rmSync(hostDir, { recursive: true, force: true }));
+		const hostFile = path.join(hostDir, "SKILL.md");
+		fs.writeFileSync(hostFile, "host skill content\n");
+		locs += `\n<skill><name>host-skill</name><location>${hostFile}</location></skill>`;
+	}
 	const thePrompt = overrides.prompt ?? prompt;
 	const records = [
 		JSON.stringify({ type: "session", cwd: root }),
@@ -192,6 +201,11 @@ test("auditSession attests a well-formed boot session", (t) => {
 	assert.match(out, /^clean /);
 	assert.match(out, /provider zai-coding-cn/);
 	assert.match(out, /model glm-5.3-flash/);
+});
+
+test("auditSession ignores host skills advertised from outside the checkout", (t) => {
+	const dir = buildSession(t);
+	assert.doesNotThrow(() => auditSession(dir, realRoot));
 });
 
 test("auditSession attests skill use when paired and errors otherwise", (t) => {
