@@ -221,6 +221,7 @@ export function auditSession(dir, rootArg, skill) {
 	if (userRecs.length !== 1) {
 		throw new Error(`expected exactly 1 user record, found ${userRecs.length}`);
 	}
+	const userIndex = recs.indexOf(userRecs[0]);
 	// A completed one-shot ends with the assistant's response: a transcript
 	// truncated at a record boundary cannot attest a full session. A final
 	// assistant record that still carries a tool request, a length-truncated
@@ -265,6 +266,20 @@ export function auditSession(dir, rootArg, skill) {
 	if (changes[0].provider !== wantModel[0] || changes[0].modelId !== wantModel[1]) {
 		throw new Error(
 			`model mismatch: ran ${changes[0].provider}/${changes[0].modelId}, expected ${wantModel[0]}/${wantModel[1]}`,
+		);
+	}
+	// Every assistant record carries its own provider/model: a record that
+	// contradicts the model_change metadata means provider fallback or
+	// recombined evidence.
+	const assistantModels = recs
+		.filter((r) => r.message?.role === "assistant")
+		.map((r) => `${r.message.provider}/${r.message.model}`);
+	const wrongModelRecords = assistantModels.filter(
+		(pm) => pm !== `${wantModel[0]}/${wantModel[1]}`,
+	);
+	if (wrongModelRecords.length > 0) {
+		throw new Error(
+			`assistant records contradict the expected model: ${wrongModelRecords.join(", ")}`,
 		);
 	}
 	const skillsText =
@@ -463,6 +478,8 @@ export function auditSession(dir, rootArg, skill) {
 		// arguments (offset/limit) are not judged: the recorded result text
 		// must equal the current file contents, so only a read of the whole
 		// file can satisfy the check no matter what arguments were passed.
+		// The read must also occur after the recorded prompt: a read spliced
+		// before the user record was not caused by it.
 		const hit = calls.some((t) => {
 			const paired = results.get(t.id);
 			const r = paired?.message;
@@ -475,6 +492,9 @@ export function auditSession(dir, rootArg, skill) {
 					t.arguments?.path
 				)
 			) {
+				return false;
+			}
+			if (callOrder.get(t.id) <= userIndex) {
 				return false;
 			}
 			try {

@@ -221,6 +221,8 @@ function buildSession(t, repo, overrides = {}) {
 				type: "message",
 				message: {
 					role: "assistant",
+					provider: "zai-coding-cn",
+					model: "glm-5.3-flash",
 					content: [
 						{
 							type: "toolCall",
@@ -256,6 +258,8 @@ function buildSession(t, repo, overrides = {}) {
 			type: "message",
 			message: {
 				role: "assistant",
+				provider: "zai-coding-cn",
+				model: "glm-5.3-flash",
 				stopReason: "stop",
 				content: [{ type: "text", text: "summary response\n" }],
 			},
@@ -483,6 +487,8 @@ test("auditSession fails on corrupt, mismatched, or stale evidence", (t) => {
 			type: "message",
 			message: {
 				role: "assistant",
+				provider: "zai-coding-cn",
+				model: "glm-5.3-flash",
 				stopReason: "length",
 				content: [{ type: "text", text: "partial response\n" }],
 			},
@@ -544,6 +550,8 @@ test("auditSession rejects host aliases under inventory names", (t) => {
 			type: "message",
 			message: {
 				role: "assistant",
+				provider: "zai-coding-cn",
+				model: "glm-5.3-flash",
 				stopReason: "stop",
 				content: [{ type: "text", text: "summary response\n" }],
 			},
