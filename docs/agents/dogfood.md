@@ -10,14 +10,18 @@ From the checkout:
 sd=$(mktemp -d)
 pi --version > "$sd/pi-version"
 node --version > "$sd/node-version"
-timeout 300 node bin/theta.mjs --dev --provider zai-coding-cn --model glm-5.3-flash \
-  --session-dir "$sd" --print "<prompt>" 2> "$sd/stderr.txt" < /dev/null
+node bin/theta.mjs --dev --provider zai-coding-cn --model glm-5.3-flash \
+  --session-dir "$sd" --print "<prompt>" 2> "$sd/stderr.txt" < /dev/null &
+pid=$!
+( sleep 300 && kill -9 $pid 2>/dev/null ) & watchdog=$!
+wait $pid
 echo $? > "$sd/exit-status"
+kill $watchdog 2>/dev/null
 ```
 
 - Pass provider and model explicitly: pi's default model can 401 with an invalid bearer token.
 - Close stdin (`< /dev/null`): `pi --print` waits for stdin EOF even with a prompt argument, and a shell that leaves the pipe open hangs the session silently (found in the issue #8 close-out dogfood — 50 minutes, zero output, zero CPU).
-- Bound the run: `timeout 300` (GNU coreutils; `gtimeout` on macOS) turns a provider stall into a failed run — exit 124 — instead of a silent hang.
+- Bound the run: the watchdog kills a stalled session at 5 minutes (status 137 fails the audit) — no coreutils needed.
 - Record the runtime: `pi --version` and `node --version` land in the session dir and the attestation names them, so evidence says what it ran on.
 - Run inside an isolated `--session-dir`: the fresh temp dir holds exactly this run's transcript, so the audit below can never pick up another session (a newest-by-mtime lookup races every other pi session on the machine).
 - Keep the prompt neutral: a prompt that names a skill adds nothing, and a neutral one keeps the spot-check honest.
@@ -120,9 +124,13 @@ The spot-check is a second full one-shot in its own session dir, prompted with a
 sd2=$(mktemp -d)
 pi --version > "$sd2/pi-version"
 node --version > "$sd2/node-version"
-timeout 300 node bin/theta.mjs --dev --provider zai-coding-cn --model glm-5.3-flash \
-  --session-dir "$sd2" --print "<real task routing into the skill>" 2> "$sd2/stderr.txt" < /dev/null
+node bin/theta.mjs --dev --provider zai-coding-cn --model glm-5.3-flash \
+  --session-dir "$sd2" --print "<real task routing into the skill>" 2> "$sd2/stderr.txt" < /dev/null &
+pid=$!
+( sleep 300 && kill -9 $pid 2>/dev/null ) & watchdog=$!
+wait $pid
 echo $? > "$sd2/exit-status"
+kill $watchdog 2>/dev/null
 ```
 
 Audit `$sd2` with the same command as above (substitute it for `$sd`): the routing session must boot clean and advertise the full library too. Then require a read of the skill's `SKILL.md` from this checkout: a `read` tool call whose path argument equals the checkout's copy exactly, paired by `toolCallId` with a `toolResult` that reports no error. Path mentions in `bash` commands, writes, prose, or thinking are not use. On success the check prints a bound attestation — HEAD, transcript digest, the resolved skill path, and the SKILL.md content digest; keep it with the run's record.
