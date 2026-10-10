@@ -53,13 +53,13 @@ sd2=$(mktemp -d)
 st=$(git status --porcelain --untracked-files=all) || { echo "git status failed"; exit 1; }
 [ -n "$st" ] && { echo "working tree dirty — commit first"; exit 1; }
 git rev-parse HEAD > "$sd2/pre-head"
-printf '%s' "<real task routing into the skill>" > "$sd2/prompt.txt"
+printf '%s' "<real task routing into the skill — name the research domain, not the skill or its files>" > "$sd2/prompt.txt"
 printf '%s\n' "zai-coding-cn glm-5.3-flash" > "$sd2/expected-model"
 node -p "require('crypto').createHash('sha256').update(require('fs').readFileSync('package.json')).digest('hex')" > "$sd2/manifest-sha256"
 pi --version > "$sd2/pi-version"
 node --version > "$sd2/node-version"
 node bin/theta.mjs --dev --provider zai-coding-cn --model glm-5.3-flash \
-  --session-dir "$sd2" --print "<real task routing into the skill>" 2> "$sd2/stderr.txt" < /dev/null &
+  --session-dir "$sd2" --print "<real task routing into the skill — name the research domain, not the skill or its files>" 2> "$sd2/stderr.txt" < /dev/null &
 pid=$!
 ( sleep 300; echo fired > "$sd2/watchdog" 2>/dev/null; kill $pid 2>/dev/null; sleep 15; kill -9 $pid 2>/dev/null ) & watchdog=$!
 wait $pid
