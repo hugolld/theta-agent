@@ -602,13 +602,29 @@ test("auditSession accepts a sanitized real pi transcript (golden)", (t) => {
 	run("git init -q");
 	run("git config user.email test@example.com");
 	run("git config user.name test");
+	run("git config commit.gpgsign false");
+	run("git config core.hooksPath /dev/null");
 	run("git add -A");
 	run("git -c commit.gpgsign=false commit -qm init");
 
 	const real = fs.realpathSync(repo);
-	const golden = fs
+	let golden = fs
 		.readFileSync("test/fixtures/real-pi-transcript.jsonl", "utf8")
 		.replaceAll("__REPO__", real);
+	// Materialize the host-skill files the real session had advertised: pi
+	// runs with the operator's host skills, and the fixture must carry no
+	// machine-specific absolute paths.
+	if (golden.includes("/Users/")) {
+		throw new Error("golden fixture contains machine-specific /Users/ paths");
+	}
+	const hostRoot = fs.mkdtempSync(path.join(os.tmpdir(), "golden-host-"));
+	t.after(() => fs.rmSync(hostRoot, { recursive: true, force: true }));
+	for (const m of golden.matchAll(/__HOST_SKILLS__\/([^"']+?\/SKILL\.md)/g)) {
+		const hostSkill = path.join(hostRoot, "skills", m[1]);
+		fs.mkdirSync(path.dirname(hostSkill), { recursive: true });
+		fs.writeFileSync(hostSkill, "host skill content\n");
+	}
+	golden = golden.replaceAll("__HOST_SKILLS__", path.join(hostRoot, "skills"));
 	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "dogfood-session-"));
 	t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
 	fs.writeFileSync(path.join(dir, "session.jsonl"), golden);
