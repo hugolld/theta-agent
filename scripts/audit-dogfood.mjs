@@ -42,7 +42,10 @@ export function ge(a, b) {
 	const cmpId = (x, y) => {
 		const nx = /^\d+$/.test(x);
 		const ny = /^\d+$/.test(y);
-		if (nx && ny) return Number(x) - Number(y);
+		if (nx && ny) {
+			const d = BigInt(x) - BigInt(y);
+			return d === 0n ? 0 : d > 0n ? 1 : -1;
+		}
 		if (nx) return -1;
 		if (ny) return 1;
 		return x < y ? -1 : x > y ? 1 : 0;
@@ -77,9 +80,16 @@ export function extractLocations(skillsText) {
 
 // Resolves the spot-check's skill argument to an absolute checkout path and
 // requires it to be one of the advertised SKILL.md files — traversal and
-// non-skill paths are rejected.
+// non-skill paths are rejected. Comparison happens on canonical paths, with
+// a lexical fallback for arguments that do not resolve on disk.
 export function resolveAdvertisedSkill(root, skill, expected) {
-	const target = path.resolve(root, skill);
+	const lexical = path.resolve(root, skill);
+	let target = lexical;
+	try {
+		target = fs.realpathSync(lexical);
+	} catch {
+		// unresolvable paths compare lexically and fail membership below
+	}
 	if (!expected.has(target)) {
 		throw new Error(
 			`skill argument must be an advertised checkout SKILL.md, got: ${skill}`,
@@ -256,11 +266,18 @@ export function auditSession(dir, root, skill) {
 				for (const t of m.content) if (t?.type === "toolCall") calls.push(t);
 			if (m.role === "toolResult") results.set(m.toolCallId, m);
 		}
+		// pi may advertise and read lexical paths through symlinked resources;
+		// canonicalize the read path so either spelling matches the target.
 		const hit = calls.some((t) => {
 			const r = results.get(t.id);
-			return (
-				t.name === "read" && t.arguments?.path === target && r && r.isError === false
-			);
+			if (!(t.name === "read" && r && r.isError === false && t.arguments?.path)) {
+				return false;
+			}
+			try {
+				return fs.realpathSync(t.arguments.path) === target;
+			} catch {
+				return false;
+			}
 		});
 		if (!hit) {
 			throw new Error("NOT used");

@@ -27,11 +27,21 @@ test("ge follows SemVer prerelease precedence", () => {
 	assert.equal(ge("0.99.1-beta", "0.99"), true);
 	assert.equal(ge("0.99.0", "0.99.0-rc.1"), true);
 	assert.equal(ge("1.0.0-alpha", "1.0.0"), false);
-	assert.equal(ge("1.0.0-alpha", "1.0.0-alpha.1"), false);
-	assert.equal(ge("1.0.0-alpha.1", "1.0.0-alpha"), true);
 	assert.equal(ge("1.0.0-alpha.1", "1.0.0-alpha.beta"), false);
 	assert.equal(ge("1.0.0-alpha.beta", "1.0.0-alpha.1"), true);
+	assert.equal(ge("1.0.0-alpha.1", "1.0.0-alpha"), true);
 	assert.equal(ge("1.1.0+build", "0.99"), true);
+});
+
+test("ge compares large numeric prerelease identifiers losslessly", () => {
+	assert.equal(
+		ge("1.0.0-9007199254740993", "1.0.0-9007199254740992"),
+		true,
+	);
+	assert.equal(
+		ge("1.0.0-9007199254740992", "1.0.0-9007199254740993"),
+		false,
+	);
 });
 
 test("ge fails closed on malformed versions", () => {
@@ -89,42 +99,67 @@ test("resolveAdvertisedSkill rejects traversal and non-skill paths", () => {
 	);
 });
 
-// Integration fixtures: a synthetic session directory audited against the
-// real checkout root, covering the clean pass and every failure mode.
-const realRoot = fs.realpathSync(".");
-const head = () => execSync("git rev-parse HEAD").toString().trim();
-const sha256 = (s) => createHash("sha256").update(s).digest("hex");
-const inventory = JSON.parse(
-	fs.readFileSync("test/expected-skills.json", "utf8"),
-);
-const inventoryNames = inventory.vendored
-	.map((e) => e.name)
-	.concat(inventory["self-authored"]);
-const prompt = "test prompt for the dogfood auditor";
+// Integration fixtures: a synthetic git repo and session directory, fully
+// isolated from the developer's checkout state — npm test stays reliable
+// before committing.
+function makeTempRepo(t) {
+	const repo = fs.mkdtempSync(path.join(os.tmpdir(), "dogfood-repo-"));
+	t.after(() => fs.rmSync(repo, { recursive: true, force: true }));
+	const run = (cmd) => execSync(cmd, { cwd: repo }).toString();
+	fs.mkdirSync(path.join(repo, "skills", "literature-review"), {
+		recursive: true,
+	});
+	fs.writeFileSync(
+		path.join(repo, "skills", "literature-review", "SKILL.md"),
+		"skill content\n",
+	);
+	fs.mkdirSync(path.join(repo, "test"), { recursive: true });
+	fs.writeFileSync(
+		path.join(repo, "test", "expected-skills.json"),
+		JSON.stringify({
+			vendored: [{ name: "literature-review", "tree-sha256": "x" }],
+			"self-authored": [],
+		}),
+	);
+	fs.writeFileSync(
+		path.join(repo, "package.json"),
+		JSON.stringify({ pi: { skills: ["./skills"] } }),
+	);
+	run("git init -q");
+	run("git config user.email test@example.com");
+	run("git config user.name test");
+	run("git add -A");
+	run("git commit -qm init");
+	return repo;
+}
 
-function buildSession(t, overrides = {}) {
-	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "dogfood-fixture-"));
+const repoHead = (repo) =>
+	execSync("git rev-parse HEAD", { cwd: repo }).toString().trim();
+const repoManifestSha = (repo) =>
+	createHash("sha256")
+		.update(fs.readFileSync(path.join(repo, "package.json")))
+		.digest("hex");
+
+function buildSession(t, repo, overrides = {}) {
+	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "dogfood-session-"));
 	t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
-	const root = realRoot;
-	const advertised = overrides.advertisedNames ?? inventoryNames;
-	let locs = advertised
+	const names = overrides.advertisedNames ?? ["literature-review"];
+	let locs = names
 		.map(
 			(n) =>
-				`<skill><name>${n}</name><location>${root}/skills/${n}/SKILL.md</location></skill>`,
+				`<skill><name>${n}</name><location>${repo}/skills/${n}/SKILL.md</location></skill>`,
 		)
 		.join("\n");
-	// pi also advertises the user's host-level skills from outside the
-	// checkout; they are the environment, not extras.
-	if (!overrides.noHostSkills) {
+	const prompt = overrides.transcriptPrompt ?? "test prompt";
+	if (!overrides.noHostSkill) {
 		const hostDir = fs.mkdtempSync(path.join(os.tmpdir(), "host-skill-"));
 		t.after(() => fs.rmSync(hostDir, { recursive: true, force: true }));
 		const hostFile = path.join(hostDir, "SKILL.md");
 		fs.writeFileSync(hostFile, "host skill content\n");
 		locs += `\n<skill><name>host-skill</name><location>${hostFile}</location></skill>`;
 	}
-	const thePrompt = overrides.prompt ?? prompt;
 	const records = [
-		JSON.stringify({ type: "session", cwd: root }),
+		JSON.stringify({ type: "session", cwd: overrides.sessionCwd ?? repo }),
 		JSON.stringify({
 			type: "model_change",
 			provider: "zai-coding-cn",
@@ -139,11 +174,11 @@ function buildSession(t, overrides = {}) {
 		}),
 		JSON.stringify({
 			type: "message",
-			message: { role: "user", content: [{ type: "text", text: thePrompt }] },
+			message: { role: "user", content: [{ type: "text", text: prompt }] },
 		}),
 	];
 	if (overrides.toolResultIsError !== undefined) {
-		const target = `${root}/skills/literature-review/SKILL.md`;
+		const target = `${repo}/skills/literature-review/SKILL.md`;
 		records.push(
 			JSON.stringify({
 				type: "message",
@@ -168,111 +203,150 @@ function buildSession(t, overrides = {}) {
 					toolCallId: "call_test",
 					toolName: "read",
 					isError: overrides.toolResultIsError,
-					content: [{ type: "text", text: "irrelevant" }],
+					content: [{ type: "text", text: "skill content\n" }],
 				},
 			}),
 		);
 	}
-	fs.writeFileSync(
-		path.join(dir, "session.jsonl"),
-		records.join("\n") + "\n",
-	);
-	fs.writeFileSync(path.join(dir, "prompt.txt"), prompt);
+	fs.writeFileSync(path.join(dir, "session.jsonl"), records.join("\n") + "\n");
+	fs.writeFileSync(path.join(dir, "prompt.txt"), "test prompt");
 	fs.writeFileSync(
 		path.join(dir, "expected-model"),
-		"zai-coding-cn glm-5.3-flash\n",
+		overrides.expectedModel ?? "zai-coding-cn glm-5.3-flash\n",
 	);
 	fs.writeFileSync(path.join(dir, "exit-status"), overrides.exit ?? "0");
 	fs.writeFileSync(path.join(dir, "stderr.txt"), overrides.stderr ?? "");
-	fs.writeFileSync(path.join(dir, "pi-version"), "1.1.0\n");
-	fs.writeFileSync(path.join(dir, "node-version"), "v26.11.0\n");
-	fs.writeFileSync(path.join(dir, "pre-head"), overrides.preHead ?? head());
+	fs.writeFileSync(path.join(dir, "pi-version"), overrides.piVersion ?? "1.1.0\n");
 	fs.writeFileSync(
-		path.join(dir, "manifest-sha256"),
-		sha256(fs.readFileSync("package.json", "utf8")),
+		path.join(dir, "node-version"),
+		overrides.nodeVersion ?? "v26.11.0\n",
 	);
+	fs.writeFileSync(path.join(dir, "pre-head"), overrides.preHead ?? repoHead(repo));
+	fs.writeFileSync(path.join(dir, "manifest-sha256"), repoManifestSha(repo));
 	if (overrides.watchdog) fs.writeFileSync(path.join(dir, "watchdog"), "fired");
 	return dir;
 }
 
+function auditIn(cwd, fn) {
+	const prev = process.cwd();
+	process.chdir(cwd);
+	try {
+		return fn();
+	} finally {
+		process.chdir(prev);
+	}
+}
+
 test("auditSession attests a well-formed boot session", (t) => {
-	const dir = buildSession(t);
-	const out = auditSession(dir, realRoot);
+	const repo = makeTempRepo(t);
+	const dir = buildSession(t, repo);
+	const out = auditIn(repo, () => auditSession(dir, repo));
 	assert.match(out, /^clean /);
 	assert.match(out, /provider zai-coding-cn/);
 	assert.match(out, /model glm-5.3-flash/);
 });
 
-test("auditSession ignores host skills advertised from outside the checkout", (t) => {
-	const dir = buildSession(t);
-	assert.doesNotThrow(() => auditSession(dir, realRoot));
+test("auditSession ignores host skills advertised from outside the repo", (t) => {
+	const repo = makeTempRepo(t);
+	const dir = buildSession(t, repo);
+	assert.doesNotThrow(() => auditIn(repo, () => auditSession(dir, repo)));
 });
 
 test("auditSession attests skill use when paired and errors otherwise", (t) => {
-	const good = buildSession(t, { toolResultIsError: false });
-	const out = auditSession(good, realRoot, "skills/literature-review/SKILL.md");
+	const repo = makeTempRepo(t);
+	const good = buildSession(t, repo, { toolResultIsError: false });
+	const out = auditIn(repo, () =>
+		auditSession(good, repo, "skills/literature-review/SKILL.md"),
+	);
 	assert.match(out, /used .*\/skills\/literature-review\/SKILL\.md/);
-	const bad = buildSession(t, { toolResultIsError: true });
+	const bad = buildSession(t, repo, { toolResultIsError: true });
 	assert.throws(
-		() => auditSession(bad, realRoot, "skills/literature-review/SKILL.md"),
+		() => auditIn(repo, () => auditSession(bad, repo, "skills/literature-review/SKILL.md")),
 		/NOT used/,
 	);
 });
 
 test("auditSession fails on missing and unresolvable advertised skills", (t) => {
+	const repo = makeTempRepo(t);
+	const missing = buildSession(t, repo, { advertisedNames: [] });
 	assert.throws(
-		() => auditSession(buildSession(t, { advertisedNames: inventoryNames.slice(1) }), realRoot),
+		() => auditIn(repo, () => auditSession(missing, repo)),
 		/NOT advertised: literature-review/,
 	);
+	const ghost = buildSession(t, repo, { advertisedNames: ["ghost-skill"] });
 	assert.throws(
-		() =>
-			auditSession(
-				buildSession(t, { advertisedNames: [...inventoryNames, "extra-skill"] }),
-				realRoot,
-			),
+		() => auditIn(repo, () => auditSession(ghost, repo)),
 		/do not resolve on disk/,
 	);
 });
 
 test("auditSession fails on corrupt, mismatched, or stale evidence", (t) => {
-	const dir = buildSession(t);
-	fs.appendFileSync(path.join(dir, "session.jsonl"), "{corrupt\n");
-	assert.throws(() => auditSession(dir, realRoot), /corrupt transcript/);
+	const repo = makeTempRepo(t);
 
-	const moved = buildSession(t, { preHead: "0".repeat(40) });
-	assert.throws(() => auditSession(moved, realRoot), /HEAD moved/);
-
-	const stale = buildSession(t, { prompt: "a different prompt" });
-	assert.throws(() => auditSession(stale, realRoot), /prompt mismatch/);
-
-	const wrongModel = buildSession(t);
-	fs.writeFileSync(
-		path.join(wrongModel, "expected-model"),
-		"other-provider other-model\n",
-	);
-	assert.throws(() => auditSession(wrongModel, realRoot), /model mismatch/);
-
-	const failed = buildSession(t, { exit: "1" });
-	assert.throws(() => auditSession(failed, realRoot), /boot not clean/);
-
-	const noisy = buildSession(t, { stderr: "boom\n" });
-	assert.throws(() => auditSession(noisy, realRoot), /boot not clean/);
-
-	const timedOut = buildSession(t, { watchdog: true });
-	assert.throws(() => auditSession(timedOut, realRoot), /watchdog fired/);
-
-	const twoSystem = buildSession(t);
-	fs.appendFileSync(
-		path.join(twoSystem, "session.jsonl"),
-		JSON.stringify({
-			type: "message",
-			message: { role: "system", sections: { skills: null } },
-		}) + "\n",
-	);
+	const corrupt = buildSession(t, repo);
+	fs.appendFileSync(path.join(corrupt, "session.jsonl"), "{corrupt\n");
 	assert.throws(
-		() => auditSession(twoSystem, realRoot),
-		/skills-bearing system record/,
+		() => auditIn(repo, () => auditSession(corrupt, repo)),
+		/corrupt transcript/,
+	);
+
+	const moved = buildSession(t, repo, { preHead: "0".repeat(40) });
+	assert.throws(
+		() => auditIn(repo, () => auditSession(moved, repo)),
+		/HEAD moved/,
+	);
+
+	const stale = buildSession(t, repo, {
+		transcriptPrompt: "a different prompt",
+	});
+	assert.throws(
+		() => auditIn(repo, () => auditSession(stale, repo)),
+		/prompt mismatch/,
+	);
+
+	const wrongModel = buildSession(t, repo, {
+		expectedModel: "other-provider other-model\n",
+	});
+	assert.throws(
+		() => auditIn(repo, () => auditSession(wrongModel, repo)),
+		/model mismatch/,
+	);
+
+	const failed = buildSession(t, repo, { exit: "1" });
+	assert.throws(
+		() => auditIn(repo, () => auditSession(failed, repo)),
+		/boot not clean/,
+	);
+
+	const noisy = buildSession(t, repo, { stderr: "boom\n" });
+	assert.throws(
+		() => auditIn(repo, () => auditSession(noisy, repo)),
+		/boot not clean/,
+	);
+
+	const timedOut = buildSession(t, repo, { watchdog: true });
+	assert.throws(
+		() => auditIn(repo, () => auditSession(timedOut, repo)),
+		/watchdog fired/,
+	);
+
+	const dirtyRepo = makeTempRepo(t);
+	const dirtyDir = buildSession(t, dirtyRepo);
+	fs.writeFileSync(path.join(dirtyRepo, "untracked.txt"), "stray\n");
+	assert.throws(
+		() => auditIn(dirtyRepo, () => auditSession(dirtyDir, dirtyRepo)),
+		/working tree dirty/,
+	);
+
+	const foreignCwd = buildSession(t, repo, { sessionCwd: "/somewhere/else" });
+	assert.throws(
+		() => auditIn(repo, () => auditSession(foreignCwd, repo)),
+		/session cwd mismatch/,
+	);
+
+	const belowFloor = buildSession(t, repo, { piVersion: "0.98.0\n" });
+	assert.throws(
+		() => auditIn(repo, () => auditSession(belowFloor, repo)),
+		/below the supported 0\.99 floor/,
 	);
 });
-
-
