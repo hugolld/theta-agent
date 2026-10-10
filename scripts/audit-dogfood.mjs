@@ -11,7 +11,7 @@ import { createHash } from "node:crypto";
 export function ge(a, b) {
 	const parse = (v) => {
 		const m =
-			/^v?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+[0-9A-Za-z.-]+)?$/.exec(
+			/^v?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/.exec(
 				v,
 			);
 		if (!m) return null;
@@ -225,11 +225,21 @@ export function auditSession(dir, root, skill) {
 		throw new Error(`NOT advertised: ${missing.join(", ")}`);
 	}
 	const expected = new Set(names.map((n) => `${skillRoot}/${n}/SKILL.md`));
-	// Only advertised skills inside the checkout are extras; host-level skills
-	// (pi also advertises the user's own global skills) are the environment.
-	const extras = [...realAdvertised].filter(
-		(l) => l.startsWith(root + path.sep) && !expected.has(l),
-	);
+	// An advertised location is an extra when its lexical path or its
+	// canonical target lies inside the checkout without being inventory —
+	// canonicalizing alone would hide a checkout symlink pointing outside.
+	// Host-level skills outside the checkout are the environment.
+	const extras = [...locations].filter((l) => {
+		const lexicalInside = l.startsWith(root + path.sep);
+		let canonical = null;
+		try {
+			canonical = fs.realpathSync(l);
+		} catch {
+			return false;
+		}
+		const canonicalInside = canonical.startsWith(root + path.sep);
+		return (lexicalInside || canonicalInside) && !expected.has(canonical);
+	});
 	if (extras.length > 0) {
 		throw new Error(`UNEXPECTED advertised skills:\n${extras.join("\n")}`);
 	}

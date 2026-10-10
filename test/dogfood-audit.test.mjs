@@ -56,6 +56,12 @@ test("ge fails closed on malformed versions", () => {
 test("ge accepts alphanumeric prerelease identifiers that start with zero", () => {
 	assert.equal(ge("1.0.0-0rc", "0.99"), true);
 	assert.equal(ge("1.0.0-0-rc", "0.99"), true);
+	assert.equal(ge("1.0.0+build.1", "0.99"), true);
+});
+
+test("ge fails closed on malformed build metadata", () => {
+	assert.equal(ge("1.0.0+.", "0.99"), false);
+	assert.equal(ge("1.0.0+build..1", "0.99"), false);
 });
 
 test("decodeXmlEntities decodes pi's entity set", () => {
