@@ -13,7 +13,7 @@ node --version > "$sd/node-version"
 node bin/theta.mjs --dev --provider zai-coding-cn --model glm-5.3-flash \
   --session-dir "$sd" --print "<prompt>" 2> "$sd/stderr.txt" < /dev/null &
 pid=$!
-( sleep 300 && kill -9 $pid 2>/dev/null ) & watchdog=$!
+( sleep 300 && kill $pid 2>/dev/null ) & watchdog=$!
 wait $pid
 echo $? > "$sd/exit-status"
 kill $watchdog 2>/dev/null
@@ -21,7 +21,7 @@ kill $watchdog 2>/dev/null
 
 - Pass provider and model explicitly: pi's default model can 401 with an invalid bearer token.
 - Close stdin (`< /dev/null`): `pi --print` waits for stdin EOF even with a prompt argument, and a shell that leaves the pipe open hangs the session silently (found in the issue #8 close-out dogfood — 50 minutes, zero output, zero CPU).
-- Bound the run: the watchdog kills a stalled session at 5 minutes (status 137 fails the audit) — no coreutils needed.
+- Bound the run: the watchdog kills a stalled session at 5 minutes (status 143 fails the audit) — no coreutils needed. The launcher forwards SIGTERM to its `pi` child; do not switch it to `kill -9`, which would orphan `pi` mid-stall.
 - Record the runtime: `pi --version` and `node --version` land in the session dir and the attestation names them, so evidence says what it ran on.
 - Run inside an isolated `--session-dir`: the fresh temp dir holds exactly this run's transcript, so the audit below can never pick up another session (a newest-by-mtime lookup races every other pi session on the machine).
 - Keep the prompt neutral: a prompt that names a skill adds nothing, and a neutral one keeps the spot-check honest.
@@ -89,9 +89,12 @@ node -e '
       fail = true;
     }
   }
+  const manifest = JSON.parse(fs.readFileSync("package.json", "utf8"));
+  const skillRoots = (manifest.pi?.skills ?? ["./skills"]).map(s =>
+    root + "/" + s.replace(/^\.\//, "").replace(/\/$/, ""));
   const expected = new Set(names.map(n => root + "/skills/" + n + "/SKILL.md"));
   const extras = [...locations].filter(l =>
-    l.startsWith(root + "/skills/") && !expected.has(l));
+    skillRoots.some(r => l.startsWith(r + "/")) && !expected.has(l));
   if (extras.length > 0) {
     console.error("UNEXPECTED advertised skills:\n" + extras.join("\n"));
     process.exit(1);
@@ -127,7 +130,7 @@ node --version > "$sd2/node-version"
 node bin/theta.mjs --dev --provider zai-coding-cn --model glm-5.3-flash \
   --session-dir "$sd2" --print "<real task routing into the skill>" 2> "$sd2/stderr.txt" < /dev/null &
 pid=$!
-( sleep 300 && kill -9 $pid 2>/dev/null ) & watchdog=$!
+( sleep 300 && kill $pid 2>/dev/null ) & watchdog=$!
 wait $pid
 echo $? > "$sd2/exit-status"
 kill $watchdog 2>/dev/null
