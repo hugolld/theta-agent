@@ -8,13 +8,17 @@ From the checkout:
 
 ```sh
 sd=$(mktemp -d)
-node bin/theta.mjs --dev --provider zai-coding-cn --model glm-5.3-flash \
+pi --version > "$sd/pi-version"
+node --version > "$sd/node-version"
+timeout 300 node bin/theta.mjs --dev --provider zai-coding-cn --model glm-5.3-flash \
   --session-dir "$sd" --print "<prompt>" 2> "$sd/stderr.txt" < /dev/null
 echo $? > "$sd/exit-status"
 ```
 
 - Pass provider and model explicitly: pi's default model can 401 with an invalid bearer token.
 - Close stdin (`< /dev/null`): `pi --print` waits for stdin EOF even with a prompt argument, and a shell that leaves the pipe open hangs the session silently (found in the issue #8 close-out dogfood — 50 minutes, zero output, zero CPU).
+- Bound the run: `timeout 300` (GNU coreutils; `gtimeout` on macOS) turns a provider stall into a failed run — exit 124 — instead of a silent hang.
+- Record the runtime: `pi --version` and `node --version` land in the session dir and the attestation names them, so evidence says what it ran on.
 - Run inside an isolated `--session-dir`: the fresh temp dir holds exactly this run's transcript, so the audit below can never pick up another session (a newest-by-mtime lookup races every other pi session on the machine).
 - Keep the prompt neutral: a prompt that names a skill adds nothing, and a neutral one keeps the spot-check honest.
 - Boot-clean is process evidence: `exit-status` must hold 0 and `stderr.txt` must be 0 bytes. Both persist in the session dir next to the transcript, and the audit below re-verifies them fail-closed.
@@ -23,7 +27,7 @@ echo $? > "$sd/exit-status"
 
 The pi session transcript is the record. Pi advertises the skill library in the session's system records — assert against those records only. Grepping the whole file proves nothing: the user prompt and tool activity can carry a skill name into a session where nothing was advertised.
 
-The oracle is the checked-in `test/expected-skills.json` inventory, not the `skills/` tree, so a dirty checkout cannot shrink the expectation silently. The audit reads only the `skills` section of the single system record (`message.sections.skills` — the field pi maintains; a one-shot session has exactly one system record, and any other count fails loudly) — host skills and project context share the system prompt, so raw text elsewhere in it can vouch for nothing. Locations are XML-decoded (including `&apos;`) and compared exactly. Every transcript line must parse — a corrupt or truncated file fails loudly instead of quietly shrinking the evidence. The same audit re-verifies the boot-clean process files: a non-zero `exit-status`, a non-empty `stderr.txt`, or missing files fails before the transcript is even parsed. The working tree under `skills/` and the inventory must be clean (clear scratch venvs and `__pycache__` first, below), so the cited HEAD is what was audited. On success it prints a full SHA-256 attestation — the Git HEAD plus digests of the transcript, both process files, and the audited inventory — so the evidence names exactly what it attests; keep that output with the run's record. Printed output on failure, or any non-zero exit, fails the criterion. The root comes from `fs.realpathSync`, so a symlinked checkout still matches the advertised paths.
+The oracle is the checked-in `test/expected-skills.json` inventory, not the `skills/` tree, so a dirty checkout cannot shrink the expectation silently. The check runs both ways: every inventory skill must be advertised, and no **extra** checkout skill may appear — a dirty `package.json` that adds a skill source cannot slip in. The audit reads only the `skills` section of the single system record (`message.sections.skills` — the field pi maintains; a one-shot session has exactly one system record, and any other count fails loudly) — host skills and project context share the system prompt, so raw text elsewhere in it can vouch for nothing. Locations are XML-decoded (including `&apos;`) and compared exactly. Every transcript line must parse — a corrupt or truncated file fails loudly instead of quietly shrinking the evidence. The same audit re-verifies the boot-clean process files: a non-zero `exit-status`, a non-empty `stderr.txt`, or missing files fails before the transcript is even parsed. The whole working tree must be clean (clear scratch venvs and `__pycache__` first, below) — runtime inputs included — so the cited HEAD is what was audited. On success it prints a full attestation: the Git HEAD, SHA-256 digests of the transcript and both process files, the recorded pi and node versions, and the audited inventory digest — the evidence names exactly what it attests; keep that output with the run's record. Printed output on failure, or any non-zero exit, fails the criterion. The root comes from `fs.realpathSync`, so a symlinked checkout still matches the advertised paths.
 
 ```sh
 node -e '
@@ -81,13 +85,19 @@ node -e '
       fail = true;
     }
   }
+  const expected = new Set(names.map(n => root + "/skills/" + n + "/SKILL.md"));
+  const extras = [...locations].filter(l =>
+    l.startsWith(root + "/skills/") && !expected.has(l));
+  if (extras.length > 0) {
+    console.error("UNEXPECTED advertised skills:\n" + extras.join("\n"));
+    process.exit(1);
+  }
   if (fail) process.exit(1);
   const { execSync } = require("child_process");
   const crypto = require("crypto");
-  const dirty = execSync("git status --porcelain -- skills test/expected-skills.json")
-    .toString().trim();
+  const dirty = execSync("git status --porcelain").toString().trim();
   if (dirty) {
-    console.error("working tree dirty under skills/ or inventory:\n" + dirty);
+    console.error("working tree dirty:\n" + dirty);
     process.exit(1);
   }
   const head = execSync("git rev-parse HEAD").toString().trim();
@@ -97,6 +107,8 @@ node -e '
     "\ntranscript " + sha(dir + "/" + files[0]) +
     "\nexit-status " + sha(dir + "/exit-status") +
     "\nstderr " + sha(dir + "/stderr.txt") +
+    "\npi " + fs.readFileSync(dir + "/pi-version", "utf8").trim() +
+    "\nnode " + fs.readFileSync(dir + "/node-version", "utf8").trim() +
     "\ninventory " + sha("test/expected-skills.json"));
   process.exit(0);
 ' "$sd"
@@ -106,7 +118,9 @@ The spot-check is a second full one-shot in its own session dir, prompted with a
 
 ```sh
 sd2=$(mktemp -d)
-node bin/theta.mjs --dev --provider zai-coding-cn --model glm-5.3-flash \
+pi --version > "$sd2/pi-version"
+node --version > "$sd2/node-version"
+timeout 300 node bin/theta.mjs --dev --provider zai-coding-cn --model glm-5.3-flash \
   --session-dir "$sd2" --print "<real task routing into the skill>" 2> "$sd2/stderr.txt" < /dev/null
 echo $? > "$sd2/exit-status"
 ```
