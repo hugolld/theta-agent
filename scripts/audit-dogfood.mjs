@@ -209,6 +209,14 @@ export function auditSession(dir, rootArg, skill) {
 	if (userRecs.length !== 1) {
 		throw new Error(`expected exactly 1 user record, found ${userRecs.length}`);
 	}
+	// A completed one-shot ends with the assistant's response: a transcript
+	// truncated at a record boundary cannot attest a full session.
+	const last = recs[recs.length - 1];
+	if (last?.message?.role !== "assistant") {
+		throw new Error(
+			"transcript does not end with an assistant response — truncated session",
+		);
+	}
 	const userRec = userRecs[0];
 	const userText = Array.isArray(userRec?.message?.content)
 		? userRec.message.content
@@ -342,6 +350,21 @@ export function auditSession(dir, rootArg, skill) {
 			"spot-check prompt names the SKILL.md file — a routed task must not read the file on direct instruction",
 		);
 	}
+	if (skill !== undefined) {
+		// A routed prompt must not name the selected skill either: steering
+		// the model to the skill by name is instruction, not routing.
+		const skillName = skill.split("/")[0].replace(/[-_]/g, " ");
+		const lowered = promptWanted.toLowerCase();
+		if (
+			lowered.includes(skillName) ||
+			lowered.includes(skill.split("/")[0].replace(/[-_]/g, "_")) ||
+			lowered.includes(skill.split("/")[0])
+		) {
+			throw new Error(
+				"spot-check prompt names the selected skill — a routed task must reach it on its own",
+			);
+		}
+	}
 	const sha = (p) => createHash("sha256").update(fs.readFileSync(p)).digest("hex");
 	const shaText = (s) => createHash("sha256").update(s).digest("hex");
 	let out =
@@ -357,8 +380,8 @@ export function auditSession(dir, rootArg, skill) {
 	if (skill !== undefined) {
 		const target = resolveAdvertisedSkill(root, skill, expected);
 		// The skill bytes as they exist at audit time (after the clean-tree
-		// gate): the paired read result must contain exactly these contents.
-		const skillBytes = fs.readFileSync(target, "utf8").replace(/\n$/, "");
+		// gate): the paired read result must equal exactly these contents.
+		const skillBytes = fs.readFileSync(target, "utf8");
 		const calls = [];
 		const results = new Map();
 		for (const r of recs) {
@@ -366,7 +389,12 @@ export function auditSession(dir, rootArg, skill) {
 			if (!m) continue;
 			if (Array.isArray(m.content))
 				for (const t of m.content) if (t?.type === "toolCall") calls.push(t);
-			if (m.role === "toolResult") results.set(m.toolCallId, m);
+			if (m.role === "toolResult") {
+				if (results.has(m.toolCallId)) {
+					throw new Error(`duplicate toolResult for ${m.toolCallId}`);
+				}
+				results.set(m.toolCallId, m);
+			}
 		}
 		// pi may advertise and read lexical paths through symlinked resources;
 		// canonicalize the read path first, so a lexical path through a
@@ -399,7 +427,7 @@ export function auditSession(dir, rootArg, skill) {
 						.map((c) => c.text)
 						.join("")
 				: (typeof r.content === "string" ? r.content : "");
-			return resultText.replace(/\n$/, "") === skillBytes;
+			return resultText === skillBytes;
 		});
 		if (!hit) {
 			throw new Error("NOT used");

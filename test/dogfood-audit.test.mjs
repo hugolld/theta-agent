@@ -245,6 +245,16 @@ function buildSession(t, repo, overrides = {}) {
 			}),
 		);
 	}
+	// a completed one-shot ends with the assistant's response
+	records.push(
+		JSON.stringify({
+			type: "message",
+			message: {
+				role: "assistant",
+				content: [{ type: "text", text: "summary response\n" }],
+			},
+		}),
+	);
 	fs.writeFileSync(path.join(dir, "session.jsonl"), records.join("\n") + "\n");
 	fs.writeFileSync(path.join(dir, "prompt.txt"), "test prompt");
 	fs.writeFileSync(
@@ -479,6 +489,13 @@ test("auditSession rejects host aliases under inventory names", (t) => {
 		JSON.stringify({
 			type: "message",
 			message: { role: "user", content: [{ type: "text", text: "test prompt" }] },
+		}),
+		JSON.stringify({
+			type: "message",
+			message: {
+				role: "assistant",
+				content: [{ type: "text", text: "summary response\n" }],
+			},
 		}),
 	];
 	fs.writeFileSync(path.join(dir, "session.jsonl"), records.join("\n") + "\n");
