@@ -10,7 +10,7 @@
 
 **Very early development (0.0.2).** The architecture, skill-selection plan, and
 milestones are being designed in the open. M1 is built: the `theta` launcher plus
-the Tier-1 research-loop skill library — 19 K-Dense skills vendored verbatim plus
+the Tier-1 research-loop skill library — K-Dense skills vendored verbatim plus
 the self-authored `theta-research-loop` orchestrator (see [Vendored
 skills](#vendored-skills)). The milestones below continue from there.
 
@@ -72,7 +72,7 @@ library, vendored **verbatim** per [ADR 0001](docs/adr/0001-vendor-k-dense-skill
 upstream names, directory shapes, and content unchanged except a provenance
 header in each vendored `SKILL.md`. Re-syncs happen at milestone boundaries.
 
-Currently vendored (upstream release `v2.72.0`, commit `526ebce`) — the full
+Currently vendored (upstream release `v2.72.0`, commit `526ebce`) — the
 Tier-1 research-loop set:
 
 - `literature-review` — systematic, scoping, and narrative literature reviews
@@ -116,6 +116,11 @@ Tier-1 research-loop set:
 
 The `theta-research-loop` orchestrator that routes the research loop into the
 library is Theta's own, self-authored work.
+
+One deliberate omission: `pi-agent`, a Tier-1 candidate that documents the pi
+harness itself. It would duplicate pi's own documentation, drift against
+installed pi releases, and add nothing to the research loop. The skip is
+recorded on [issue #5](https://github.com/hugolld/theta-agent/issues/5).
 
 K-Dense's skills are MIT-licensed, © K-Dense Inc. If you use them in research,
 please cite their paper:
