@@ -27,7 +27,7 @@ built as a [pi package](https://pi.dev) rather than a monolithic fork:
   extensions
 - **Compute**: remote Slurm-cluster jobs via an MCP compute gateway, with a
   light local sandbox for small tasks
-- **Models**: any of pi's 48 providers — bring your own key
+- **Models**: any of pi's available providers — bring your own key
 
 Theta works today as a pi package from a checkout. The staged plan (M7–M8)
 grows it into a standalone `theta` application with pi embedded as the core

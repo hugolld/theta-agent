@@ -309,6 +309,22 @@ test("auditSession fails on missing and unresolvable advertised skills", (t) => 
 	);
 });
 
+test("auditSession flags a checkout skill symlinked outside the repo", (t) => {
+	const repo = makeTempRepo(t);
+	const outside = fs.mkdtempSync(path.join(os.tmpdir(), "rogue-"));
+	t.after(() => fs.rmSync(outside, { recursive: true, force: true }));
+	fs.writeFileSync(path.join(outside, "SKILL.md"), "rogue content\n");
+	// skills/rogue is a directory symlink to the outside tree; a real
+	// checkout would commit it (git stores the symlink), and pi follows it
+	// while advertising the lexical in-repo path.
+	fs.symlinkSync(outside, path.join(repo, "skills", "rogue"), "dir");
+	const dir = buildSession(t, repo, { advertisedNames: ["literature-review", "rogue"] });
+	assert.throws(
+		() => auditIn(repo, () => auditSession(dir, repo)),
+		/UNEXPECTED advertised skills/,
+	);
+});
+
 test("auditSession fails on corrupt, mismatched, or stale evidence", (t) => {
 	const repo = makeTempRepo(t);
 
