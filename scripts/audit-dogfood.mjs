@@ -85,11 +85,20 @@ export function extractLocations(skillsText) {
 	const skillCloses = (skillsText.match(/<\/skill>/g) ?? []).length;
 	const out = [];
 	for (const record of blocks[0].match(/<skill>[\s\S]*?<\/skill>/g) ?? []) {
+		// Each child tag must appear exactly once per record: stray or
+		// duplicated name/location tags are corruption, not content.
+		const nameMatches = record.match(/<name>[\s\S]*?<\/name>/g) ?? [];
+		const locationMatches = record.match(/<location>[\s\S]*?<\/location>/g) ?? [];
+		if (nameMatches.length !== 1 || locationMatches.length !== 1) {
+			throw new Error(
+				`malformed skill record: ${nameMatches.length} name tags, ${locationMatches.length} location tags`,
+			);
+		}
 		const name = decodeXmlEntities(
-			record.match(/<name>([\s\S]*?)<\/name>/)?.[1] ?? "",
+			nameMatches[0].match(/<name>([\s\S]*?)<\/name>/)?.[1] ?? "",
 		);
 		const location = decodeXmlEntities(
-			record.match(/<location>([\s\S]*?)<\/location>/)?.[1] ?? "",
+			locationMatches[0].match(/<location>([\s\S]*?)<\/location>/)?.[1] ?? "",
 		);
 		if (!name || !location) {
 			throw new Error("malformed skill advertisement record (missing name or location)");
@@ -212,7 +221,21 @@ export function auditSession(dir, rootArg, skill) {
 			`expected exactly 1 session record, found ${sessionRecs.length}`,
 		);
 	}
-	const sysRecs = recs.filter((r) => r.message?.role === "system");
+	// A one-shot transcript is one linear chain: every record after the
+	// session identity descends from it through id/parentId. A record spliced
+	// in from another session carries a foreign parentId and fails here.
+	const idSet = new Set(recs.map((r) => r.id).filter(Boolean));
+	for (let i = 1; i < recs.length; i++) {
+		const pid = recs[i].parentId;
+		if (pid !== undefined && pid !== null && !idSet.has(pid)) {
+			throw new Error(
+				`record ${i} has a parentId outside this session's chain`,
+			);
+		}
+	}
+	const sysRecs = recs.filter(
+		(r) => r.type === "message" && r.message?.role === "system",
+	);
 	// Count records that carry a skills section at all — a later null patch
 	// removes the advertisement and must fail loudly, not pass silently.
 	const skillsRecs = sysRecs.filter(
@@ -227,7 +250,9 @@ export function auditSession(dir, rootArg, skill) {
 	if (!sess || sess.cwd !== root) {
 		throw new Error(`session cwd mismatch: expected ${root}`);
 	}
-	const userRecs = recs.filter((r) => r.message?.role === "user");
+	const userRecs = recs.filter(
+		(r) => r.type === "message" && r.message?.role === "user",
+	);
 	if (userRecs.length !== 1) {
 		throw new Error(`expected exactly 1 user record, found ${userRecs.length}`);
 	}
@@ -244,6 +269,7 @@ export function auditSession(dir, rootArg, skill) {
 	const modelOrder = orderOf((r) => r.type === "model_change");
 	const skillsOrder = orderOf(
 		(r) =>
+			r.type === "message" &&
 			r.message?.role === "system" &&
 			r.message?.sections !== undefined &&
 			"skills" in r.message.sections,
@@ -270,6 +296,7 @@ export function auditSession(dir, rootArg, skill) {
 		? lastContent.filter((c) => c?.type === "text").map((c) => c.text).join("")
 		: (typeof lastContent === "string" ? lastContent : "");
 	if (
+		last?.type !== "message" ||
 		last?.message?.role !== "assistant" ||
 		endsWithToolCall ||
 		lastText === ""
@@ -307,7 +334,7 @@ export function auditSession(dir, rootArg, skill) {
 	// contradicts the model_change metadata means provider fallback or
 	// recombined evidence.
 	const assistantModels = recs
-		.filter((r) => r.message?.role === "assistant")
+		.filter((r) => r.type === "message" && r.message?.role === "assistant")
 		.map((r) => `${r.message.provider}/${r.message.model}`);
 	const wrongModelRecords = assistantModels.filter(
 		(pm) => pm !== `${wantModel[0]}/${wantModel[1]}`,
@@ -514,7 +541,7 @@ export function auditSession(dir, rootArg, skill) {
 					callOrder.set(t.id, recordIndex);
 					calls.push(t);
 				}
-			if (m.role === "toolResult") {
+			if (r.type === "message" && m.role === "toolResult") {
 				if (typeof m.toolCallId !== "string" || m.toolCallId === "") {
 					throw new Error(
 						`toolResult without a usable toolCallId: ${JSON.stringify(m.toolCallId)}`,

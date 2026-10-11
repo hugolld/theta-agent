@@ -96,7 +96,7 @@ test("extractLocations returns decoded records and rejects other counts", () => 
 	);
 	assert.throws(
 		() => extractLocations("<available_skills><skill><name>a</name></skill></available_skills>"),
-		/missing name or location/,
+		/malformed skill record: 1 name tags, 0 location tags/,
 	);
 	assert.throws(
 		() =>
