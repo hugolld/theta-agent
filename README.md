@@ -8,10 +8,11 @@
 
 ## Status
 
-**Very early development (0.0.2 — launcher release).** The architecture,
-skill-selection plan, and milestones are being designed in the open. This package
-currently reserves the name and lays out the pi package skeleton; functionality
-arrives with the milestones below.
+**Very early development (0.0.2).** The architecture, skill-selection plan, and
+milestones are being designed in the open. M1 is built: the `theta` launcher plus
+the Tier-1 research-loop skill library — K-Dense skills vendored verbatim plus
+the self-authored `theta-research-loop` orchestrator (see [Vendored
+skills](#vendored-skills)). The milestones below continue from there.
 
 ## What Theta will be
 
@@ -26,15 +27,15 @@ built as a [pi package](https://pi.dev) rather than a monolithic fork:
   extensions
 - **Compute**: remote Slurm-cluster jobs via an MCP compute gateway, with a
   light local sandbox for small tasks
-- **Models**: any of pi's 48 providers — bring your own key
+- **Models**: any of pi's available providers — bring your own key
 
-Theta ships today as a pi package. The staged plan (M7–M8) grows it into a
-standalone `theta` application with pi embedded as the core engine — macOS and
-Linux first, Windows later.
+Theta works today as a pi package from a checkout. The staged plan (M7–M8)
+grows it into a standalone `theta` application with pi embedded as the core
+engine — macOS and Linux first, Windows later.
 
 ## Roadmap
 
-- [ ] M1 — package skeleton, `theta` launcher (bin), Tier-1 research-loop skills
+- [x] M1 — package skeleton, `theta` launcher (bin), Tier-1 research-loop skills
 - [ ] M2 — literature connectors (PubMed, arXiv, Semantic Scholar)
 - [ ] M3 — research prompt + provenance entries
 - [ ] M4 — compute: Slurm MCP gateway + typed AlphaFold3 tool
@@ -43,25 +44,45 @@ Linux first, Windows later.
 - [ ] M7 — standalone `theta` shell on pi's headless core (macOS/Linux)
 - [ ] M8 — installers & release channel: Homebrew, deb/AUR, Windows
 
-## Install (once functional)
+## Install
 
 ```sh
-pi install npm:theta-agent
+pi install npm:theta-agent@0.0.2
 ```
+
+Requires theta-agent ≥ 0.0.2 on the registry; earlier versions predate the
+launcher, and a version-pinned install fails loudly until 0.0.2 is
+visible. If the registry is not there yet, run Theta from a checkout
+instead — see [Try it](#try-it).
 
 ## Try it
 
 theta rides on the [pi](https://pi.dev) coding agent, and pi is a peer
-dependency — a global install of theta-agent does not bring `pi` along. Install
-pi first, then theta:
+dependency — install it first. The zero-registry path is a checkout:
 
 ```sh
+git clone https://github.com/hugolld/theta-agent
+cd theta-agent
 npm i -g @earendil-works/pi-coding-agent
-npm i -g theta-agent
+node bin/theta.mjs --dev
+```
+
+`node bin/theta.mjs --dev` launches pi with this checkout preloaded;
+from a checkout you can also name another directory with
+`$THETA_DEV_ROOT` (theta never loads an arbitrary current directory
+this way). Theta targets pi ≥ 0.99; if the launcher reports
+`pi not found`, install pi with the command above and retry.
+
+Once theta-agent ≥ 0.0.2 is on the registry (earlier versions predate
+the launcher — if the registry is not there yet, stay on the checkout
+path above), the installed form is:
+
+```sh
+npm i -g theta-agent@0.0.2
 theta
 ```
 
-That launches pi with the Theta package preloaded. `theta --dev` loads Theta from a local checkout — either the launcher's own repo, or the directory you name with `$THETA_DEV_ROOT` (theta never loads an arbitrary current directory this way). Theta targets pi ≥ 0.99; if `theta` reports `pi not found`, install pi with the command above and retry.
+That launches pi with the Theta package preloaded.
 
 ## Vendored skills
 
@@ -71,7 +92,7 @@ library, vendored **verbatim** per [ADR 0001](docs/adr/0001-vendor-k-dense-skill
 upstream names, directory shapes, and content unchanged except a provenance
 header in each vendored `SKILL.md`. Re-syncs happen at milestone boundaries.
 
-Currently vendored (upstream release `v2.72.0`, commit `526ebce`) — the full
+Currently vendored (upstream release `v2.72.0`, commit `526ebce`) — the
 Tier-1 research-loop set:
 
 - `literature-review` — systematic, scoping, and narrative literature reviews
@@ -115,6 +136,11 @@ Tier-1 research-loop set:
 
 The `theta-research-loop` orchestrator that routes the research loop into the
 library is Theta's own, self-authored work.
+
+One deliberate omission: `pi-agent`, a Tier-1 candidate that documents the pi
+harness itself. It would duplicate pi's own documentation, drift against
+installed pi releases, and add nothing to the research loop. The skip is
+recorded on [issue #5](https://github.com/hugolld/theta-agent/issues/5).
 
 K-Dense's skills are MIT-licensed, © K-Dense Inc. If you use them in research,
 please cite their paper:
