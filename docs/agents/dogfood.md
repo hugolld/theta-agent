@@ -7,7 +7,7 @@
 From the checkout:
 
 ```sh
-sd=$(mktemp -d)
+sd=$(mktemp -d "${TMPDIR:-/tmp}/dogfood-$(git rev-parse --short HEAD)-XXXXXX")
 st=$(git status --porcelain --untracked-files=all) || { echo "git status failed"; exit 1; }
 [ -n "$st" ] && { echo "working tree dirty — commit first"; exit 1; }
 git rev-parse HEAD > "$sd/pre-head"
@@ -32,7 +32,7 @@ pkill -P $watchdog 2>/dev/null; kill $watchdog 2>/dev/null
 - Bound the run: the watchdog sends SIGTERM at 5 minutes — the launcher forwards it to `pi` — and 15 seconds later SIGKILLs the launcher if it still hangs, leaving a `watchdog` sentinel the audit rejects. A `pi` stalled through both signals may keep running detached, but the run fails either way. No coreutils needed.
 - Record the runtime: `pi --version`, `node --version`, and the expected provider/model land in the session dir; the audit enforces the pi ≥ 0.99 and node ≥ 22 floors and verifies the transcript's `model_change` record against the expected run. These are operator-attested runtime observations — the launcher resolves `pi` from `PATH` independently, so the audit names what was recorded, not a cryptographically bound executable.
 - Keep the spot-check prompt pure ASCII: the audit rejects non-ASCII prompts (cross-script lookalikes are not auditable), and legitimate English scientific text with em dashes or symbols must be transcribed in ASCII before the run.
-- Run inside an isolated `--session-dir`: the fresh temp dir holds exactly this run's transcript, so the audit below can never pick up another session (a newest-by-mtime lookup races every other pi session on the machine).
+- Run inside an isolated `--session-dir`: the fresh temp dir holds exactly this run's transcript, so the audit below can never pick up another session (a newest-by-mtime lookup races every other pi session on the machine). The dir name carries the short HEAD, so evidence dirs self-identify.
 - Keep the prompt neutral: a prompt that names a skill adds nothing, and a neutral one keeps the spot-check honest.
 - Boot-clean is process evidence: `exit-status` must hold 0 and `stderr.txt` must be 0 bytes. Both persist in the session dir next to the transcript, and the audit below re-verifies them fail-closed.
 
@@ -51,7 +51,7 @@ node scripts/audit-dogfood.mjs "$sd"
 The spot-check is a second full one-shot in its own session dir, prompted with a real task in the skill's domain — never a prompt that names the skill or its file. What it attests is that the **selected file was opened in a real session**: the model reached the SKILL.md on its own, unprompted by name. It does not claim deeper autonomous routing — a global instruction could still steer a read — and the audit rejects prompts that name the skill or file so the recorded evidence stays meaningful. The prompt is written into the session dir, and the audit verifies the session ran exactly that prompt. Record shapes live in [pi-transcript-schema.md](pi-transcript-schema.md):
 
 ```sh
-sd2=$(mktemp -d)
+sd2=$(mktemp -d "${TMPDIR:-/tmp}/dogfood-spot-$(git rev-parse --short HEAD)-XXXXXX")
 st=$(git status --porcelain --untracked-files=all) || { echo "git status failed"; exit 1; }
 [ -n "$st" ] && { echo "working tree dirty — commit first"; exit 1; }
 git rev-parse HEAD > "$sd2/pre-head"

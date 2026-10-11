@@ -23,6 +23,24 @@ test("package.json carries the pi manifest", () => {
 	}
 });
 
+test("package.json bin exposes the theta launcher", () => {
+	// npm strips invalid bin entries at publish time with only a warning in
+	// the tarball output — a red test here makes that failure loud instead.
+	assert.deepEqual(
+		manifest.bin,
+		{ theta: "./bin/theta.mjs" },
+		"bin must map the theta command to ./bin/theta.mjs (got " +
+			JSON.stringify(manifest.bin) +
+			")",
+	);
+	// version must be full SemVer: npm rejects bare "1.2" at publish time
+	assert.match(
+		manifest.version,
+		/^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/,
+		`version must be full SemVer (got ${JSON.stringify(manifest.version)})`,
+	);
+});
+
 test("pi manifest targets exist on disk", async () => {
 	for (const dir of [manifest.pi.extensions, manifest.pi.skills]) {
 		const dirStat = await stat(new URL(`../${dir}`, import.meta.url));
