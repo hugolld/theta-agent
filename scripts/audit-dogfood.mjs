@@ -221,15 +221,23 @@ export function auditSession(dir, rootArg, skill) {
 			`expected exactly 1 session record, found ${sessionRecs.length}`,
 		);
 	}
-	// A one-shot transcript is one linear chain: every record after the
-	// session identity descends from it through id/parentId. A record spliced
-	// in from another session carries a foreign parentId and fails here.
-	const idSet = new Set(recs.map((r) => r.id).filter(Boolean));
-	for (let i = 1; i < recs.length; i++) {
+	// A one-shot transcript is one linear chain: record ids are unique, and
+	// every non-null parentId refers to an EARLIER record — a spliced record
+	// from another session carries a foreign parentId, and a forward or
+	// duplicate reference fails here.
+	const seenIds = new Set();
+	for (let i = 0; i < recs.length; i++) {
+		const id = recs[i].id;
 		const pid = recs[i].parentId;
-		if (pid !== undefined && pid !== null && !idSet.has(pid)) {
+		if (id !== undefined && id !== null) {
+			if (seenIds.has(id)) {
+				throw new Error(`duplicate record id: ${id}`);
+			}
+			seenIds.add(id);
+		}
+		if (i > 0 && pid !== undefined && pid !== null && !seenIds.has(pid)) {
 			throw new Error(
-				`record ${i} has a parentId outside this session's chain`,
+				`record ${i} does not descend from the session chain`,
 			);
 		}
 	}
