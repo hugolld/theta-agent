@@ -221,25 +221,39 @@ export function auditSession(dir, rootArg, skill) {
 			`expected exactly 1 session record, found ${sessionRecs.length}`,
 		);
 	}
-	// A one-shot transcript is one linear chain: record ids are unique, and
-	// every non-null parentId refers to an EARLIER record — a spliced record
-	// from another session carries a foreign parentId, and a forward or
-	// duplicate reference fails here.
+	// A one-shot transcript is ONE linear chain rooted at the session record:
+	// ids are unique, record 0 is the session, and every later record's
+	// parentId is the previous record's id (the schema's single null-parent
+	// root exception is the first record after the session). Disconnected
+	// roots, self-parents, DAG ancestry, and spliced records all fail.
 	const seenIds = new Set();
+	let prevId = null;
+	let rootExceptions = 0;
 	for (let i = 0; i < recs.length; i++) {
 		const id = recs[i].id;
 		const pid = recs[i].parentId;
-		if (id !== undefined && id !== null) {
-			if (seenIds.has(id)) {
-				throw new Error(`duplicate record id: ${id}`);
-			}
-			seenIds.add(id);
+		if (id === undefined || id === null || id === "") {
+			throw new Error(`record ${i} has no usable id`);
 		}
-		if (i > 0 && pid !== undefined && pid !== null && !seenIds.has(pid)) {
+		if (seenIds.has(id)) {
+			throw new Error(`duplicate record id: ${id}`);
+		}
+		seenIds.add(id);
+		if (i === 0) {
+			if (recs[i].type !== "session") {
+				throw new Error("record 0 must be the session record");
+			}
+		} else if (pid === undefined || pid === null) {
+			rootExceptions += 1;
+			if (rootExceptions > 1) {
+				throw new Error(`record ${i} is an extra disconnected root`);
+			}
+		} else if (pid !== prevId) {
 			throw new Error(
-				`record ${i} does not descend from the session chain`,
+				`record ${i} breaks the linear chain (parent ${pid}, expected ${prevId})`,
 			);
 		}
+		prevId = id;
 	}
 	const sysRecs = recs.filter(
 		(r) => r.type === "message" && r.message?.role === "system",

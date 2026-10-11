@@ -201,23 +201,23 @@ function buildSession(t, repo, overrides = {}) {
 		: wrapped;
 	const prompt = overrides.transcriptPrompt ?? "test prompt";
 	const records = [
-		JSON.stringify({ type: "session", cwd: overrides.sessionCwd ?? fs.realpathSync(repo) }),
-		JSON.stringify({
+		{ type: "session", cwd: overrides.sessionCwd ?? fs.realpathSync(repo) },
+		{
 			type: "model_change",
 			provider: "zai-coding-cn",
 			modelId: "glm-5.3-flash",
-		}),
-		JSON.stringify({
+		},
+		{
 			type: "message",
 			message: {
 				role: "system",
 				sections: { skills: skillsText },
 			},
-		}),
-		JSON.stringify({
+		},
+		{
 			type: "message",
 			message: { role: "user", content: [{ type: "text", text: prompt }] },
-		}),
+		},
 	];
 	if (overrides.toolResultIsError !== undefined) {
 		const target = `${repo}/skills/literature-review/SKILL.md`;
@@ -231,7 +231,7 @@ function buildSession(t, repo, overrides = {}) {
 			callArguments.limit = 2000;
 		}
 		records.push(
-			JSON.stringify({
+			({
 				type: "message",
 				message: {
 					role: "assistant",
@@ -249,7 +249,7 @@ function buildSession(t, repo, overrides = {}) {
 			}),
 		);
 		records.push(
-			JSON.stringify({
+			({
 				type: "message",
 				message: {
 					role: "toolResult",
@@ -268,7 +268,7 @@ function buildSession(t, repo, overrides = {}) {
 	}
 	// a completed one-shot ends with the assistant's response
 	records.push(
-		JSON.stringify({
+		({
 			type: "message",
 			message: {
 				role: "assistant",
@@ -279,7 +279,20 @@ function buildSession(t, repo, overrides = {}) {
 			},
 		}),
 	);
-	fs.writeFileSync(path.join(dir, "session.jsonl"), records.join("\n") + "\n");
+	// linear id/parentId chain, matching real pi transcripts
+	if (overrides.extraRecords) records.push(...overrides.extraRecords);
+	let prevFx = null;
+	records.forEach((rec, idx) => {
+		rec.id = `fx${idx}`;
+		if (idx > 0) rec.parentId = prevFx;
+		prevFx = rec.id;
+	});
+	fs.writeFileSync(
+			path.join(dir, "session.jsonl"),
+			records
+				.map((r) => JSON.stringify(r))
+				.join("\n") + "\n",
+		);
 	fs.writeFileSync(path.join(dir, "prompt.txt"), "test prompt");
 	fs.writeFileSync(
 		path.join(dir, "expected-model"),
@@ -506,20 +519,20 @@ test("auditSession fails on corrupt, mismatched, or stale evidence", (t) => {
 		/below the supported 0\.99 floor/,
 	);
 
-	const lengthCapped = buildSession(t, repo);
-	fs.appendFileSync(
-		path.join(lengthCapped, "session.jsonl"),
-		JSON.stringify({
-			type: "message",
-			message: {
-				role: "assistant",
-				provider: "zai-coding-cn",
-				model: "glm-5.3-flash",
-				stopReason: "length",
-				content: [{ type: "text", text: "partial response\n" }],
+	const lengthCapped = buildSession(t, repo, {
+		extraRecords: [
+			{
+				type: "message",
+				message: {
+					role: "assistant",
+					provider: "zai-coding-cn",
+					model: "glm-5.3-flash",
+					stopReason: "length",
+					content: [{ type: "text", text: "partial response\n" }],
+				},
 			},
-		}) + "\n",
-	);
+		],
+	});
 	assert.throws(
 		() => auditIn(repo, () => auditSession(lengthCapped, repo)),
 		/incomplete final assistant response: stopReason length/,
@@ -555,24 +568,24 @@ test("auditSession rejects host aliases under inventory names", (t) => {
 	t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
 	const locs = invNamesToLocs(repo, ["literature-review"], hostDir);
 	const records = [
-		JSON.stringify({ type: "session", cwd: fs.realpathSync(repo) }),
-		JSON.stringify({
+		({ type: "session", cwd: fs.realpathSync(repo) }),
+		({
 			type: "model_change",
 			provider: "zai-coding-cn",
 			modelId: "glm-5.3-flash",
 		}),
-		JSON.stringify({
+		({
 			type: "message",
 			message: {
 				role: "system",
 				sections: { skills: `<available_skills>${locs}</available_skills>` },
 			},
 		}),
-		JSON.stringify({
+		({
 			type: "message",
 			message: { role: "user", content: [{ type: "text", text: "test prompt" }] },
 		}),
-		JSON.stringify({
+		({
 			type: "message",
 			message: {
 				role: "assistant",
@@ -583,7 +596,16 @@ test("auditSession rejects host aliases under inventory names", (t) => {
 			},
 		}),
 	];
-	fs.writeFileSync(path.join(dir, "session.jsonl"), records.join("\n") + "\n");
+	let prevHost = null;
+	records.forEach((rec, idx) => {
+		rec.id = `host${idx}`;
+		if (idx > 0) rec.parentId = prevHost;
+		prevHost = rec.id;
+	});
+	fs.writeFileSync(
+		path.join(dir, "session.jsonl"),
+		records.map((r) => JSON.stringify(r)).join("\n") + "\n",
+	);
 	fs.writeFileSync(path.join(dir, "prompt.txt"), "test prompt");
 	fs.writeFileSync(path.join(dir, "expected-model"), "zai-coding-cn glm-5.3-flash\n");
 	fs.writeFileSync(path.join(dir, "exit-status"), "0");
