@@ -28,6 +28,7 @@ pkill -P $watchdog 2>/dev/null; kill $watchdog 2>/dev/null
 - Pass provider and model explicitly: pi's default model can 401 with an invalid bearer token.
 - Close stdin (`< /dev/null`): `pi --print` waits for stdin EOF even with a prompt argument, and a shell that leaves the pipe open hangs the session silently (found in the issue #8 close-out dogfood — 50 minutes, zero output, zero CPU).
 - Gate before launch: a dirty tree refuses the run, and the pre-run HEAD and `package.json` digest are captured into the session dir — the audit fails if either moved afterwards, so evidence cannot be rebound to a different tree.
+- Batch fixes before regenerating evidence: the pre-head binding makes evidence stale on the next commit, so harden first, commit, then run the evidence pair once at the final HEAD.
 - Bound the run: the watchdog sends SIGTERM at 5 minutes — the launcher forwards it to `pi` — and 15 seconds later SIGKILLs the launcher if it still hangs, leaving a `watchdog` sentinel the audit rejects. A `pi` stalled through both signals may keep running detached, but the run fails either way. No coreutils needed.
 - Record the runtime: `pi --version`, `node --version`, and the expected provider/model land in the session dir; the audit enforces the pi ≥ 0.99 and node ≥ 22 floors and verifies the transcript's `model_change` record against the expected run. These are operator-attested runtime observations — the launcher resolves `pi` from `PATH` independently, so the audit names what was recorded, not a cryptographically bound executable.
 - Keep the spot-check prompt pure ASCII: the audit rejects non-ASCII prompts (cross-script lookalikes are not auditable), and legitimate English scientific text with em dashes or symbols must be transcribed in ASCII before the run.
@@ -47,7 +48,7 @@ The auditor is a tested repository script, `scripts/audit-dogfood.mjs` (unit tes
 node scripts/audit-dogfood.mjs "$sd"
 ```
 
-The spot-check is a second full one-shot in its own session dir, prompted with a real task in the skill's domain — never a prompt that names the skill or its file. What it attests is that the **selected file was opened in a real session**: the model reached the SKILL.md on its own, unprompted by name. It does not claim deeper autonomous routing — a global instruction could still steer a read — and the audit rejects prompts that name the skill or file so the recorded evidence stays meaningful. The prompt is written into the session dir, and the audit verifies the session ran exactly that prompt:
+The spot-check is a second full one-shot in its own session dir, prompted with a real task in the skill's domain — never a prompt that names the skill or its file. What it attests is that the **selected file was opened in a real session**: the model reached the SKILL.md on its own, unprompted by name. It does not claim deeper autonomous routing — a global instruction could still steer a read — and the audit rejects prompts that name the skill or file so the recorded evidence stays meaningful. The prompt is written into the session dir, and the audit verifies the session ran exactly that prompt. Record shapes live in [pi-transcript-schema.md](pi-transcript-schema.md):
 
 ```sh
 sd2=$(mktemp -d)

@@ -1,0 +1,6 @@
+#!/bin/sh
+# Local guardrail mirroring the verify workflow: block commits on a red suite.
+# Unset the env git exports to hooks — fixture repos in the suite must not
+# commit into this repository.
+unset GIT_DIR GIT_INDEX_FILE GIT_WORK_TREE GIT_OBJECT_DIRECTORY
+npm test --silent

@@ -21,6 +21,7 @@ Current state: 0.0.2 — the M1 launcher (stage A of T9, PR #1) is merged: a thi
 - When a change supersedes text in a steering doc (`CLAUDE.md`, `GLOSSARY.md`, `docs/adr/`), the same strike edits that text.
 - `.npmrc` pins the official registry (the machine default is npmmirror).
 - No build step; tests use Node's built-in node:test runner (pi loads extension TS via jiti). Verify changes with `npm test`, `npm run lint`, and `npm run typecheck`; check shipped files with `npm pack --dry-run`.
+- Commits run the suite via the versioned `.githooks/pre-commit` hook; enable it per clone with `git config core.hooksPath .githooks`.
 - Dogfood acceptance criteria are met on captured evidence — session transcripts for the skill criteria, recorded exit status and stderr for clean boot — never the model's self-report. Procedure: `docs/agents/dogfood.md`.
 
 ## Git workflow — one "coding strike" per task
@@ -28,7 +29,7 @@ Current state: 0.0.2 — the M1 launcher (stage A of T9, PR #1) is merged: a thi
 1. Start the strike in a new git worktree on a feature branch.
 2. On the first commit, open a **draft** PR against `main`.
 3. Commit and push every further change to that PR branch.
-4. When the strike is complete, mark the PR ready, then run a dedicated PR review pass before merging to `main`.
+4. When the strike is complete, mark the PR ready, then run a dedicated PR review pass before merging to `main`. An adversarial review loop terminates when findings stay wording-level for two consecutive rounds — record the residual as a documented trust boundary instead of iterating.
 
 ## Publishing
 
