@@ -11,11 +11,13 @@ A)
 	rm -rf skills/theta-lit-probe extensions/lit-probe.ts
 	cp -R prototype/arms/skill/theta-lit-probe skills/theta-lit-probe
 	cp prototype/arms/expected-skills.armA.json test/expected-skills.json
+	cp prototype/arms/real-pi-transcript.armA.jsonl test/fixtures/real-pi-transcript.jsonl
 	;;
 B)
 	rm -rf skills/theta-lit-probe extensions/lit-probe.ts
 	cp prototype/arms/tool/lit-probe.ts extensions/lit-probe.ts
 	cp prototype/arms/expected-skills.armB.json test/expected-skills.json
+	cp prototype/arms/real-pi-transcript.armB.jsonl test/fixtures/real-pi-transcript.jsonl
 	;;
 *)
 	echo "unknown arm: $arm" >&2

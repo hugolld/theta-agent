@@ -1,6 +1,6 @@
 ---
 name: theta-lit-probe
-description: PubMed literature search for biomedicine. Runs a PubMed query through NCBI E-utilities (esearch + esummary) and returns structured metadata per paper: title, first author, year, journal, PMID, and DOI. Paces requests to the E-utilities limit (3 per second anonymous, 10 with NCBI_API_KEY), detects API errors that arrive inside HTTP 200 bodies, and redacts api_key, email, and tool values from any echoed request URL. Use for searches of biomedical literature by topic or query; not for full text, citation graphs, or non-biomedical databases.
+description: PubMed literature search for biomedicine. Runs a PubMed query through NCBI E-utilities (esearch + esummary) and returns structured metadata per paper (title, first author, year, journal, PMID, and DOI). Paces requests to the E-utilities limit (3 per second anonymous, 10 with NCBI_API_KEY), detects API errors that arrive inside HTTP 200 bodies, and redacts api_key, email, and tool values from any echoed request URL. Use for searches of biomedical literature by topic or query; not for full text, citation graphs, or non-biomedical databases.
 allowed-tools: Read Bash
 license: MIT
 metadata:
