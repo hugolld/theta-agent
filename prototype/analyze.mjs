@@ -19,7 +19,7 @@ const recs = fs
 	.map((l) => JSON.parse(l));
 
 const userTs = recs.find((r) => r.message?.role === "user")?.timestamp;
-let skills = [], tools = "", hasTool = false, hasSkill = false;
+let skills = [], hasTool = false, hasSkill = false;
 const calls = []; // {ts, name, detail, isError}
 const results = new Map();
 
@@ -29,9 +29,14 @@ for (const r of recs) {
 	if (m.role === "system") {
 		const s = m.sections?.skills ?? "";
 		skills = [...s.matchAll(/<name>([^<]*)<\/name>/g)].map((x) => x[1]);
-		tools = m.sections?.tools ?? "";
 		hasSkill = skills.includes("theta-lit-probe");
-		hasTool = tools.includes("pubmed_probe_search");
+	}
+	// Tool declarations ride the provider schema, not the system prompt's
+	// tools section (observed live): registration evidence is the toolCall.
+	if (m.role === "assistant") {
+		for (const c of m.content ?? []) {
+			if (c.type === "toolCall" && c.name === "pubmed_probe_search") hasTool = true;
+		}
 	}
 	if (m.role === "assistant") {
 		for (const c of m.content ?? []) {

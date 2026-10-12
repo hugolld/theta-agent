@@ -1,0 +1,93 @@
+file: prototype/evidence/dogfood-protoA-1-74bbf53/2026-10-12T13-49-15-330Z_01a1305f-ecc2-7776-a4ad-47a09f9a9a0f.jsonl
+arm d | skills advertised: 24 | theta-lit-probe: true | pubmed_probe_search registered: false
+span: 79.6s | tool calls: 4 | toolResults with isError: 0 | time-to-first-arm-use: 26.5s
+routing: arm-code used: [
+  'script:python3 /Users/hugodong/Code/theta-agent/.claude/worktrees/m2-shape-contest/skills/theta-lit-probe/s',
+  'script:python3 /Users/hugodong/Code/theta-agent/.claude/worktrees/m2-shape-contest/skills/theta-lit-probe/s',
+  'script:python3 /Users/hugodong/Code/theta-agent/.claude/worktrees/m2-shape-contest/skills/theta-lit-probe/s'
+]
+routing: paper-lookup used: no
+routing: hand-rolled eutils: no
+call timeline:
+  2026-10-12T13:49:37.264Z read     {"path":"/Users/hugodong/Code/theta-agent/.claude/worktrees/m2-shape-contest/skills/theta-lit-probe/SKILL.md","offset":1,"limit":200}
+  2026-10-12T13:49:41.930Z bash     python3 /Users/hugodong/Code/theta-agent/.claude/worktrees/m2-shape-contest/skills/theta-lit-probe/scripts/pubmed_search.py --query "CRISPR 
+  2026-10-12T13:49:56.739Z bash     python3 /Users/hugodong/Code/theta-agent/.claude/worktrees/m2-shape-contest/skills/theta-lit-probe/scripts/pubmed_search.py --query "((base 
+  2026-10-12T13:50:12.852Z bash     python3 /Users/hugodong/Code/theta-agent/.claude/worktrees/m2-shape-contest/skills/theta-lit-probe/scripts/pubmed_search.py --query "off-tar
+
+file: prototype/evidence/dogfood-protoA-2-fe3a2a6/2026-10-12T14-00-51-096Z_01a1306a-8a97-7232-9b59-4f9b38ab90ac.jsonl
+arm d | skills advertised: 24 | theta-lit-probe: true | pubmed_probe_search registered: false
+span: 52.8s | tool calls: 4 | toolResults with isError: 0 | time-to-first-arm-use: 8.2s
+routing: arm-code used: [
+  'script:python3 skills/theta-lit-probe/scripts/pubmed_search.py --query "CRISPR base editing off-target effe',
+  'script:python3 skills/theta-lit-probe/scripts/pubmed_search.py --query "(\\"base editing\\"[tiab] OR \\"base e',
+  'script:python3 skills/theta-lit-probe/scripts/pubmed_search.py --query "(\\"base edit*\\"[ti] OR \\"base edito'
+]
+routing: paper-lookup used: no
+routing: hand-rolled eutils: no
+call timeline:
+  2026-10-12T14:00:55.965Z read     {"path":"/Users/hugodong/Code/theta-agent/.claude/worktrees/m2-shape-contest/skills/theta-lit-probe/SKILL.md","offset":1,"limit":200}
+  2026-10-12T14:00:59.322Z bash     python3 skills/theta-lit-probe/scripts/pubmed_search.py --query "CRISPR base editing off-target effects" --retmax 8 --sort pub_date
+  2026-10-12T14:01:11.962Z bash     python3 skills/theta-lit-probe/scripts/pubmed_search.py --query "(\"base editing\"[tiab] OR \"base editor\"[tiab]) AND (\"off-target\"[tiab]
+  2026-10-12T14:01:23.509Z bash     python3 skills/theta-lit-probe/scripts/pubmed_search.py --query "(\"base edit*\"[ti] OR \"base editor*\"[ti]) AND off-target[ti]" --retmax 1
+
+file: prototype/evidence/dogfood-protoA-3-27f287a/2026-10-12T14-11-44-613Z_01a13074-8364-7543-a277-41a857b9bba5.jsonl
+arm d | skills advertised: 24 | theta-lit-probe: true | pubmed_probe_search registered: false
+span: 79.0s | tool calls: 4 | toolResults with isError: 0 | time-to-first-arm-use: 8.7s
+routing: arm-code used: [
+  'script:python3 skills/theta-lit-probe/scripts/pubmed_search.py --query "CRISPR base editing off-target effe',
+  'script:python3 skills/theta-lit-probe/scripts/pubmed_search.py --query "(\\"base editing\\"[Title/Abstract] O',
+  'script:python3 skills/theta-lit-probe/scripts/pubmed_search.py --query "(\\"base edit*\\"[Title/Abstract] OR '
+]
+routing: paper-lookup used: no
+routing: hand-rolled eutils: no
+call timeline:
+  2026-10-12T14:11:48.349Z read     {"path":"/Users/hugodong/Code/theta-agent/.claude/worktrees/m2-shape-contest/skills/theta-lit-probe/SKILL.md","offset":1,"limit":200}
+  2026-10-12T14:11:53.368Z bash     python3 skills/theta-lit-probe/scripts/pubmed_search.py --query "CRISPR base editing off-target effects" --retmax 10 --sort pub_date
+  2026-10-12T14:12:06.511Z bash     python3 skills/theta-lit-probe/scripts/pubmed_search.py --query "(\"base editing\"[Title/Abstract] OR \"base editor\"[Title/Abstract] OR \"b
+  2026-10-12T14:12:28.002Z bash     python3 skills/theta-lit-probe/scripts/pubmed_search.py --query "(\"base edit*\"[Title/Abstract] OR \"adenine base\"[Title/Abstract] OR \"cy
+
+file: prototype/evidence/dogfood-protoB-1-99cf989/2026-10-12T13-54-58-737Z_01a13065-2a31-753e-ab44-f0578173c8b2.jsonl
+arm d | skills advertised: 23 | theta-lit-probe: false | pubmed_probe_search registered: true
+span: 51.6s | tool calls: 3 | toolResults with isError: 0 | time-to-first-arm-use: 8.2s
+routing: arm-code used: [
+  'tool:CRISPR base editing off-target effects',
+  'tool:"base editing"[Title/Abstract] AND "off-target"[Title/Abstract]',
+  'tool:("base editing"[Title] OR "base editor"[Title]) AND "off-target"[Title]'
+]
+routing: paper-lookup used: no
+routing: hand-rolled eutils: no
+call timeline:
+  2026-10-12T13:55:07.047Z pubmed_probe_search {"query":"CRISPR base editing off-target effects","retmax":10,"sort":"pub_date"}
+  2026-10-12T13:55:16.884Z pubmed_probe_search {"query":"\"base editing\"[Title/Abstract] AND \"off-target\"[Title/Abstract]","retmax":10,"sort":"pub_date"}
+  2026-10-12T13:55:26.929Z pubmed_probe_search {"query":"(\"base editing\"[Title] OR \"base editor\"[Title]) AND \"off-target\"[Title]","retmax":12,"sort":"pub_date"}
+
+file: prototype/evidence/dogfood-protoB-2-089b85d/2026-10-12T14-06-18-320Z_01a1306f-88cf-7419-85c5-bd895f148907.jsonl
+arm d | skills advertised: 23 | theta-lit-probe: false | pubmed_probe_search registered: true
+span: 50.1s | tool calls: 3 | toolResults with isError: 0 | time-to-first-arm-use: 7.2s
+routing: arm-code used: [
+  'tool:CRISPR base editing off-target effects',
+  'tool:("base editing"[Title/Abstract] OR "base editor"[Title/Abstract]) AND "off-target"[Title/Abstract]',
+  'tool:("base editing"[Title] OR "base editor"[Title] OR "base editors"[Title]) AND ("off-target"[Title] OR "off target"[Title])'
+]
+routing: paper-lookup used: no
+routing: hand-rolled eutils: no
+call timeline:
+  2026-10-12T14:06:25.542Z pubmed_probe_search {"query":"CRISPR base editing off-target effects","retmax":10,"sort":"pub_date"}
+  2026-10-12T14:06:37.492Z pubmed_probe_search {"query":"(\"base editing\"[Title/Abstract] OR \"base editor\"[Title/Abstract]) AND \"off-target\"[Title/Abstract]","retmax":10,"sort":"pub_
+  2026-10-12T14:06:47.537Z pubmed_probe_search {"query":"(\"base editing\"[Title] OR \"base editor\"[Title] OR \"base editors\"[Title]) AND (\"off-target\"[Title] OR \"off target\"[Title]
+
+file: prototype/evidence/dogfood-protoB-3-ef7537e/2026-10-12T14-17-13-195Z_01a13079-86eb-7206-95eb-644c71f99104.jsonl
+arm d | skills advertised: 23 | theta-lit-probe: false | pubmed_probe_search registered: true
+span: 59.6s | tool calls: 3 | toolResults with isError: 0 | time-to-first-arm-use: 7.3s
+routing: arm-code used: [
+  'tool:CRISPR base editing off-target effects',
+  'tool:("base edit*"[tiab] OR "base editor*"[tiab]) AND "off-target*"[tiab]',
+  'tool:("base edit*"[ti] OR "base editor*"[ti]) AND "off-target*"[ti]'
+]
+routing: paper-lookup used: no
+routing: hand-rolled eutils: no
+call timeline:
+  2026-10-12T14:17:20.563Z pubmed_probe_search {"query":"CRISPR base editing off-target effects","retmax":10,"sort":"pub_date"}
+  2026-10-12T14:17:33.220Z pubmed_probe_search {"query":"(\"base edit*\"[tiab] OR \"base editor*\"[tiab]) AND \"off-target*\"[tiab]","retmax":12,"sort":"pub_date"}
+  2026-10-12T14:17:42.487Z pubmed_probe_search {"query":"(\"base edit*\"[ti] OR \"base editor*\"[ti]) AND \"off-target*\"[ti]","retmax":12,"sort":"pub_date"}
+
