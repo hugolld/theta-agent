@@ -1,0 +1,12 @@
+clean 74bbf53341a4c03e179277495acdab5c447e1ad2
+transcript e85c082d89b595d16b550dd2b33441e90d819dcef44c0a14fbf8486e0cde6269
+exit-status 9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa
+stderr e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+pi 1.1.0
+node 26.11.0
+provider zai-coding-cn
+model glm-5.3-flash
+inventory 9942396a5cd281b6c7b64d00e65efd4142468177d535ba067bfc1cb91b0e8648
+prompt 3bf17e3d7c8c32325dc49921abd9642e0999b03ad4110ec8a624bae164c92c83
+selected-file-opened /Users/hugodong/Code/theta-agent/.claude/worktrees/m2-shape-contest/skills/theta-lit-probe/SKILL.md
+skill-content 8f91f965622cca1ceac43f20b69b6c82f2b21eebf8f14a6166bf8a0cdee2ee7d
