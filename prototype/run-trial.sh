@@ -25,7 +25,10 @@ pid=$!
 ( sleep 300; echo fired > "$sd/watchdog" 2>/dev/null; kill $pid 2>/dev/null; sleep 15; kill -9 $pid 2>/dev/null ) & watchdog=$!
 wait $pid
 echo $? > "$sd/exit-status"
-pkill -P $watchdog 2>/dev/null; kill $watchdog 2>/dev/null
+# Kill the watchdog subshell BEFORE reaping its sleep child: if pkill hits the
+# sleep first, the subshell advances to the sentinel write and every clean run
+# falsely records "watchdog fired" (observed live 2026-10-12).
+kill $watchdog 2>/dev/null; pkill -P $watchdog 2>/dev/null
 
 # Audit while the tree is still clean at pre-head (the auditor re-checks both).
 node scripts/audit-dogfood.mjs "$sd" > "$sd/attestation.txt" 2>&1
