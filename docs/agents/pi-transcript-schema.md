@@ -1,6 +1,6 @@
 # pi session transcript schema
 
-Reference for the JSONL records pi writes under `~/.pi/agent/sessions/<project>/*.jsonl`, as consumed by `scripts/audit-dogfood.mjs`. Pinned against pi 1.1.0 by `test/dogfood-audit.test.mjs` (golden fixture) and the live runs in PR #13.
+Reference for the JSONL records pi writes under `~/.pi/agent/sessions/<project>/*.jsonl`, as consumed by `scripts/audit-dogfood.mjs`. Pinned against pi 1.1.0 by `test/dogfood-audit.test.mjs` (golden fixture) and the live runs in PR #13; the custom-tool and `details` shapes below are pinned by the M2 shape-contest runs (`prototype/m2-shape-contest`).
 
 ## Record envelope
 
@@ -20,7 +20,7 @@ Every line is one JSON object: `type`, `id`, `parentId`, plus a type-specific pa
 `message: { role, provider, model, stopReason, errorMessage?, content, durationMs?, usage? }`
 
 - **roles**: `system`, `user`, `assistant`, `toolResult`.
-- **system**: `content: ""`; the payload lives in `sections` — `{ preamble, tools, rules, docs, project_context, skills, cwd }`. `sections.skills` holds the advertisement: exactly one `<available_skills>` block of `<skill><name/><description/><location/></skill>` records, XML-escaped (`&apos;`, `&quot;`). `<location>` is the absolute path to each SKILL.md, spelling affected by mount aliases.
+- **system**: `content: ""`; the payload lives in `sections` — `{ preamble, tools, rules, docs, project_context, skills, cwd }`. `sections.skills` holds the advertisement: exactly one `<available_skills>` block of `<skill><name/><description/><location/></skill>` records, XML-escaped (`&apos;`, `&quot;`). `<location>` is the absolute path to each SKILL.md, spelling affected by mount aliases. `sections.tools` is the built-in-tools text block (it ends with a generic "other custom tools" line); a custom tool registered by an extension is declared via the provider tool schema, and the transcript persists that declaration at the message level — the system record's `toolsAdded` array holds one entry per tool (`name`, `description`, `parameters`), the built-ins plus any extension-registered tool. No system section names a custom tool.
 - **assistant**: `content` items are `{type: "text"|"thinking"|"toolCall", …}`. `toolCall` items carry `{id, name, arguments}`; `read` arguments are `{path, offset?, limit?}` — pi passes `offset: 1, limit: 2000` even for full-file reads.
-- **toolResult**: own record with `role: "toolResult"`, `toolCallId`, `toolName`, `isError` (boolean, always present), `content` (the returned file text or output — for a SKILL.md read, exactly the file bytes).
+- **toolResult**: own record with `role: "toolResult"`, `toolCallId`, `toolName`, `isError` (boolean, always present), `content` (array of typed items — `{type: "text", text}` — carrying the returned output; for a SKILL.md read, the text is exactly the file bytes). Custom-tool results also persist a `details` object (tool-defined; observed: query, sort, count, pmids, records, provenance) — machine-checkable without parsing shell text. Built-in tools (bash, read) carry no `details`.
 - **stopReason** values observed: `stop`, `toolUse`, `length`, `error` (with `errorMessage`).
