@@ -48,3 +48,7 @@ Default five-role vocabulary (each label string equals its role name). See `docs
 ### Domain docs
 
 Single-context: root `GLOSSARY.md` + `docs/adr/`. See `docs/agents/domain.md`.
+
+### SKILL.md frontmatter
+
+Descriptions are capped at 1..1024 chars and must stay plain-scalar-safe (no `: ` sequences in the value). `test/skills-library.test.mjs` enforces both and rejects frontmatter its parser cannot read.

@@ -99,7 +99,9 @@ def redact_url(url: str) -> str:
 	"""URL with credential query-parameter values replaced.
 
 	Same contract as `redact_params`: `api_key` stays visible as a parameter
-	name so the call remains repeatable with the reader's own key.
+	name so the call remains repeatable with the reader's own key. The query
+	is re-encoded from its parsed pairs, so the result can differ cosmetically
+	from the wire URL (commas become %2C) while staying valid and repeatable.
 	"""
 	parts = urlsplit(url)
 	if not parts.query:
