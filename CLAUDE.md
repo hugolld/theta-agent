@@ -51,4 +51,4 @@ Single-context: root `GLOSSARY.md` + `docs/adr/`. See `docs/agents/domain.md`.
 
 ### SKILL.md frontmatter
 
-Descriptions are capped at 1..1024 chars and must stay plain-scalar-safe (no `: ` sequences in the value). `test/skills-library.test.mjs` enforces both and rejects frontmatter its parser cannot read.
+Descriptions are capped at 1..1024 chars and must stay plain-scalar-safe (no `: ` sequences in the value). `test/skills-library.test.mjs` enforces both: it parses frontmatter with the `yaml` package — the same engine pi runs — so invalid YAML fails the suite instead of pi silently dropping the skill.
