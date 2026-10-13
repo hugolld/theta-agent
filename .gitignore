@@ -1,6 +1,7 @@
 node_modules/
 *.tgz
 .DS_Store
+__pycache__/
 
 # machine-local Claude Code / agent skills (symlinks into .agents/)
 .claude/

@@ -1,0 +1,4 @@
+{
+	"error": "Invalid value supplied to parameter",
+	"detail": "shape fixture: a generic top-level error body inside HTTP 200; only the rate-limit error body is documented verbatim (NBK25497)"
+}

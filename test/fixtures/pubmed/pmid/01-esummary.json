@@ -1,0 +1,27 @@
+{
+	"result": {
+		"uids": ["39114817"],
+		"39114817": {
+			"uid": "39114817",
+			"pubdate": "2023 Aug 10",
+			"epubdate": "2023 Jul 31",
+			"source": "Nature",
+			"authors": [
+				{ "name": "Frasca D", "authtype": "Author" },
+				{ "name": "Blomberg BB", "authtype": "Author" }
+			],
+			"lastauthor": "Blomberg BB",
+			"title": "CRISPR-based gene editing approaches to restore immune cell function in aged organisms.",
+			"sortfirstauthor": "Frasca D",
+			"sortlastauthor": "Blomberg BB",
+			"fulljournalname": "Nature",
+			"volume": "620",
+			"issue": "7972",
+			"pubtype": ["Journal Article"],
+			"articleids": [
+				{ "idtype": "pubmed", "value": "39114817" },
+				{ "idtype": "doi", "value": "10.1038/s41586-023-06321-w" }
+			]
+		}
+	}
+}
