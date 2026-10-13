@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { readdir, readFile } from "node:fs/promises";
 import { test } from "node:test";
-import { parse as parseYaml } from "yaml";
+import { parse as parseYaml, YAMLParseError } from "yaml";
 
 // Seam guard for the shipped skills library (see test/manifest.test.mjs for
 // the same philosophy): if these break, pi loads a skill wrong or the library
@@ -15,9 +15,11 @@ const expected = JSON.parse(
 );
 
 // Frontmatter is parsed by the same YAML engine pi itself runs (`yaml`, the
-// package pi declares as a dependency), so what this suite sees is what pi
-// sees. Values come back fully typed — `false` is a boolean, `1.5` a number —
-// and invalid YAML throws, failing the suite loudly. That throw is the point
+// package pi declares as a dependency — 2.9.x on both sides today), so what
+// this suite sees is what pi sees. If pi ever moves to a different YAML
+// engine or major, re-check this seam's parity claim. Values come back fully
+// typed — `false` is a boolean, `1.5` a number — and invalid YAML throws,
+// failing the suite loudly. That throw is the point
 // of the seam (#22): pi's own failure mode is the silent one — it drops a
 // skill whose frontmatter it cannot parse — so a construct the engine
 // rejects must never reach a shipped SKILL.md.
@@ -36,7 +38,9 @@ test("invalid frontmatter fails loudly under the real YAML engine", async () => 
 		new URL("fixtures/frontmatter/invalid/SKILL.md", import.meta.url),
 		"utf8",
 	);
-	assert.throws(() => parseFrontmatter(invalid));
+	// The class pin matters: parseFrontmatter also throws a plain Error when
+	// the `---` fence is missing, and that throw must not satisfy this test.
+	assert.throws(() => parseFrontmatter(invalid), YAMLParseError);
 });
 
 const shipped = (await readdir(skillsRoot, { withFileTypes: true }))
