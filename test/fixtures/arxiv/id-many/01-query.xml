@@ -1,0 +1,130 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom" xmlns:arxiv="http://arxiv.org/schemas/atom" xmlns:opensearch="http://a9.com/-/spec/opensearch/1.1/">
+  <link href="https://export.arxiv.org/api/query?search_query=&amp;id_list=2401.00001%2C2401.00002%2C2401.00003%2C2401.00004%2C2401.00005%2C2401.00006%2C2401.00007%2C2401.00008%2C2401.00009%2C2401.00010%2C2401.00011%2C2401.00012&amp;start=0&amp;max_results=12" rel="self" type="application/atom+xml"/>
+  <title type="html">ArXiv Query: search_query=&amp;id_list=2401.00001,2401.00002,2401.00003,2401.00004,2401.00005,2401.00006,2401.00007,2401.00008,2401.00009,2401.00010,2401.00011,2401.00012&amp;start=0&amp;max_results=12</title>
+  <id>https://export.arxiv.org/api/mAnYiDs0yhzUXga</id>
+  <updated>2026-10-13T00:00:00-04:00</updated>
+  <opensearch:totalResults>12</opensearch:totalResults>
+  <opensearch:startIndex>0</opensearch:startIndex>
+  <opensearch:itemsPerPage>12</opensearch:itemsPerPage>
+  <entry>
+    <id>http://arxiv.org/abs/2401.00001v1</id>
+    <updated>2024-01-01T00:00:00Z</updated>
+    <published>2024-01-01T00:00:00Z</published>
+    <title>Scalable methods paper 01</title>
+    <summary>First of twelve synthetic records.</summary>
+    <author><name>Author One</name></author>
+    <arxiv:primary_category term="q-bio.QM"/>
+    <category term="q-bio.QM"/>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2401.00002v1</id>
+    <updated>2024-01-01T00:00:00Z</updated>
+    <published>2024-01-01T00:00:00Z</published>
+    <title>Scalable methods paper 02</title>
+    <summary>Second of twelve synthetic records.</summary>
+    <author><name>Author Two</name></author>
+    <arxiv:primary_category term="q-bio.QM"/>
+    <category term="q-bio.QM"/>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2401.00003v1</id>
+    <updated>2024-01-01T00:00:00Z</updated>
+    <published>2024-01-01T00:00:00Z</published>
+    <title>Scalable methods paper 03</title>
+    <summary>Third of twelve synthetic records.</summary>
+    <author><name>Author Three</name></author>
+    <arxiv:primary_category term="q-bio.QM"/>
+    <category term="q-bio.QM"/>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2401.00004v1</id>
+    <updated>2024-01-01T00:00:00Z</updated>
+    <published>2024-01-01T00:00:00Z</published>
+    <title>Scalable methods paper 04</title>
+    <summary>Fourth of twelve synthetic records.</summary>
+    <author><name>Author Four</name></author>
+    <arxiv:primary_category term="q-bio.QM"/>
+    <category term="q-bio.QM"/>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2401.00005v1</id>
+    <updated>2024-01-01T00:00:00Z</updated>
+    <published>2024-01-01T00:00:00Z</published>
+    <title>Scalable methods paper 05</title>
+    <summary>Fifth of twelve synthetic records.</summary>
+    <author><name>Author Five</name></author>
+    <arxiv:primary_category term="q-bio.QM"/>
+    <category term="q-bio.QM"/>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2401.00006v1</id>
+    <updated>2024-01-01T00:00:00Z</updated>
+    <published>2024-01-01T00:00:00Z</published>
+    <title>Scalable methods paper 06</title>
+    <summary>Sixth of twelve synthetic records.</summary>
+    <author><name>Author Six</name></author>
+    <arxiv:primary_category term="q-bio.QM"/>
+    <category term="q-bio.QM"/>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2401.00007v1</id>
+    <updated>2024-01-01T00:00:00Z</updated>
+    <published>2024-01-01T00:00:00Z</published>
+    <title>Scalable methods paper 07</title>
+    <summary>Seventh of twelve synthetic records.</summary>
+    <author><name>Author Seven</name></author>
+    <arxiv:primary_category term="q-bio.QM"/>
+    <category term="q-bio.QM"/>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2401.00008v1</id>
+    <updated>2024-01-01T00:00:00Z</updated>
+    <published>2024-01-01T00:00:00Z</published>
+    <title>Scalable methods paper 08</title>
+    <summary>Eighth of twelve synthetic records.</summary>
+    <author><name>Author Eight</name></author>
+    <arxiv:primary_category term="q-bio.QM"/>
+    <category term="q-bio.QM"/>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2401.00009v1</id>
+    <updated>2024-01-01T00:00:00Z</updated>
+    <published>2024-01-01T00:00:00Z</published>
+    <title>Scalable methods paper 09</title>
+    <summary>Ninth of twelve synthetic records.</summary>
+    <author><name>Author Nine</name></author>
+    <arxiv:primary_category term="q-bio.QM"/>
+    <category term="q-bio.QM"/>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2401.00010v1</id>
+    <updated>2024-01-01T00:00:00Z</updated>
+    <published>2024-01-01T00:00:00Z</published>
+    <title>Scalable methods paper 10</title>
+    <summary>Tenth of twelve synthetic records.</summary>
+    <author><name>Author Ten</name></author>
+    <arxiv:primary_category term="q-bio.QM"/>
+    <category term="q-bio.QM"/>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2401.00011v1</id>
+    <updated>2024-01-01T00:00:00Z</updated>
+    <published>2024-01-01T00:00:00Z</published>
+    <title>Scalable methods paper 11</title>
+    <summary>Eleventh of twelve synthetic records.</summary>
+    <author><name>Author Eleven</name></author>
+    <arxiv:primary_category term="q-bio.QM"/>
+    <category term="q-bio.QM"/>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2401.00012v1</id>
+    <updated>2024-01-01T00:00:00Z</updated>
+    <published>2024-01-01T00:00:00Z</published>
+    <title>Scalable methods paper 12</title>
+    <summary>Twelfth of twelve synthetic records.</summary>
+    <author><name>Author Twelve</name></author>
+    <arxiv:primary_category term="q-bio.QM"/>
+    <category term="q-bio.QM"/>
+  </entry>
+</feed>
