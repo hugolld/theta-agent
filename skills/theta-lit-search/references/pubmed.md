@@ -1,9 +1,9 @@
 # PubMed (NCBI E-utilities)
 
 Endpoint contract facts for `scripts/pubmed.py`. Official sources reviewed
-2026-10-11 (see SKILL.md provenance); the full delta review against the
-vendored paper-lookup reference lives in the repo at
-`docs/research/2026-10-11-m2-literature-api-contracts.md`.
+2026-10-11 (contract basis: the script docstring and the repo research note
+`docs/research/2026-10-11-m2-literature-api-contracts.md`, which also holds
+the delta review against the vendored paper-lookup reference).
 
 ## Base URL
 

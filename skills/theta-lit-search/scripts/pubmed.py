@@ -86,7 +86,22 @@ def is_throttle(payload: dict) -> bool:
 	return isinstance(error, str) and THROTTLE_MARK in error.lower()
 
 
-def classify(status: int, body: str, what: str) -> dict:
+PACE_HINT = (
+	"its pace is 3 requests/second anonymous, 10 with an NCBI_API_KEY; "
+	"wait before retrying"
+)
+
+
+def throttle_error(endpoint: str, where: str, error_json: object) -> ApiError:
+	"""The one throttle message, whether the body arrived with 200 or not."""
+	return ApiError(
+		f"pubmed.py: {endpoint}: throttled by NCBI {where}: "
+		f"{json.dumps(error_json)} -- {PACE_HINT}",
+		4,
+	)
+
+
+def classify(status: int, body: str, endpoint: str) -> dict:
 	"""Turn one HTTP response into a parsed JSON object or an ApiError.
 
 	The order matters: a non-200 body can still carry the throttle error, and
@@ -98,62 +113,60 @@ def classify(status: int, body: str, what: str) -> dict:
 	except json.JSONDecodeError:
 		code = 3 if status == 200 else 2
 		raise ApiError(
-			f"pubmed.py: {what}: HTTP {status} with a non-JSON body: {body[:200]!r}",
+			f"pubmed.py: {endpoint}: HTTP {status} with a non-JSON body: {body[:200]!r}",
 			code,
 		) from None
 	if status != 200:
 		if isinstance(parsed, dict) and is_throttle(parsed):
-			raise ApiError(
-				f"pubmed.py: {what}: throttled by NCBI (HTTP {status}): "
-				f"{json.dumps(parsed['error'])} -- its pace is 3 requests/second "
-				"anonymous, 10 with an NCBI_API_KEY; wait before retrying",
-				4,
-			)
+			raise throttle_error(endpoint, f"(HTTP {status})", parsed["error"])
 		raise ApiError(
-			f"pubmed.py: {what}: HTTP {status}: {body[:200]!r}", 2
+			f"pubmed.py: {endpoint}: HTTP {status}: {body[:200]!r}", 2
 		) from None
 	if not isinstance(parsed, dict):
 		raise ApiError(
-			f"pubmed.py: {what}: HTTP 200 body is not a JSON object: {body[:200]!r}",
+			f"pubmed.py: {endpoint}: HTTP 200 body is not a JSON object: {body[:200]!r}",
 			3,
 		)
 	if "error" in parsed:
 		if is_throttle(parsed):
-			raise ApiError(
-				f"pubmed.py: {what}: throttled by NCBI inside HTTP 200: "
-				f"{json.dumps(parsed['error'])} -- its pace is 3 requests/second "
-				"anonymous, 10 with an NCBI_API_KEY; wait before retrying",
-				4,
-			)
+			raise throttle_error(endpoint, "inside HTTP 200", parsed["error"])
 		raise ApiError(
-			f"pubmed.py: {what}: error inside HTTP 200: {json.dumps(parsed['error'])[:200]}",
+			f"pubmed.py: {endpoint}: error inside HTTP 200: {json.dumps(parsed['error'])[:200]}",
 			3,
 		)
 	return parsed
 
 
-def call(
-	path: str,
-	params: dict[str, str],
-	api_key: str,
-	transport,
-	provenance: list[dict],
-) -> dict:
-	"""One paced call; records redacted provenance; classifies the body."""
-	fetch_params = dict(params)
-	if api_key:
-		fetch_params["api_key"] = api_key
-	url = BASE + path + "?" + urlencode(fetch_params)
-	status, body = transport.get(url)
-	parsed = classify(status, body, path)
-	provenance.append(
-		{
-			"endpoint": path,
-			"params": redact_params(fetch_params),
-			"url": redact_url(url),
-		}
-	)
-	return parsed
+class Eutils:
+	"""One paced E-utilities session: credentials, transport, provenance.
+
+	The three travelled as loose parameters through every function before;
+	they live here now, before the arXiv and Semantic Scholar slices clone
+	the pattern. The API key stays private so nothing outside this class can
+	echo it unredacted.
+	"""
+
+	def __init__(self, api_key: str, transport) -> None:
+		self._api_key = api_key
+		self._transport = transport
+		self.calls: list[dict] = []
+
+	def call(self, path: str, params: dict[str, str]) -> dict:
+		"""One paced call; records redacted provenance; classifies the body."""
+		fetch_params = dict(params)
+		if self._api_key:
+			fetch_params["api_key"] = self._api_key
+		url = BASE + path + "?" + urlencode(fetch_params)
+		status, body = self._transport.get(url)
+		parsed = classify(status, body, path)
+		self.calls.append(
+			{
+				"endpoint": path,
+				"params": redact_params(fetch_params),
+				"url": redact_url(url),
+			}
+		)
+		return parsed
 
 
 def extract_record(uid: str, doc: dict) -> dict:
@@ -188,16 +201,11 @@ def extract_record(uid: str, doc: dict) -> dict:
 	}
 
 
-def summarize_uids(
-	uids: list[str], api_key: str, transport, provenance: list[dict]
-) -> list[dict]:
+def summarize_uids(uids: list[str], client: Eutils) -> list[dict]:
 	"""esummary for a bounded UID list, with per-UID in-200 errors caught."""
-	payload = call(
+	payload = client.call(
 		"esummary.fcgi",
 		{"db": "pubmed", "id": ",".join(uids), "retmode": "json"},
-		api_key,
-		transport,
-		provenance,
 	)
 	result = payload.get("result")
 	if not isinstance(result, dict) or "uids" not in result:
@@ -223,8 +231,7 @@ def summarize_uids(
 	return records
 
 
-def run_search(args: argparse.Namespace, api_key: str, transport) -> dict:
-	provenance: list[dict] = []
+def run_search(args: argparse.Namespace, client: Eutils) -> dict:
 	params = {
 		"db": "pubmed",
 		"term": args.query,
@@ -233,7 +240,7 @@ def run_search(args: argparse.Namespace, api_key: str, transport) -> dict:
 	}
 	if args.sort != "relevance":
 		params["sort"] = args.sort
-	payload = call("esearch.fcgi", params, api_key, transport, provenance)
+	payload = client.call("esearch.fcgi", params)
 	result = payload.get("esearchresult")
 	if not isinstance(result, dict) or "idlist" not in result:
 		raise ApiError(
@@ -241,10 +248,11 @@ def run_search(args: argparse.Namespace, api_key: str, transport) -> dict:
 			f"{json.dumps(payload)[:200]}",
 			3,
 		)
-	total = result.get("count")
+	# esearch reports count as a string; tolerate a JSON number defensively.
+	total_text = str(result.get("count", ""))
 	uids = [str(uid) for uid in result["idlist"]][:MAX_UIDS]
-	records = summarize_uids(uids, api_key, transport, provenance) if uids else []
-	return finish(
+	records = summarize_uids(uids, client) if uids else []
+	return attach_provenance(
 		{
 			"source": "pubmed",
 			"operation": "search",
@@ -252,17 +260,19 @@ def run_search(args: argparse.Namespace, api_key: str, transport) -> dict:
 			"sort": args.sort,
 			"retmax": args.retmax,
 			"count": len(records),
-			"total_matches": int(total) if isinstance(total, str) and total.isdigit() else None,
+			"total_matches": int(total_text) if total_text.isdigit() else None,
 			"records": records,
+			# A search that returns nothing is an answer; an identifier lookup
+			# that returns nothing is an error (classify already raised).
+			**({"note": ZERO_NOTE} if not records else {}),
 		},
-		provenance,
+		client.calls,
 	)
 
 
-def run_summary(args: argparse.Namespace, api_key: str, transport) -> dict:
-	provenance: list[dict] = []
-	records = summarize_uids(args.pmids, api_key, transport, provenance)
-	return finish(
+def run_summary(args: argparse.Namespace, client: Eutils) -> dict:
+	records = summarize_uids(args.pmids, client)
+	return attach_provenance(
 		{
 			"source": "pubmed",
 			"operation": "summary",
@@ -270,16 +280,14 @@ def run_summary(args: argparse.Namespace, api_key: str, transport) -> dict:
 			"count": len(records),
 			"records": records,
 		},
-		provenance,
+		client.calls,
 	)
 
 
-def finish(payload: dict, provenance: list[dict]) -> dict:
-	"""Attach provenance (and the honest-zero note) and return the payload."""
-	if payload["operation"] == "search" and payload["count"] == 0:
-		payload["note"] = ZERO_NOTE
+def attach_provenance(payload: dict, calls: list[dict]) -> dict:
+	"""Attach the repeat-the-call record: endpoints, parameters, access date."""
 	payload["provenance"] = {
-		"calls": provenance,
+		"calls": calls,
 		"accessed": date.today().isoformat(),
 	}
 	return payload
@@ -310,7 +318,7 @@ def print_text(payload: dict) -> None:
 	note = payload.get("note")
 	if note:
 		print(f"# {note}")
-	urls = "; ".join(call_["url"] for call_ in payload["provenance"]["calls"])
+	urls = "; ".join(entry["url"] for entry in payload["provenance"]["calls"])
 	print(f"# provenance: {urls}; accessed {payload['provenance']['accessed']}")
 
 
@@ -351,12 +359,14 @@ def main(argv: list[str] | None = None) -> int:
 	require_python()
 	args = parse_args(argv)
 	api_key = os.environ.get("NCBI_API_KEY", "").strip()
-	transport = make_transport(KEYED_INTERVAL if api_key else ANONYMOUS_INTERVAL)
+	client = Eutils(
+		api_key, make_transport(KEYED_INTERVAL if api_key else ANONYMOUS_INTERVAL)
+	)
 	try:
 		payload = (
-			run_search(args, api_key, transport)
+			run_search(args, client)
 			if args.query is not None
-			else run_summary(args, api_key, transport)
+			else run_summary(args, client)
 		)
 	except ApiError as error:
 		fail(str(error), error.exit_code)

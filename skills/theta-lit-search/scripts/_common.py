@@ -198,7 +198,7 @@ class FixtureTransport:
 		return 200, text
 
 
-def make_transport(min_interval: float, env: dict[str, str] | None = None) -> HttpTransport | FixtureTransport:
+def make_transport(min_interval: float) -> HttpTransport | FixtureTransport:
 	"""The real network unless the fixture variable points somewhere."""
-	source = (env if env is not None else os.environ).get(FIXTURE_ENV, "")
+	source = os.environ.get(FIXTURE_ENV, "")
 	return FixtureTransport(source) if source else HttpTransport(min_interval)
