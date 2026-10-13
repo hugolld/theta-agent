@@ -22,14 +22,14 @@ pid=$!
 ( sleep 300; echo fired > "$sd/watchdog" 2>/dev/null; kill $pid 2>/dev/null; sleep 15; kill -9 $pid 2>/dev/null ) & watchdog=$!
 wait $pid
 echo $? > "$sd/exit-status"
-pkill -P $watchdog 2>/dev/null; kill $watchdog 2>/dev/null
+kill $watchdog 2>/dev/null; pkill -P $watchdog 2>/dev/null
 ```
 
 - Pass provider and model explicitly: pi's default model can 401 with an invalid bearer token.
 - Close stdin (`< /dev/null`): `pi --print` waits for stdin EOF even with a prompt argument, and a shell that leaves the pipe open hangs the session silently (found in the issue #8 close-out dogfood — 50 minutes, zero output, zero CPU).
 - Gate before launch: a dirty tree refuses the run, and the pre-run HEAD and `package.json` digest are captured into the session dir — the audit fails if either moved afterwards, so evidence cannot be rebound to a different tree.
 - Batch fixes before regenerating evidence: the pre-head binding makes evidence stale on the next commit, so harden first, commit, then run the evidence pair once at the final HEAD.
-- Bound the run: the watchdog sends SIGTERM at 5 minutes — the launcher forwards it to `pi` — and 15 seconds later SIGKILLs the launcher if it still hangs, leaving a `watchdog` sentinel the audit rejects. A `pi` stalled through both signals may keep running detached, but the run fails either way. No coreutils needed.
+- Bound the run: the watchdog sends SIGTERM at 5 minutes — the launcher forwards it to `pi` — and 15 seconds later SIGKILLs the launcher if it still hangs, leaving a `watchdog` sentinel the audit rejects. A `pi` stalled through both signals may keep running detached, but the run fails either way. No coreutils needed. Teardown kills the watchdog subshell **before** reaping its children: killing the `sleep` child first lets the subshell advance to the sentinel write, so a clean run could record a false `fired` (observed live 2026-10-12, contest residual 5; the swap closes it).
 - Record the runtime: `pi --version`, `node --version`, and the expected provider/model land in the session dir; the audit enforces the pi ≥ 0.99 and node ≥ 22 floors and verifies the transcript's `model_change` record against the expected run. These are operator-attested runtime observations — the launcher resolves `pi` from `PATH` independently, so the audit names what was recorded, not a cryptographically bound executable.
 - Keep the spot-check prompt pure ASCII: the audit rejects non-ASCII prompts (cross-script lookalikes are not auditable), and legitimate English scientific text with em dashes or symbols must be transcribed in ASCII before the run.
 - Run inside an isolated `--session-dir`: the fresh temp dir holds exactly this run's transcript, so the audit below can never pick up another session (a newest-by-mtime lookup races every other pi session on the machine). The dir name carries the short HEAD, so evidence dirs self-identify.
@@ -66,7 +66,7 @@ pid=$!
 ( sleep 300; echo fired > "$sd2/watchdog" 2>/dev/null; kill $pid 2>/dev/null; sleep 15; kill -9 $pid 2>/dev/null ) & watchdog=$!
 wait $pid
 echo $? > "$sd2/exit-status"
-pkill -P $watchdog 2>/dev/null; kill $watchdog 2>/dev/null
+kill $watchdog 2>/dev/null; pkill -P $watchdog 2>/dev/null
 ```
 
 Audit `$sd2` with the same one command, passing the skill path as a second argument — one invocation runs every check above on that session and then, only if all of them passed, requires a read of the skill's `SKILL.md` from this checkout against the same in-memory transcript: a `read` tool call whose path canonicalizes to the checkout's copy exactly, paired by `toolCallId` with a `toolResult` that reports no error and whose text equals the current file contents — `offset` and `limit` are not judged, because a fragment cannot reproduce the full file's bytes. The attested fact is **selected file opened in a real session**, not autonomous routing. The skill argument must resolve to an advertised checkout SKILL.md — traversal or any non-skill path is rejected. Path mentions in `bash` commands, writes, prose, or thinking are not use. Nothing can slip between the checks — one auditor, one attestation.
