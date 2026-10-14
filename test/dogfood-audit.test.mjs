@@ -487,6 +487,8 @@ test("commandResolvesToScript attests execution positions only", (t) => {
 		"nohup nice -n 3 stdbuf -oL python3 skills/literature-review/scripts/search.py",
 		"set -e\npython3 skills/literature-review/scripts/search.py",
 		`python3 ${target} --query x 2>&1 | tee out.txt`,
+		// backslash-newline is a line continuation, not a word
+		"python3 \\\nskills/literature-review/scripts/search.py --query x",
 	];
 	for (const command of hits) {
 		assert.equal(
@@ -521,7 +523,8 @@ test("commandResolvesToScript attests execution positions only", (t) => {
 		`bash -c "python3 ${target}"`,
 		// short-circuited segments never attest: the overall exit status
 		// cannot prove a ||-guarded word ran, and an &&-chained one only
-		// when the chain reaches the command's end
+		// when the chain reaches the command's end — newlines directly
+		// after &&/|| continue the list
 		`true || python3 ${target}`,
 		"echo done || python3 skills/literature-review/scripts/search.py",
 		"false || python3 skills/literature-review/scripts/search.py",
@@ -529,15 +532,29 @@ test("commandResolvesToScript attests execution positions only", (t) => {
 		`echo hi || ( false || python3 ${target} )`,
 		"true && python3 skills/literature-review/scripts/search.py; echo done",
 		"false && python3 skills/literature-review/scripts/search.py || true",
+		"false &&\npython3 skills/literature-review/scripts/search.py; echo done",
+		"true ||\npython3 skills/literature-review/scripts/search.py; echo done",
+		"false && # note\npython3 skills/literature-review/scripts/search.py; echo done",
+		// interpreter flags may eat the program word — the search ends
+		"python3 - skills/literature-review/scripts/search.py < /dev/null",
+		"python3 -W skills/literature-review/scripts/search.py < /dev/null",
+		"python3 -u skills/literature-review/scripts/search.py",
+		// a subshell's cd dies with it — the parent anchor governs after )
+		"(cd skills/literature-review); python3 scripts/search.py",
+		// a bare "run" word is a program, not a uv prefix
+		"PATH=.:$PATH run python3 skills/literature-review/scripts/search.py",
+		"uv run python3 skills/literature-review/scripts/search.py",
 		// control flow is refused outright — whether the body ran is what
 		// the attestation would have to prove
 		"if [ -f results.json ]; then\npython3 skills/literature-review/scripts/search.py\nfi",
 		"while false; do\npython3 skills/literature-review/scripts/search.py\ndone",
 		"case nope in match) python3 skills/literature-review/scripts/search.py;; esac",
 		"for i in; do\npython3 skills/literature-review/scripts/search.py\ndone",
-		// a heredoc body ends at a line holding only the delimiter — a
-		// mid-line occurrence is body text, not the terminator
+		// a heredoc body ends at a raw line holding only the delimiter —
+		// quoted, padded, and mid-line lookalikes are body text
 		`cat > /tmp/x.sh <<'EOF'\necho X EOF\npython3 skills/literature-review/scripts/search.py\nEOF`,
+		`cat > /tmp/x.sh <<'EOF'\n"EOF"\npython3 skills/literature-review/scripts/search.py\nEOF`,
+		`cat <<A <<B\nx\nA\npython3 skills/literature-review/scripts/search.py\nB`,
 		// a cd through an unresolvable expansion loses the anchor
 		"cd $SKILL_DIR && python3 scripts/search.py",
 		"cd ~/elsewhere && python3 skills/literature-review/scripts/search.py",

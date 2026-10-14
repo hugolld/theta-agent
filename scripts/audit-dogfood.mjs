@@ -167,19 +167,49 @@ export function resolveCheckoutScript(rootArg, script) {
 // their quote-stripped value; operators are runs of `;&|<>()` (a leading
 // file-descriptor digit is absorbed: `2>&1` lexes as the operator `2>&`
 // followed by the word `1`) and unquoted newlines. Quoting groups,
-// backslash escapes, and `#` at word start comments to end of line. An
+// backslash escapes (a backslash-newline is a line continuation and
+// contributes nothing), and `#` at word start comments to end of line. An
 // unterminated quote consumes the rest of the string — a command the shell
-// itself would reject.
+// itself would reject. Heredoc bodies are consumed here, at the raw-line
+// level: the lines after the command line belong to each pending `<<`
+// delimiter in order, and the terminator is the delimiter ALONE on its
+// line — quote-stripped or whitespace-padded lookalikes are body text.
 function shellLex(command) {
 	const toks = [];
+	const heredocs = [];
+	let expectDelim = false;
 	const isOp = (c) => /[\s;&|<>()]/.test(c);
 	const isOpNoSpace = (c) => /[;&|<>()]/.test(c);
 	let i = 0;
 	while (i < command.length) {
 		const ch = command[i];
 		if (ch === "\n" || ch === "\r") {
+			if (heredocs.length > 0) {
+				i = ch === "\r" && command[i + 1] === "\n" ? i + 2 : i + 1;
+				for (const h of heredocs) {
+					let terminator = false;
+					while (i <= command.length) {
+						const nl = command.indexOf("\n", i);
+						const end = nl === -1 ? command.length : nl;
+						const line = command.slice(i, end);
+						if ((h.tabs ? line.replace(/^\t+/, "") : line) === h.delim) {
+							i = nl === -1 ? command.length : nl + 1;
+							terminator = true;
+							break;
+						}
+						if (nl === -1) {
+							i = command.length;
+							break;
+						}
+						i = nl + 1;
+					}
+					if (!terminator) i = command.length;
+				}
+				heredocs.length = 0;
+			} else {
+				i++;
+			}
 			toks.push({ t: "o", v: "\n" });
-			i++;
 			continue;
 		}
 		if (/\s/.test(ch)) {
@@ -190,31 +220,49 @@ function shellLex(command) {
 			while (i < command.length && command[i] !== "\n") i++;
 			continue;
 		}
-		// fd-prefixed redirection: the digits join the operator run
+		// fd-prefixed redirection: the digits join the following <>& run
 		let j = i;
 		while (j < command.length && /[0-9]/.test(command[j])) j++;
 		if (j > i && j < command.length && /[<>]/.test(command[j])) {
-			while (j < command.length && isOpNoSpace(command[j])) j++;
-			toks.push({ t: "o", v: command.slice(i, j) });
+			while (j < command.length && /[<>&]/.test(command[j])) j++;
+			const op = command.slice(i, j);
+			toks.push({ t: "o", v: op });
+			expectDelim = op.includes("<<") && !op.includes("<<<");
 			i = j;
 			continue;
 		}
 		if (isOpNoSpace(ch)) {
 			while (j < command.length && isOpNoSpace(command[j])) j++;
-			toks.push({ t: "o", v: command.slice(i, j) });
+			const run = command.slice(i, j);
 			i = j;
+			// emit canonical operators, splitting runs: `);` is two
+			// operators, while &&, ||, <<, >>, <<< stay whole
+			for (let k = 0; k < run.length; ) {
+				const three = run.slice(k, k + 3);
+				const two = run.slice(k, k + 2);
+				let op = run[k];
+				if (three === "<<<") op = three;
+				else if (two === "&&" || two === "||" || two === "<<" || two === ">>") op = two;
+				toks.push({ t: "o", v: op });
+				// a heredoc expects its delimiter next; a herestring does not
+				if (op.includes("<<")) expectDelim = !op.includes("<<<");
+				k += op.length;
+			}
 			continue;
 		}
 		// a word: quoting groups, backslash escapes the next character
 		let w = "";
+		let quoted = false;
 		while (i < command.length && !isOp(command[i])) {
 			const c = command[i];
 			if (c === "'") {
+				quoted = true;
 				let k = i + 1;
 				while (k < command.length && command[k] !== "'") k++;
 				w += command.slice(i + 1, k);
 				i = Math.min(k + 1, command.length);
 			} else if (c === '"') {
+				quoted = true;
 				let k = i + 1;
 				while (k < command.length && command[k] !== '"') k++;
 				for (let q = i + 1; q < k; q++) {
@@ -223,14 +271,27 @@ function shellLex(command) {
 				}
 				i = Math.min(k + 1, command.length);
 			} else if (c === "\\") {
-				w += command[i + 1] ?? "";
-				i += 2;
+				// backslash-newline (and backslash-\r\n) is a continuation
+				if (command[i + 1] === "\n") i += 2;
+				else if (command[i + 1] === "\r" && command[i + 2] === "\n") i += 3;
+				else {
+					w += command[i + 1] ?? "";
+					i += 2;
+				}
 			} else {
 				w += c;
 				i++;
 			}
 		}
-		toks.push({ t: "w", v: w });
+		if (expectDelim) {
+			heredocs.push({
+				delim: w.startsWith("-") ? w.slice(1) : w,
+				tabs: w.startsWith("-"),
+			});
+			expectDelim = false;
+		}
+		// an empty word matters only as a quoted heredoc delimiter
+		if (w !== "" || quoted) toks.push({ t: "w", v: w });
 	}
 	return toks;
 }
@@ -245,7 +306,9 @@ export function shellTokens(command) {
 // Interpreters execute their first program word; wrappers pass through to a
 // program after their own flags, numeric arguments, and assignments.
 const INTERPRETERS = new Set(["python3", "python", "bash", "sh", "zsh", "env", "uv"]);
-const WRAPPERS = new Set(["timeout", "nohup", "nice", "stdbuf", "watch", "sudo", "time"]);
+const WRAPPERS = new Set([
+	"timeout", "nohup", "nice", "stdbuf", "watch", "sudo", "time", "exec",
+]);
 const isInterpreter = (w) => INTERPRETERS.has(w) || /^python\d+(\.\d+)?$/.test(w);
 
 // Control-flow keywords: whether the body ran is exactly what an
@@ -264,9 +327,10 @@ const COMPOUND = new Set([
 // arguments, comments, heredoc bodies, redirection targets — never
 // attest, and neither does a copy of the script elsewhere on disk.
 // Short-circuit operators are modelled conservatively: a segment after
-// `&&` attests only when its chain runs to the end of the command (a
-// non-error overall result then proves every `&&`-chained segment ran);
-// a segment after `||` never attests, because success and skip are
+// `&&` attests only when its chain runs to the command's end unbroken (a
+// non-error overall result then proves every `&&`-chained segment ran;
+// newlines directly after the operator continue the list); a segment
+// after `||` never attests, because success and skip are
 // indistinguishable in the overall exit status. Control flow (if, while,
 // case, for, brace groups) is refused outright — whether the body ran is
 // exactly what an attestation would have to prove.
@@ -302,45 +366,40 @@ export function commandResolvesToScript(command, target, root) {
 	// assignments; "program" = the next word is the executed program;
 	// "args" = the program word is behind us and nothing later executes.
 	// Reachability of the current segment: "open" runs unconditionally,
-	// "and"/"or" follow a short-circuit operator.
+	// "and"/"or" follow a short-circuit operator. `awaiting` marks an
+	// &&/|| operand still expected — a newline (or comment line) directly
+	// after the operator continues the list instead of ending it.
 	let phase = "prefix";
 	let guard = "open";
+	let awaiting = false;
+	const anchors = []; // the cwd at each open subshell
 	let i = 0;
 	while (i < toks.length) {
 		const tok = toks[i];
 		if (tok.t === "o") {
 			const op = tok.v;
-			if (op.includes("<<")) {
-				// heredoc: the body runs to a line holding only the
-				// delimiter word — a mid-line occurrence is body text; a
-				// missing terminator swallows the rest (the shell would be
-				// waiting for one — nothing later can attest).
-				const delim = toks[i + 1]?.t === "w" ? toks[i + 1].v : null;
-				i += 2;
-				if (delim !== null) {
-					while (i < toks.length) {
-						const loneLine =
-							toks[i].t === "w" &&
-							toks[i].v === delim &&
-							(i === 0 || (toks[i - 1].t === "o" && toks[i - 1].v === "\n")) &&
-							(toks[i + 1] === undefined ||
-								(toks[i + 1].t === "o" && toks[i + 1].v === "\n"));
-						if (loneLine) {
-							i++;
-							break;
-						}
-						i++;
-					}
-				}
-				continue;
-			}
 			if (op.includes("<") || op.includes(">")) {
 				i += 2; // the redirection operator and its target word
 				continue;
 			}
-			if (op === "&&") guard = "and";
-			else if (op === "||") guard = "or";
-			else if (op !== "(") guard = "open"; // a subshell group keeps the guard
+			if (op === "&&") {
+				guard = "and";
+				awaiting = true;
+			} else if (op === "||") {
+				guard = "or";
+				awaiting = true;
+			} else if (op === "(") {
+				anchors.push(cwd); // a subshell starts at the parent cwd…
+			} else if (op === ")") {
+				cwd = anchors.pop() ?? cwd; // …and its cd dies with it
+				guard = "open";
+				awaiting = false;
+			} else if (op === "\n" && awaiting) {
+				// the AND-OR list continues past the newline
+			} else {
+				guard = "open";
+				awaiting = false;
+			}
 			phase = "prefix"; // every operator ends the simple command
 			i++;
 			continue;
@@ -348,23 +407,32 @@ export function commandResolvesToScript(command, target, root) {
 		const wordIdx = i;
 		const w = tok.v;
 		i++;
+		awaiting = false;
 		// A guarded segment's program word attests only when its execution
 		// is provable: open segments always run; an `&&`-guarded one only
 		// inside a chain that reaches the command's end unbroken.
 		const provable = guard === "open" || (guard === "and" && nextBreak[wordIdx] === -1);
 		const skippable = /^-/.test(w) || /^\d+$/.test(w) || /^[A-Za-z_][A-Za-z0-9_]*=/.test(w);
 		if (phase === "args") continue;
-		if (skippable || w === "run") continue; // uv run, timeout 30, env K=V, flags
 		if (phase === "program") {
-			if (isInterpreter(w) || WRAPPERS.has(w)) continue; // chained: env python3 x.py
+			// An interpreter flag may take the next word as its value — or
+			// be the read-stdin operand `-`: the program search ends here,
+			// and no later word in this segment can attest.
+			if (/^-/.test(w)) {
+				phase = "args";
+				continue;
+			}
+			if (skippable) continue; // env K=V chains keep waiting
+			if (isInterpreter(w) || WRAPPERS.has(w)) continue; // env python3 x.py
 			phase = "args";
 			if (provable && resolvesTo(w)) return true;
 			continue;
 		}
 		// prefix phase: this word is the command word
+		if (skippable) continue; // timeout 30, flags, assignments
 		if (COMPOUND.has(w)) return false; // control flow is refused outright
 		if (WRAPPERS.has(w)) continue;
-		if (w === "cd") {
+		if (w === "cd" || w === "pushd") {
 			// Consume the directory argument. The anchor moves only when
 			// the cd provably ran and succeeded: open, or `&&`-guarded in
 			// a chain that reaches the command's end (the caller's
@@ -375,7 +443,7 @@ export function commandResolvesToScript(command, target, root) {
 			// know, and later relative words can no longer attest.
 			const dir = toks[i]?.t === "w" ? toks[i].v : null;
 			if (dir === null) {
-				cwd = null; // bare cd goes HOME
+				cwd = null; // bare cd goes HOME; bare pushd swaps
 			} else {
 				i++;
 				const p =
@@ -393,6 +461,11 @@ export function commandResolvesToScript(command, target, root) {
 				}
 				cwd = real !== null && provable ? real : null;
 			}
+			phase = "args";
+			continue;
+		}
+		if (w === "popd") {
+			cwd = null; // restores an older directory the audit never knew
 			phase = "args";
 			continue;
 		}
