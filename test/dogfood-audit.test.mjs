@@ -598,9 +598,14 @@ test("commandResolvesToScript attests execution positions only", (t) => {
 		// process substitution is unmodelled and refused outright
 		`<(echo ${target}) x || true`,
 		`>(echo ${target}) x || true`,
-		// a `<< --` delimiter is the literal word --: the dash is not
-		// the <<- tab-stripping form
+		// a spaced `<< --` delimiter is the literal word `--`; only a
+		// dash attached to the operator makes the <<- tab-stripping form
 		"cat << --\n-\npython3 skills/literature-review/scripts/search.py\n--\ntrue",
+		// the <<- terminator strips leading tabs only — a `-EOF` line is
+		// body text, whatever the audit's spelling of the delimiter
+		"cat <<-EOF\n-EOF\npython3 skills/literature-review/scripts/search.py\nEOF\ntrue",
+		"cat <<- 'EOF'\npython3 skills/literature-review/scripts/search.py\nEOF",
+		"cat <<-X\npython3 skills/literature-review/scripts/search.py\nX",
 		// timeout takes exactly one duration operand
 		"timeout 2 30 python3 skills/literature-review/scripts/search.py",
 		// a background-looking &> redirect moves the parent cwd — the

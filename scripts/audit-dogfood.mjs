@@ -229,6 +229,12 @@ function shellLex(command) {
 			toks.push({ t: "o", v: op });
 			expectDelim = op.includes("<<") && !op.includes("<<<") ? "<<" : null;
 			i = j;
+			// a dash attached to the heredoc operator marks the
+			// tab-stripping form and belongs to the operator
+			if (expectDelim === "<<" && command[i] === "-") {
+				expectDelim = "<<-";
+				i++;
+			}
 			continue;
 		}
 		if (isOpNoSpace(ch)) {
@@ -236,12 +242,12 @@ function shellLex(command) {
 			const run = command.slice(i, j);
 			i = j;
 			// emit canonical operators, splitting runs: `);` is two
-			// operators, while &&, ||, <<, >>, <<<, <<-, &>, &>> stay whole
+			// operators, while &&, ||, <<, >>, <<<, &>, &>> stay whole
 			for (let k = 0; k < run.length; ) {
 				const three = run.slice(k, k + 3);
 				const two = run.slice(k, k + 2);
 				let op = run[k];
-				if (three === "<<<" || three === "&>>" || three === "<<-") op = three;
+				if (three === "<<<" || three === "&>>") op = three;
 				else if (
 					two === "&&" ||
 					two === "||" ||
@@ -252,12 +258,16 @@ function shellLex(command) {
 					op = two;
 				}
 				toks.push({ t: "o", v: op });
-				// a heredoc expects its delimiter next; a herestring does
-				// not, and `<<-` marks a tab-indented terminator
+				// a heredoc expects its delimiter next; a herestring does not
 				if (op === "<<") expectDelim = "<<";
-				else if (op === "<<-") expectDelim = "<<-";
 				else if (op === "<<<") expectDelim = null;
 				k += op.length;
+			}
+			// a dash attached to `<<` is the <<- operator, not the start
+			// of the delimiter word
+			if (expectDelim === "<<" && command[i] === "-") {
+				expectDelim = "<<-";
+				i++;
 			}
 			continue;
 		}
@@ -309,6 +319,8 @@ function shellLex(command) {
 			}
 		}
 		if (expectDelim) {
+			// the delimiter is the word as-is; `<<-` only changes how the
+			// terminator line is matched (leading tabs stripped)
 			heredocs.push({ delim: w, tabs: expectDelim === "<<-" });
 			expectDelim = null;
 		}
