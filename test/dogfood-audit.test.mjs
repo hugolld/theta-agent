@@ -484,6 +484,8 @@ test("commandResolvesToScript attests execution positions only", (t) => {
 		"nohup nice -n 3 stdbuf -oL python3 skills/literature-review/scripts/search.py",
 		"set -e\npython3 skills/literature-review/scripts/search.py",
 		`python3 ${target} --query x 2>&1 | tee out.txt`,
+		// a provably-failing left side forces the || branch to run
+		"false || python3 skills/literature-review/scripts/search.py",
 	];
 	for (const command of hits) {
 		assert.equal(
@@ -516,6 +518,16 @@ test("commandResolvesToScript attests execution positions only", (t) => {
 		"python3 $(echo skills/literature-review/scripts/search.py)",
 		// a nested command string is one word, not a command
 		`bash -c "python3 ${target}"`,
+		// short-circuited segments never attest: the overall exit status
+		// cannot prove a ||-guarded word ran, and an &&-chained one only
+		// when the chain reaches the command's end
+		`true || python3 ${target}`,
+		"echo done || python3 skills/literature-review/scripts/search.py",
+		"true && python3 skills/literature-review/scripts/search.py; echo done",
+		"false && python3 skills/literature-review/scripts/search.py || true",
+		// a cd through an unresolvable expansion loses the anchor
+		"cd $SKILL_DIR && python3 scripts/search.py",
+		"cd ~/elsewhere && python3 skills/literature-review/scripts/search.py",
 	];
 	for (const command of misses) {
 		assert.equal(

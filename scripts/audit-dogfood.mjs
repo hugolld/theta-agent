@@ -255,10 +255,20 @@ const isInterpreter = (w) => INTERPRETERS.has(w) || /^python\d+(\.\d+)?$/.test(w
 // earlier in the command). Words that merely mention the path —
 // arguments, comments, heredoc bodies, redirection targets — never
 // attest, and neither does a copy of the script elsewhere on disk.
+// Short-circuit operators are modelled conservatively: a segment after
+// `&&` attests only when its chain runs to the end of the command (a
+// non-error overall result then proves every `&&`-chained segment ran);
+// a segment after `||` never attests — except after the word `false`,
+// which provably fails — because success and skip are indistinguishable
+// in the overall exit status.
 export function commandResolvesToScript(command, target, root) {
+	// cwd anchors relative words; null means the shell went somewhere the
+	// audit cannot know (cd through an expansion), so relative words can
+	// no longer attest.
 	let cwd = root;
 	const resolvesTo = (w) => {
 		if (w === "") return false;
+		if (!path.isAbsolute(w) && cwd === null) return false;
 		const p = path.isAbsolute(w) ? w : path.resolve(cwd, w);
 		try {
 			return fs.realpathSync(p) === target;
@@ -267,11 +277,26 @@ export function commandResolvesToScript(command, target, root) {
 		}
 	};
 	const toks = shellLex(command);
+	// Operators that decouple the overall exit status from the `&&` chain
+	// in progress: once one follows, the chain's later segments can no
+	// longer be proven to have run.
+	const breaksChain = (op) =>
+		op === ";" || op === "\n" || op === "&" || op === "||" || op === ")";
+	// Index of the next chain-breaking operator at or after each token.
+	const nextBreak = new Array(toks.length).fill(-1);
+	for (let k = toks.length - 1; k >= 0; k--) {
+		nextBreak[k] =
+			toks[k].t === "o" && breaksChain(toks[k].v) ? k : (nextBreak[k + 1] ?? -1);
+	}
 	// Program-position state, per simple command (restarted at every
 	// operator): "prefix" = still consuming wrappers, flags, and
 	// assignments; "program" = the next word is the executed program;
 	// "args" = the program word is behind us and nothing later executes.
+	// Reachability of the current segment: "open" runs unconditionally,
+	// "and"/"or" follow a short-circuit operator.
 	let phase = "prefix";
+	let guard = "open";
+	let lastHead = null;
 	let i = 0;
 	while (i < toks.length) {
 		const tok = toks[i];
@@ -290,46 +315,69 @@ export function commandResolvesToScript(command, target, root) {
 				i += 2; // the redirection operator and its target word
 				continue;
 			}
-			phase = "prefix"; // every other operator ends the simple command
+			if (op === "&&") guard = "and";
+			else if (op === "||") guard = lastHead === "false" ? "open" : "or";
+			else if (op !== "(") guard = "open"; // a subshell group keeps the guard
+			phase = "prefix"; // every operator ends the simple command
 			i++;
 			continue;
 		}
+		const wordIdx = i;
 		const w = tok.v;
 		i++;
+		// A guarded segment's program word attests only when its execution
+		// is provable: open segments always run; an `&&`-guarded one only
+		// inside a chain that reaches the command's end unbroken.
+		const provable = guard === "open" || (guard === "and" && nextBreak[wordIdx] === -1);
 		const skippable = /^-/.test(w) || /^\d+$/.test(w) || /^[A-Za-z_][A-Za-z0-9_]*=/.test(w);
 		if (phase === "args") continue;
 		if (skippable || w === "run") continue; // uv run, timeout 30, env K=V, flags
 		if (phase === "program") {
 			if (isInterpreter(w) || WRAPPERS.has(w)) continue; // chained: env python3 x.py
 			phase = "args";
-			if (resolvesTo(w)) return true;
+			lastHead = w;
+			if (provable && resolvesTo(w)) return true;
 			continue;
 		}
 		// prefix phase: this word is the command word
 		if (WRAPPERS.has(w)) continue;
 		if (w === "cd") {
-			// Consume the directory argument; the change persists for the
-			// rest of the bash call. Applied unconditionally: a failed cd
-			// makes the whole command exit non-zero, and the paired
-			// non-error result gate rejects exactly that.
+			// Consume the directory argument. A resolvable directory moves
+			// the anchor for later relative words (open segments only); a
+			// clean literal that fails to resolve is a failed cd — the
+			// anchor stays, and an `&&` chain then dies at the non-error
+			// result gate. An argument the audit cannot expand ($VARS, ~)
+			// or a bare cd took the shell somewhere unknowable: the anchor
+			// is lost and later relative words can no longer attest.
 			const dir = toks[i]?.t === "w" ? toks[i].v : null;
-			if (dir !== null) {
-				const p = path.isAbsolute(dir) ? dir : path.resolve(cwd, dir);
-				try {
-					const real = fs.realpathSync(p);
-					if (fs.statSync(real).isDirectory()) {
-						cwd = real;
-						i++;
+			if (dir === null) {
+				cwd = null; // bare cd goes HOME
+			} else {
+				i++;
+				const indirect = /[$`]/.test(dir) || dir.startsWith("~");
+				const p =
+					cwd === null
+						? (path.isAbsolute(dir) ? dir : null)
+						: (path.isAbsolute(dir) ? dir : path.resolve(cwd, dir));
+				let real = null;
+				if (p !== null) {
+					try {
+						const r = fs.realpathSync(p);
+						if (fs.statSync(r).isDirectory()) real = r;
+					} catch {
+						// unresolvable: a failed cd, unless indirect
 					}
-				} catch {
-					// not a directory: leave the word as a plain argument
 				}
+				if (real !== null && guard === "open") cwd = real;
+				else if (real === null && (indirect || p === null)) cwd = null;
 			}
 			phase = "args";
+			lastHead = "cd";
 			continue;
 		}
 		phase = isInterpreter(w) ? "program" : "args";
-		if (resolvesTo(w)) return true;
+		lastHead = w;
+		if (provable && resolvesTo(w)) return true;
 	}
 	return false;
 }
