@@ -487,8 +487,11 @@ test("commandResolvesToScript attests execution positions only", (t) => {
 		"git status && cd skills/literature-review && python3 scripts/search.py",
 		// the cd is not in the pipeline — only the script invocation is
 		"cd skills/literature-review && python3 scripts/search.py | tee out.txt",
-		// a command/builtin prefix passes the real program through
+		// a command prefix passes the real program through; >& file is a
+		// both-streams redirect; a subshell replacement dies with it
 		"command python3 skills/literature-review/scripts/search.py",
+		`python3 ${target} >& out.txt`,
+		"(exec true); python3 skills/literature-review/scripts/search.py",
 		// a file redirect reopens a closed fd before the dup reads it
 		"1>&- > log.txt 2>&1 python3 skills/literature-review/scripts/search.py",
 		// exec'ing the script itself replaces the shell with it
@@ -707,6 +710,19 @@ test("commandResolvesToScript attests execution positions only", (t) => {
 		`python3 ${target} 2>&out.txt ; echo ok`,
 		// exec'ing a special builtin ends the shell
 		"exec cd skills/literature-review; python3 scripts/search.py",
+		// builtin runs only shell builtins — never a program
+		"builtin python3 skills/literature-review/scripts/search.py || true",
+		// mode flags run nothing: command prints the path, sudo -v refreshes
+		"command -v skills/literature-review/scripts/search.py",
+		"command -v python3 skills/literature-review/scripts/search.py",
+		"sudo -v python3 skills/literature-review/scripts/search.py",
+		// an unknown wrapper flag fails the wrapper before the program
+		"command -q python3 skills/literature-review/scripts/search.py; echo ok",
+		"nice -Q python3 skills/literature-review/scripts/search.py; echo ok",
+		"nohup -Z python3 skills/literature-review/scripts/search.py; echo ok",
+		"timeout -Z 30 python3 skills/literature-review/scripts/search.py; echo ok",
+		// command-prefixing the exec-close still closes the shell's fd
+		"command exec 1>&-; python3 skills/literature-review/scripts/search.py 2>&1; echo done",
 		// a spaced `<< --` delimiter is the literal word `--`; only a
 		// dash attached to the operator makes the <<- tab-stripping form
 		"cat << --\n-\npython3 skills/literature-review/scripts/search.py\n--\ntrue",

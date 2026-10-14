@@ -344,11 +344,52 @@ export function shellTokens(command) {
 
 // Interpreters execute their first program word; wrappers pass through to a
 // program after their own flags, numeric arguments, and assignments.
+// (`builtin` runs only shell builtins, so it is not a wrapper.)
 const INTERPRETERS = new Set(["python3", "python", "bash", "sh", "zsh", "env", "uv"]);
 const WRAPPERS = new Set([
 	"timeout", "nohup", "nice", "stdbuf", "watch", "sudo", "time", "exec",
-	"command", "builtin",
+	"command",
 ]);
+
+// A wrapper's known flags: an unknown one fails the wrapper before the
+// program runs, so the program search ends. stdbuf's take glued values
+// (-oL); the lists stay deliberately short — an unlisted flag is only a
+// refusal, never a false attestation.
+const wrapperAcceptsFlag = (wrapper, flag) => {
+	switch (wrapper) {
+		case "command":
+			return flag === "-p" || flag === "-v" || flag === "-V";
+		case "nice":
+			return flag === "-n";
+		case "time":
+			return flag === "-p";
+		case "nohup":
+		case "exec":
+			return false;
+		case "timeout":
+			return (
+				flag === "-k" ||
+				flag === "-s" ||
+				flag === "--foreground" ||
+				flag === "--preserve-status"
+			);
+		case "stdbuf":
+			return /^-[oei]/.test(flag);
+		case "sudo":
+			return (
+				/^-[AabCcDEegHhIiKkLlnPpRrSsTtUuVv]$/.test(flag) ||
+				flag === "--preserve-env" ||
+				flag === "--login" ||
+				flag === "--shell" ||
+				flag === "--validate" ||
+				flag.startsWith("--user=")
+			);
+		case "watch":
+			return /^-[dgnptbcex]$/.test(flag);
+		default:
+			return false;
+	}
+};
 const isInterpreter = (w) => INTERPRETERS.has(w) || /^python\d+(\.\d+)?$/.test(w);
 
 // Pipe spellings: `|` and bash's `|&` share every semantic the audit
@@ -521,7 +562,7 @@ export function commandResolvesToScript(command, target, root) {
 				// a fd-prefixed dup takes an fd operand only — a file word
 				// is bash's ambiguous redirect (the bare >&file form is a
 				// both-streams file redirect and falls through)
-				if (/^\d*>&$/.test(t.v)) return true;
+				if (/^\d+>&$/.test(t.v)) return true;
 				const p =
 					cwd === null
 						? (path.isAbsolute(target) ? target : null)
@@ -626,7 +667,7 @@ export function commandResolvesToScript(command, target, root) {
 					i++;
 				}
 				if (
-					headWord === "exec" &&
+					execHeaded &&
 					frames.length === 0 &&
 					(op === ">&" || /^\d*>&$/.test(op)) &&
 					toks[i]?.t === "w" &&
@@ -646,7 +687,7 @@ export function commandResolvesToScript(command, target, root) {
 			headWord = null;
 			timeoutNum = false;
 			// a replaced shell makes every later segment phantom
-			if (execPend) return false;
+			if (execPend && frames.length === 0) return false;
 			execHeaded = false;
 			if (op === "&&") {
 				guard = "and";
@@ -712,8 +753,9 @@ export function commandResolvesToScript(command, target, root) {
 			if (/^-/.test(w) || /^\d+$/.test(w) || assignment) {
 				phase = "args";
 				// the operand position of an exec'd interpreter was eaten
-				// by a flag or value: the shell was replaced regardless
-				if (execHeaded) return false;
+				// by a flag or value: the shell was replaced regardless —
+				// a subshell replacement dies with its subshell
+				if (execHeaded && frames.length === 0) return false;
 				continue;
 			}
 			if (isInterpreter(w) || WRAPPERS.has(w)) {
@@ -730,8 +772,9 @@ export function commandResolvesToScript(command, target, root) {
 			phase = "args";
 			if (provable && !redirectUnsafe(segStart) && resolvesTo(w)) return true;
 			// exec replaces the shell: an unresolved program word means
-			// every later segment is phantom
-			if (execHeaded) return false;
+			// every later segment is phantom — unless the replacement is
+			// subshell-confined
+			if (execHeaded && frames.length === 0) return false;
 			continue;
 		}
 		// prefix phase: this word is the command word
@@ -743,7 +786,20 @@ export function commandResolvesToScript(command, target, root) {
 			// such home is itself the program — the shell would fail to
 			// find it — and the search ends.
 			if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(w) && lastWrapper === null) continue;
-			if (/^-/.test(w) && lastWrapper !== null) continue;
+			if (/^-/.test(w) && lastWrapper !== null) {
+				// mode flags that run nothing: command prints, sudo -v
+				// refreshes credentials
+				if (
+					(lastWrapper === "command" && /^-[vV]$/.test(w)) ||
+					(lastWrapper === "sudo" && w === "-v")
+				) {
+					phase = "args";
+					continue;
+				}
+				// an unknown flag fails the wrapper before the program runs
+				if (!wrapperAcceptsFlag(lastWrapper, w)) phase = "args";
+				continue;
+			}
 			if (/^\d+$/.test(w) && lastWrapper === "timeout" && !timeoutNum) {
 				timeoutNum = true; // timeout takes exactly one duration
 				continue;
@@ -777,7 +833,7 @@ export function commandResolvesToScript(command, target, root) {
 		}
 		if (w === "cd" || w === "pushd") {
 			// exec'ing a special builtin ends the shell too
-			if (execHeaded) return false;
+			if (execHeaded && frames.length === 0) return false;
 			// Consume the directory argument, past cd's own flags (-L,
 			// -P, …) and `--`. The anchor moves only when the cd provably
 			// ran and succeeded in the parent shell: open and foreground,
@@ -859,7 +915,7 @@ export function commandResolvesToScript(command, target, root) {
 		// exec replaces the shell: an unresolved program word means every
 		// later segment is phantom — unless the word opens a program phase
 		// whose operand may still resolve
-		if (execHeaded && !isInterpreter(w)) return false;
+		if (execHeaded && frames.length === 0 && !isInterpreter(w)) return false;
 	}
 	return false;
 }
