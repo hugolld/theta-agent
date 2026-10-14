@@ -486,7 +486,9 @@ test("commandResolvesToScript attests execution positions only", (t) => {
 		"timeout 30 python3 skills/literature-review/scripts/search.py",
 		"env NCBI_API_KEY=k python3 skills/literature-review/scripts/search.py",
 		"time sudo watch python3 skills/literature-review/scripts/search.py",
-		"nohup nice -n 3 stdbuf -oL python3 skills/literature-review/scripts/search.py",
+		"nohup nice stdbuf -oL python3 skills/literature-review/scripts/search.py",
+		// cd's own flags precede the directory operand
+		"cd -P skills/literature-review && python3 scripts/search.py",
 		"set -e\npython3 skills/literature-review/scripts/search.py",
 		`python3 ${target} --query x 2>&1 | tee out.txt`,
 		// backslash-newline is a line continuation, not a word
@@ -568,6 +570,11 @@ test("commandResolvesToScript attests execution positions only", (t) => {
 		// a bare "run" word is a program, not a uv prefix
 		"PATH=.:$PATH run python3 skills/literature-review/scripts/search.py",
 		"uv run python3 skills/literature-review/scripts/search.py",
+		// a numeric or flag word with no wrapper to own it IS the program;
+		// its not-found failure can be swallowed by `|| true`
+		"30 python3 skills/literature-review/scripts/search.py || true",
+		"time -p 30 python3 skills/literature-review/scripts/search.py || true",
+		"-v python3 skills/literature-review/scripts/search.py || true",
 		// control flow is refused outright — whether the body ran is what
 		// the attestation would have to prove
 		"if [ -f results.json ]; then\npython3 skills/literature-review/scripts/search.py\nfi",

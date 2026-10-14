@@ -396,7 +396,8 @@ export function commandResolvesToScript(command, target, root) {
 	);
 	// Operators that decouple the overall exit status from the `&&` chain
 	// in progress: once one follows, the chain's later segments can no
-	// longer be proven to have run.
+	// longer be proven to have run. `|` is deliberately absent — pipeline
+	// members run unconditionally.
 	const breaksChain = (op) =>
 		op === ";" || op === "\n" || op === "&" || op === "||" || op === ")";
 	// Index of the next chain-breaking operator at or after each token.
@@ -417,6 +418,7 @@ export function commandResolvesToScript(command, target, root) {
 	let guard = "open";
 	let awaiting = false;
 	let envChain = false; // the program word waits after env
+	let lastWrapper = null; // the wrapper whose args are being consumed
 	const anchors = []; // the cwd at each open subshell
 	let i = 0;
 	while (i < toks.length) {
@@ -433,6 +435,7 @@ export function commandResolvesToScript(command, target, root) {
 				continue;
 			}
 			envChain = false; // a new simple command begins
+			lastWrapper = null;
 			if (op === "&&") {
 				guard = "and";
 				awaiting = true;
@@ -491,26 +494,45 @@ export function commandResolvesToScript(command, target, root) {
 			continue;
 		}
 		// prefix phase: this word is the command word
-		if (skippable) continue; // timeout 30, flags, assignments
+		if (skippable) {
+			// Command-prefix material: assignments may precede any
+			// command, flags follow the wrapper they belong to, and only
+			// timeout always takes a numeric duration operand. A numeric
+			// or flag word with no such home is itself the program — the
+			// shell would fail to find it — and the search ends.
+			if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(w)) continue;
+			if (/^-/.test(w) && lastWrapper !== null) continue;
+			if (/^\d+$/.test(w) && lastWrapper === "timeout") continue;
+			phase = "args";
+			continue;
+		}
 		if (COMPOUND.has(w)) return false; // control flow is refused outright
-		if (WRAPPERS.has(w)) continue;
+		if (WRAPPERS.has(w)) {
+			lastWrapper = w;
+			continue;
+		}
 		if (w === "cd" || w === "pushd") {
-			// Consume the directory argument. The anchor moves only when
-			// the cd provably ran and succeeded in the parent shell:
-			// open and foreground, or `&&`-guarded in a chain that
-			// reaches the command's end (the caller's non-error result
-			// gate then proves every chained segment exited 0). A cd
-			// backgrounded with `&` or anywhere in a pipeline runs in a
-			// subshell — the parent anchor stays exactly. Any other cd —
-			// `||`-guarded, decoupled by a later separator,
-			// CDPATH-shadowed, expansion-sourced, bare, or resolving to
-			// nothing on disk now — leaves the shell somewhere the audit
-			// cannot know, and later relative words can no longer attest.
-			const dir = toks[i]?.t === "w" ? toks[i].v : null;
+			// Consume the directory argument, past cd's own flags (-L,
+			// -P, …) and `--`. The anchor moves only when the cd provably
+			// ran and succeeded in the parent shell: open and foreground,
+			// or `&&`-guarded in a chain that reaches the command's end
+			// (the caller's non-error result gate then proves every
+			// chained segment exited 0). A cd backgrounded with `&` or
+			// anywhere in a pipeline runs in a subshell — the parent
+			// anchor stays exactly. Any other cd — `||`-guarded, decoupled
+			// by a later separator, CDPATH-shadowed, expansion-sourced,
+			// bare, or resolving to nothing on disk now — leaves the
+			// shell somewhere the audit cannot know, and later relative
+			// words can no longer attest.
+			let d = i;
+			while (toks[d]?.t === "w" && /^-/.test(toks[d].v) && toks[d].v !== "--") d++;
+			if (toks[d]?.t === "w" && toks[d].v === "--") d++;
+			const dir = toks[d]?.t === "w" ? toks[d].v : null;
 			if (dir === null) {
 				cwd = null; // bare cd goes HOME; bare pushd swaps
+				i = d;
 			} else {
-				i++;
+				i = d + 1;
 				const subshellCd = subshellConfined(toks, wordIdx, i);
 				const cdpathShadowed =
 					cdpathAt !== -1 &&
