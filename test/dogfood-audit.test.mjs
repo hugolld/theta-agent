@@ -489,6 +489,9 @@ test("commandResolvesToScript attests execution positions only", (t) => {
 		`python3 ${target} --query x 2>&1 | tee out.txt`,
 		// backslash-newline is a line continuation, not a word
 		"python3 \\\nskills/literature-review/scripts/search.py --query x",
+		// a trailing newline ends the line, not the chain
+		"true && python3 skills/literature-review/scripts/search.py\n",
+		"cat <<EOF && python3 skills/literature-review/scripts/search.py\nbody\nEOF",
 	];
 	for (const command of hits) {
 		assert.equal(
@@ -541,6 +544,19 @@ test("commandResolvesToScript attests execution positions only", (t) => {
 		"python3 -u skills/literature-review/scripts/search.py",
 		// a subshell's cd dies with it — the parent anchor governs after )
 		"(cd skills/literature-review); python3 scripts/search.py",
+		// a backgrounded cd moves only its subshell; the parent anchor holds
+		"cd skills/literature-review & python3 scripts/search.py",
+		// a CDPATH assignment shadows later bare-relative cds
+		"export CDPATH=/shadow; cd literature-review && python3 scripts/search.py",
+		"CDPATH=/shadow cd literature-review && python3 scripts/search.py",
+		// a function definition's () body defines; it does not run
+		`f() ( python3 ${target} )`,
+		// leading split redirects open the file; they do not run it
+		`<> ${target} cat`,
+		`>& ${target} true`,
+		// a numeric or assignment word would itself be the script operand
+		"python3 30 skills/literature-review/scripts/search.py",
+		"python3 A=1 skills/literature-review/scripts/search.py",
 		// a bare "run" word is a program, not a uv prefix
 		"PATH=.:$PATH run python3 skills/literature-review/scripts/search.py",
 		"uv run python3 skills/literature-review/scripts/search.py",

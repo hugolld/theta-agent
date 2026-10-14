@@ -350,6 +350,21 @@ export function commandResolvesToScript(command, target, root) {
 		}
 	};
 	const toks = shellLex(command);
+	// A trailing newline ends the last line, not a statement — the
+	// &&-tail proof must not count it as a break.
+	while (
+		toks.length > 0 &&
+		toks[toks.length - 1].t === "o" &&
+		toks[toks.length - 1].v === "\n"
+	) {
+		toks.pop();
+	}
+	// A CDPATH assignment makes later bare-relative cds land somewhere the
+	// audit cannot know — bash searches CDPATH before the working
+	// directory. (`./x` and `../x` bypass it; so do absolute paths.)
+	const cdpathAt = toks.findIndex(
+		(t) => t.t === "w" && t.v.startsWith("CDPATH="),
+	);
 	// Operators that decouple the overall exit status from the `&&` chain
 	// in progress: once one follows, the chain's later segments can no
 	// longer be proven to have run.
@@ -372,6 +387,7 @@ export function commandResolvesToScript(command, target, root) {
 	let phase = "prefix";
 	let guard = "open";
 	let awaiting = false;
+	let envChain = false; // the program word waits after env
 	const anchors = []; // the cwd at each open subshell
 	let i = 0;
 	while (i < toks.length) {
@@ -379,7 +395,12 @@ export function commandResolvesToScript(command, target, root) {
 		if (tok.t === "o") {
 			const op = tok.v;
 			if (op.includes("<") || op.includes(">")) {
-				i += 2; // the redirection operator and its target word
+				// a redirection's target is the next word — operator runs
+				// may split (`<>` lexes as `<` then `>`), so skip any
+				// stray operators before it
+				i++;
+				while (i < toks.length && toks[i].t === "o") i++;
+				i++;
 				continue;
 			}
 			if (op === "&&") {
@@ -394,6 +415,11 @@ export function commandResolvesToScript(command, target, root) {
 				cwd = anchors.pop() ?? cwd; // …and its cd dies with it
 				guard = "open";
 				awaiting = false;
+				// `) (` adjacency (newlines aside) is a function
+				// definition's body: the body defines, it does not run
+				let k = i + 1;
+				while (k < toks.length && toks[k].t === "o" && toks[k].v === "\n") k++;
+				if (toks[k]?.t === "o" && toks[k].v === "(") return false;
 			} else if (op === "\n" && awaiting) {
 				// the AND-OR list continues past the newline
 			} else {
@@ -416,14 +442,20 @@ export function commandResolvesToScript(command, target, root) {
 		if (phase === "args") continue;
 		if (phase === "program") {
 			// An interpreter flag may take the next word as its value — or
-			// be the read-stdin operand `-`: the program search ends here,
-			// and no later word in this segment can attest.
-			if (/^-/.test(w)) {
+			// be the read-stdin operand `-`; a numeric or assignment word
+			// would itself be the script operand (env is the exception: it
+			// consumes NAME=VALUE pairs). The program search ends, and no
+			// later word in this segment can attest.
+			const assignment = /^[A-Za-z_][A-Za-z0-9_]*=/.test(w);
+			if (envChain && assignment) continue; // env K=V pairs keep waiting
+			if (/^-/.test(w) || /^\d+$/.test(w) || assignment) {
 				phase = "args";
 				continue;
 			}
-			if (skippable) continue; // env K=V chains keep waiting
-			if (isInterpreter(w) || WRAPPERS.has(w)) continue; // env python3 x.py
+			if (isInterpreter(w) || WRAPPERS.has(w)) {
+				if (w === "env") envChain = true;
+				continue; // env python3 x.py
+			}
 			phase = "args";
 			if (provable && resolvesTo(w)) return true;
 			continue;
@@ -434,18 +466,28 @@ export function commandResolvesToScript(command, target, root) {
 		if (WRAPPERS.has(w)) continue;
 		if (w === "cd" || w === "pushd") {
 			// Consume the directory argument. The anchor moves only when
-			// the cd provably ran and succeeded: open, or `&&`-guarded in
-			// a chain that reaches the command's end (the caller's
-			// non-error result gate then proves every chained segment
-			// exited 0). Any other cd — `||`-guarded, decoupled by a later
-			// separator, expansion-sourced, bare, or resolving to nothing
-			// on disk now — leaves the shell somewhere the audit cannot
-			// know, and later relative words can no longer attest.
+			// the cd provably ran and succeeded in the parent shell:
+			// open and foreground, or `&&`-guarded in a chain that
+			// reaches the command's end (the caller's non-error result
+			// gate then proves every chained segment exited 0). A
+			// backgrounded cd moves only its subshell — the anchor stays
+			// exactly. Any other cd — `||`-guarded, decoupled by a later
+			// separator, CDPATH-shadowed, expansion-sourced, bare, or
+			// resolving to nothing on disk now — leaves the shell
+			// somewhere the audit cannot know, and later relative words
+			// can no longer attest.
 			const dir = toks[i]?.t === "w" ? toks[i].v : null;
+			const backgrounded = toks[i + 1]?.t === "o" && toks[i + 1].v === "&";
 			if (dir === null) {
 				cwd = null; // bare cd goes HOME; bare pushd swaps
 			} else {
 				i++;
+				const cdpathShadowed =
+					cdpathAt !== -1 &&
+					cdpathAt < wordIdx &&
+					!path.isAbsolute(dir) &&
+					!dir.startsWith("./") &&
+					!dir.startsWith("../");
 				const p =
 					cwd === null
 						? (path.isAbsolute(dir) ? dir : null)
@@ -459,7 +501,9 @@ export function commandResolvesToScript(command, target, root) {
 						// unresolvable now: it may have existed at run time
 					}
 				}
-				cwd = real !== null && provable ? real : null;
+				if (!backgrounded) {
+					cwd = real !== null && provable && !cdpathShadowed ? real : null;
+				}
 			}
 			phase = "args";
 			continue;
@@ -470,6 +514,7 @@ export function commandResolvesToScript(command, target, root) {
 			continue;
 		}
 		phase = isInterpreter(w) ? "program" : "args";
+		envChain = w === "env";
 		if (provable && resolvesTo(w)) return true;
 	}
 	return false;
