@@ -10,6 +10,9 @@ import {
 	decodeXmlEntities,
 	extractLocations,
 	resolveAdvertisedSkill,
+	resolveCheckoutScript,
+	shellTokens,
+	commandResolvesToScript,
 	auditSession,
 } from "../scripts/audit-dogfood.mjs";
 
@@ -149,6 +152,13 @@ function makeTempRepo(t) {
 		path.join(repo, "skills", "literature-review", "SKILL.md"),
 		"skill content\n",
 	);
+	fs.mkdirSync(path.join(repo, "skills", "literature-review", "scripts"), {
+		recursive: true,
+	});
+	fs.writeFileSync(
+		path.join(repo, "skills", "literature-review", "scripts", "search.py"),
+		"# connector script\n",
+	);
 	fs.mkdirSync(path.join(repo, "test"), { recursive: true });
 	fs.writeFileSync(
 		path.join(repo, "test", "expected-skills.json"),
@@ -265,6 +275,44 @@ function buildSession(t, repo, overrides = {}) {
 				},
 			}),
 		);
+	}
+	if (overrides.bashCommand !== undefined) {
+		const bashPair = [
+			({
+				type: "message",
+				message: {
+					role: "assistant",
+					provider: "zai-coding-cn",
+					model: "glm-5.3-flash",
+					content: [
+						{
+							type: "toolCall",
+							id: "call_bash",
+							name: "bash",
+							arguments: { command: overrides.bashCommand, timeout: 60 },
+						},
+					],
+				},
+			}),
+			({
+				type: "message",
+				message: {
+					role: "toolResult",
+					toolCallId: "call_bash",
+					toolName: overrides.bashToolName ?? "bash",
+					isError: overrides.bashIsError ?? false,
+					content: [
+						{
+							type: "text",
+							text: overrides.bashResultText ?? "1. query\n2. provenance\n",
+						},
+					],
+				},
+			}),
+		];
+		// a bash call spliced in before the user record was not caused by it
+		if (overrides.bashBeforePrompt) records.splice(3, 0, ...bashPair);
+		else records.push(...bashPair);
 	}
 	// a completed one-shot ends with the assistant's response
 	records.push(
@@ -396,6 +444,198 @@ test("auditSession attests skill use when paired and errors otherwise", (t) => {
 	assert.throws(
 		() => auditIn(repo, () => auditSession(camelSteer, repo, "skills/literature-review/SKILL.md")),
 		/names the selected skill/,
+	);
+});
+
+test("shellTokens splits commands the way a shell reads them", () => {
+	assert.deepEqual(shellTokens(`python3 'skills/a/search.py' --query "two words"`), [
+		"python3",
+		"skills/a/search.py",
+		"--query",
+		"two words",
+	]);
+	assert.deepEqual(shellTokens("a.py;cd /tmp&&b.py | c.py"), [
+		"a.py",
+		"cd",
+		"/tmp",
+		"b.py",
+		"c.py",
+	]);
+	assert.deepEqual(shellTokens("echo a # python3 skills/a/search.py"), ["echo", "a"]);
+	assert.deepEqual(shellTokens("# whole line\nx.py"), ["x.py"]);
+	assert.deepEqual(shellTokens("out=$(pwd)/x.py 2>&1"), ["out=$", "pwd", "/x.py", "1"]);
+	assert.deepEqual(shellTokens("py\\thon x"), ["python", "x"]);
+	assert.deepEqual(shellTokens("echo 'unclosed"), ["echo", "unclosed"]);
+});
+
+test("commandResolvesToScript attests execution positions only", (t) => {
+	const repo = fs.realpathSync(makeTempRepo(t));
+	const target = `${repo}/skills/literature-review/scripts/search.py`;
+	const hits = [
+		`python3 ${target} --query "p53" --json`,
+		"python3 skills/literature-review/scripts/search.py --pmid 1",
+		"python3 'skills/literature-review/scripts/search.py' --query x",
+		"cd skills/literature-review && python3 scripts/search.py --query x",
+		"cd skills/literature-review; python3 scripts/search.py",
+		"skills/literature-review/scripts/search.py --query x",
+		"timeout 30 python3 skills/literature-review/scripts/search.py",
+		"env NCBI_API_KEY=k python3 skills/literature-review/scripts/search.py",
+		"set -e\npython3 skills/literature-review/scripts/search.py",
+		`python3 ${target} --query x 2>&1 | tee out.txt`,
+	];
+	for (const command of hits) {
+		assert.equal(
+			commandResolvesToScript(command, target, repo),
+			true,
+			`expected hit: ${command}`,
+		);
+	}
+	const copyDir = fs.mkdtempSync(path.join(os.tmpdir(), "script-copy-"));
+	t.after(() => fs.rmSync(copyDir, { recursive: true, force: true }));
+	fs.copyFileSync(target, path.join(copyDir, "search.py"));
+	const alias = path.join(os.tmpdir(), `alias-${process.pid}-${Date.now()}.py`);
+	fs.symlinkSync(target, alias);
+	t.after(() => fs.rmSync(alias, { force: true }));
+	const misses = [
+		// argument mentions are not execution
+		`cat ${target}`,
+		`grep -q foo ${target}`,
+		`ls ${repo}/skills/literature-review/scripts/`,
+		`echo python3 ${target}`,
+		// a copy outside the checkout is not the checkout's script
+		`python3 ${copyDir}/search.py --query x`,
+		// redirection targets and heredoc bodies mention without executing
+		`echo hi > ${target}`,
+		`cat > /tmp/x.sh <<'EOF'\npython3 ${target}\nEOF`,
+		// comments are not commands
+		`echo hi # python3 ${target}`,
+		// unmodelled expansion fails closed
+		"python3 $SCRIPT --query x",
+		"python3 $(echo skills/literature-review/scripts/search.py)",
+		// a nested command string is one word, not a command
+		`bash -c "python3 ${target}"`,
+	];
+	for (const command of misses) {
+		assert.equal(
+			commandResolvesToScript(command, target, repo),
+			false,
+			`expected miss: ${command}`,
+		);
+	}
+	// an alias of the checkout's copy executes the same bytes
+	assert.equal(commandResolvesToScript(`python3 ${alias}`, target, repo), true);
+});
+
+test("resolveCheckoutScript accepts only existing files inside the checkout", (t) => {
+	const repo = makeTempRepo(t);
+	const real = fs.realpathSync(repo);
+	const rel = "skills/literature-review/scripts/search.py";
+	assert.equal(resolveCheckoutScript(repo, rel), `${real}/skills/literature-review/scripts/search.py`);
+	assert.equal(
+		resolveCheckoutScript(repo, `./${rel}`),
+		`${real}/skills/literature-review/scripts/search.py`,
+	);
+	assert.throws(
+		() => resolveCheckoutScript(repo, "/etc/hosts"),
+		/must be a file inside the checkout/,
+	);
+	assert.throws(
+		() => resolveCheckoutScript(repo, "skills/literature-review"),
+		/must be a file inside the checkout/,
+	);
+	assert.throws(
+		() => resolveCheckoutScript(repo, "skills/literature-review/scripts/nope.py"),
+		/does not resolve on disk/,
+	);
+});
+
+test("auditSession attests script execution when the checkout's script ran", (t) => {
+	const repo = makeTempRepo(t);
+	const real = fs.realpathSync(repo);
+	const abs = `${real}/skills/literature-review/scripts/search.py`;
+	const arg = "skills/literature-review/scripts/search.py";
+
+	// pass: read + executed script, both attestations in one invocation
+	const ran = buildSession(t, repo, {
+		toolResultIsError: false,
+		bashCommand: `python3 ${abs} --query "p53 AND therapy" --json`,
+	});
+	const out = auditIn(repo, () =>
+		auditSession(ran, repo, "skills/literature-review/SKILL.md", arg),
+	);
+	assert.ok(out.includes(`script-executed ${abs}`), out);
+	assert.match(out, /script-content [0-9a-f]{64}/);
+	assert.ok(out.indexOf("script-executed") > out.indexOf("selected-file-opened"));
+
+	// the doctrine's own invocation shape (cd + relative path) attests
+	const doctrine = buildSession(t, repo, {
+		bashCommand: "cd skills/literature-review && python3 scripts/search.py --query p53",
+	});
+	const doctrineOut = auditIn(repo, () => auditSession(doctrine, repo, undefined, arg));
+	assert.ok(doctrineOut.includes(`script-executed ${abs}`));
+
+	// script not run: nothing in the session executed it
+	const notRun = buildSession(t, repo, { toolResultIsError: false });
+	assert.throws(
+		() => auditIn(repo, () => auditSession(notRun, repo, undefined, arg)),
+		/checkout script never executed/,
+	);
+
+	// error result: the bash call resolved to the script but failed
+	const errored = buildSession(t, repo, {
+		bashCommand: `python3 ${abs} --query x`,
+		bashIsError: true,
+	});
+	assert.throws(
+		() => auditIn(repo, () => auditSession(errored, repo, undefined, arg)),
+		/checkout script execution failed/,
+	);
+
+	// non-checkout copy executed: same bytes, wrong tree — does not attest
+	const copyDir = fs.mkdtempSync(path.join(os.tmpdir(), "script-copy-"));
+	t.after(() => fs.rmSync(copyDir, { recursive: true, force: true }));
+	fs.copyFileSync(abs, path.join(copyDir, "search.py"));
+	const copied = buildSession(t, repo, {
+		bashCommand: `python3 ${copyDir}/search.py --query x`,
+	});
+	assert.throws(
+		() => auditIn(repo, () => auditSession(copied, repo, undefined, arg)),
+		/checkout script never executed/,
+	);
+
+	// a bash call spliced in before the prompt was not caused by the task
+	const spliced = buildSession(t, repo, {
+		bashCommand: `python3 ${abs}`,
+		bashBeforePrompt: true,
+	});
+	assert.throws(
+		() => auditIn(repo, () => auditSession(spliced, repo, undefined, arg)),
+		/checkout script never executed/,
+	);
+
+	// a prompt naming the script steers instead of routing
+	const steered = buildSession(t, repo, {
+		bashCommand: `python3 ${abs}`,
+		transcriptPrompt: "run scripts/search.py and show me the output",
+	});
+	fs.writeFileSync(
+		path.join(steered, "prompt.txt"),
+		"run scripts/search.py and show me the output",
+	);
+	assert.throws(
+		() => auditIn(repo, () => auditSession(steered, repo, undefined, arg)),
+		/names the selected script/,
+	);
+
+	// the script argument itself must be a checkout file
+	const plain = buildSession(t, repo, {});
+	assert.throws(
+		() => auditIn(repo, () => auditSession(plain, repo, undefined, "/etc/hosts")),
+		/must be a file inside the checkout/,
+	);
+	assert.throws(
+		() => auditIn(repo, () => auditSession(plain, repo, undefined, "nope/missing.py")),
+		/does not resolve on disk/,
 	);
 });
 
@@ -710,4 +950,19 @@ test("auditSession accepts a sanitized real pi transcript (golden)", (t) => {
 	const out = auditIn(repo, () => auditSession(dir, repo));
 	assert.match(out, /^clean /);
 	assert.match(out, /provider zai-coding-cn/);
+	// The golden transcript mentions checkout paths in bash commands only
+	// as grep/ls/wc ARGUMENTS — real-pi command shapes that must NOT
+	// attest as script execution.
+	assert.throws(
+		() =>
+			auditIn(repo, () =>
+				auditSession(
+					dir,
+					repo,
+					undefined,
+					"skills/literature-review/references/core_workflow.md",
+				),
+			),
+		/checkout script never executed/,
+	);
 });

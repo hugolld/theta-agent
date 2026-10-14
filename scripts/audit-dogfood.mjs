@@ -133,11 +133,283 @@ export function resolveAdvertisedSkill(root, skill, expected) {
 	return target;
 }
 
+// Resolves the script argument to an absolute path and requires an existing
+// regular file inside the checkout — traversal and outside paths (including
+// symlinks that escape the checkout) are rejected. Unlike the skill
+// argument there is no advertisement set to check membership against, so
+// containment is the criterion.
+export function resolveCheckoutScript(rootArg, script) {
+	const root = fs.realpathSync(rootArg);
+	const lexical = path.resolve(root, script);
+	let target = lexical;
+	try {
+		target = fs.realpathSync(lexical);
+	} catch {
+		throw new Error(`script argument does not resolve on disk: ${script}`);
+	}
+	if (!fs.statSync(target).isFile() || !target.startsWith(root + path.sep)) {
+		throw new Error(`script argument must be a file inside the checkout, got: ${script}`);
+	}
+	return target;
+}
+
+// ---------------------------------------------------------------------------
+// Shell command inspection
+//
+// The script attestation judges a bash command STRING, not structured
+// arguments. These helpers implement a conservative POSIX-ish read: enough
+// shell to know which word is the program being executed, refusing
+// everything they cannot model. Unmodelled forms (expansions, arithmetic,
+// process substitution, nested `bash -c` strings) leave words unresolvable
+// and fail closed.
+
+// Lexes a command into an ordered mix of words and operators. Words carry
+// their quote-stripped value; operators are runs of `;&|<>()` (a leading
+// file-descriptor digit is absorbed: `2>&1` lexes as the operator `2>&`
+// followed by the word `1`) and unquoted newlines. Quoting groups,
+// backslash escapes, and `#` at word start comments to end of line. An
+// unterminated quote consumes the rest of the string — a command the shell
+// itself would reject.
+function shellLex(command) {
+	const toks = [];
+	const isOp = (c) => /[\s;&|<>()]/.test(c);
+	const isOpNoSpace = (c) => /[;&|<>()]/.test(c);
+	let i = 0;
+	while (i < command.length) {
+		const ch = command[i];
+		if (ch === "\n" || ch === "\r") {
+			toks.push({ t: "o", v: "\n" });
+			i++;
+			continue;
+		}
+		if (/\s/.test(ch)) {
+			i++;
+			continue;
+		}
+		if (ch === "#") {
+			while (i < command.length && command[i] !== "\n") i++;
+			continue;
+		}
+		// fd-prefixed redirection: the digits join the operator run
+		let j = i;
+		while (j < command.length && /[0-9]/.test(command[j])) j++;
+		if (j > i && j < command.length && /[<>]/.test(command[j])) {
+			while (j < command.length && isOpNoSpace(command[j])) j++;
+			toks.push({ t: "o", v: command.slice(i, j) });
+			i = j;
+			continue;
+		}
+		if (isOpNoSpace(ch)) {
+			while (j < command.length && isOpNoSpace(command[j])) j++;
+			toks.push({ t: "o", v: command.slice(i, j) });
+			i = j;
+			continue;
+		}
+		// a word: quoting groups, backslash escapes the next character
+		let w = "";
+		while (i < command.length && !isOp(command[i])) {
+			const c = command[i];
+			if (c === "'") {
+				let k = i + 1;
+				while (k < command.length && command[k] !== "'") k++;
+				w += command.slice(i + 1, k);
+				i = Math.min(k + 1, command.length);
+			} else if (c === '"') {
+				let k = i + 1;
+				while (k < command.length && command[k] !== '"') k++;
+				for (let q = i + 1; q < k; q++) {
+					if (command[q] === "\\" && /[$`"\\\n]/.test(command[q + 1] ?? "")) q++;
+					w += command[q] ?? "";
+				}
+				i = Math.min(k + 1, command.length);
+			} else if (c === "\\") {
+				w += command[i + 1] ?? "";
+				i += 2;
+			} else {
+				w += c;
+				i++;
+			}
+		}
+		toks.push({ t: "w", v: w });
+	}
+	return toks;
+}
+
+// The command's words, quote-stripped, in order (operators dropped).
+export function shellTokens(command) {
+	return shellLex(command)
+		.filter((tok) => tok.t === "w")
+		.map((tok) => tok.v);
+}
+
+// Interpreters execute their first program word; wrappers pass through to a
+// program after their own flags, numeric arguments, and assignments.
+const INTERPRETERS = new Set(["python3", "python", "bash", "sh", "zsh", "env", "uv"]);
+const WRAPPERS = new Set(["timeout", "nohup", "nice", "stdbuf", "watch", "sudo", "time"]);
+const isInterpreter = (w) => INTERPRETERS.has(w) || /^python\d+(\.\d+)?$/.test(w);
+
+// True when the command EXECUTES the target script: a word in program
+// position — the command word itself, or the program word after an
+// interpreter or wrapper chain — resolves canonically to exactly the
+// target. Relative words resolve against the session cwd (or a `cd`
+// earlier in the command). Words that merely mention the path —
+// arguments, comments, heredoc bodies, redirection targets — never
+// attest, and neither does a copy of the script elsewhere on disk.
+export function commandResolvesToScript(command, target, root) {
+	let cwd = root;
+	const resolvesTo = (w) => {
+		if (w === "") return false;
+		const p = path.isAbsolute(w) ? w : path.resolve(cwd, w);
+		try {
+			return fs.realpathSync(p) === target;
+		} catch {
+			return false;
+		}
+	};
+	const toks = shellLex(command);
+	// Program-position state, per simple command (restarted at every
+	// operator): "prefix" = still consuming wrappers, flags, and
+	// assignments; "program" = the next word is the executed program;
+	// "args" = the program word is behind us and nothing later executes.
+	let phase = "prefix";
+	let i = 0;
+	while (i < toks.length) {
+		const tok = toks[i];
+		if (tok.t === "o") {
+			const op = tok.v;
+			if (op.includes("<<")) {
+				// heredoc: the body up to the delimiter word is data; a
+				// missing delimiter swallows the rest (the shell would be
+				// waiting for one — nothing later can attest).
+				const delim = toks[i + 1]?.t === "w" ? toks[i + 1].v : null;
+				i += 2;
+				while (i < toks.length && !(toks[i].t === "w" && toks[i].v === delim)) i++;
+				continue;
+			}
+			if (op.includes("<") || op.includes(">")) {
+				i += 2; // the redirection operator and its target word
+				continue;
+			}
+			phase = "prefix"; // every other operator ends the simple command
+			i++;
+			continue;
+		}
+		const w = tok.v;
+		i++;
+		const skippable = /^-/.test(w) || /^\d+$/.test(w) || /^[A-Za-z_][A-Za-z0-9_]*=/.test(w);
+		if (phase === "args") continue;
+		if (skippable || w === "run") continue; // uv run, timeout 30, env K=V, flags
+		if (phase === "program") {
+			if (isInterpreter(w) || WRAPPERS.has(w)) continue; // chained: env python3 x.py
+			phase = "args";
+			if (resolvesTo(w)) return true;
+			continue;
+		}
+		// prefix phase: this word is the command word
+		if (WRAPPERS.has(w)) continue;
+		if (w === "cd") {
+			// Consume the directory argument; the change persists for the
+			// rest of the bash call. Applied unconditionally: a failed cd
+			// makes the whole command exit non-zero, and the paired
+			// non-error result gate rejects exactly that.
+			const dir = toks[i]?.t === "w" ? toks[i].v : null;
+			if (dir !== null) {
+				const p = path.isAbsolute(dir) ? dir : path.resolve(cwd, dir);
+				try {
+					const real = fs.realpathSync(p);
+					if (fs.statSync(real).isDirectory()) {
+						cwd = real;
+						i++;
+					}
+				} catch {
+					// not a directory: leave the word as a plain argument
+				}
+			}
+			phase = "args";
+			continue;
+		}
+		phase = isInterpreter(w) ? "program" : "args";
+		if (resolvesTo(w)) return true;
+	}
+	return false;
+}
+
+// Collects the tool-call/result graph the spot-check attestations search.
+// tool calls are assistant requests: one embedded in a system, user, or
+// toolResult record is transcript corruption. The graph must be temporally
+// consistent: every call needs exactly one later matching result, every
+// result an earlier call — a spliced transcript pairing a result with a
+// later call fails.
+function collectToolGraph(recs) {
+	const calls = [];
+	const callOrder = new Map();
+	const results = new Map();
+	let recordIndex = 0;
+	for (const r of recs) {
+		const m = r.message;
+		recordIndex += 1;
+		if (!m) continue;
+		// tool calls are assistant requests: one embedded in a system,
+		// user, or toolResult record is transcript corruption.
+		if (m.role !== "assistant" && Array.isArray(m.content)) {
+			for (const t of m.content) {
+				if (t?.type === "toolCall") {
+					throw new Error(
+						`toolCall in ${m.role} record — transcript corruption`,
+					);
+				}
+			}
+		}
+		if (Array.isArray(m.content))
+			for (const t of m.content) {
+				if (t?.type !== "toolCall") continue;
+				if (typeof t.id !== "string" || t.id === "") {
+					throw new Error(`toolCall without a usable id: ${JSON.stringify(t.id)}`);
+				}
+				if (callOrder.has(t.id)) {
+					throw new Error(`duplicate toolCall id: ${t.id}`);
+				}
+				callOrder.set(t.id, recordIndex);
+				calls.push(t);
+			}
+		if (r.type === "message" && m.role === "toolResult") {
+			if (typeof m.toolCallId !== "string" || m.toolCallId === "") {
+				throw new Error(
+					`toolResult without a usable toolCallId: ${JSON.stringify(m.toolCallId)}`,
+				);
+			}
+			if (results.has(m.toolCallId)) {
+				throw new Error(`duplicate toolResult for ${m.toolCallId}`);
+			}
+			results.set(m.toolCallId, { recordIndex, message: m });
+		}
+	}
+	const orphans = [...results.keys()].filter((id) => !callOrder.has(id));
+	const unanswered = calls.filter((t) => !results.has(t.id));
+	if (orphans.length > 0) {
+		throw new Error(`orphan toolResults without calls:\n${orphans.join("\n")}`);
+	}
+	if (unanswered.length > 0) {
+		throw new Error(
+			`tool calls without results:\n${unanswered.map((t) => t.id).join("\n")}`,
+		);
+	}
+	for (const t of calls) {
+		const r = results.get(t.id);
+		if (r && r.recordIndex < callOrder.get(t.id)) {
+			throw new Error(`toolResult for ${t.id} precedes its toolCall`);
+		}
+	}
+	return { calls, callOrder, results };
+}
+
 // Audits one dogfood session directory against the checkout at the current
 // HEAD and returns the attestation. Throws on any failure; `skill` (a
 // checkout-relative SKILL.md path) additionally requires a successful read
-// tool call on that exact file.
-export function auditSession(dir, rootArg, skill) {
+// tool call on that exact file; `script` (a checkout-relative script path)
+// additionally requires a bash tool call that executed that exact file,
+// paired with a non-error tool result.
+export function auditSession(dir, rootArg, skill, script) {
 	const root = fs.realpathSync(rootArg);
 	// Mount aliases (e.g. /var vs /private/var on macOS) give the same tree
 	// two spellings; lexical containment accepts either spelling of root.
@@ -497,28 +769,9 @@ export function auditSession(dir, rootArg, skill) {
 		`model ${wantModel[1]}\n` +
 		`inventory ${shaText(inventoryText)}\n` +
 		`prompt ${shaText(promptWanted)}`;
-	if (skill !== undefined) {
-		const target = resolveAdvertisedSkill(root, skill, expected);
-		// The skill bytes are read exactly once: the paired read result must
-		// equal these validated bytes, and the attested digest hashes the same
-		// buffer — no second read can separate validated from attested bytes.
-		const skillBuf = fs.readFileSync(target);
-		const skillText = skillBuf.toString("utf8");
-		// A routed prompt must not name the selected skill or its file:
-		// steering the model there is instruction, not routing. The name is
-		// derived from the target's parent directory, not from the argument
-		// string, and the comparison strips case, separators, and punctuation
-		// from both sides — so LiteratureReview, literature_review,
-		// "literature review", and SKILL.md all match their canonical forms.
-		const normalize = (s) =>
-			s.toLowerCase().normalize("NFKC").replace(/[^a-z0-9]/g, "");
-		const promptNorm = normalize(promptWanted);
-		const skillName = path.basename(path.dirname(target));
-		const promptVariants = [
-			normalize(skillName),
-			normalize(path.basename(target)),
-			normalize(target),
-		];
+	// The spot-check attestations — skill read, script execution — share one
+	// tool-call/result graph and one prompt-neutrality gate.
+	if (skill !== undefined || script !== undefined) {
 		// Cross-script lookalikes (Cyrillic і for Latin i) survive NFKC, so
 		// the recorded prompt must be pure ASCII: the operator's task is
 		// English text, and anything else fails closed.
@@ -527,116 +780,138 @@ export function auditSession(dir, rootArg, skill) {
 				"spot-check prompt contains non-ASCII characters — cross-script lookalikes are not auditable",
 			);
 		}
-		if (promptVariants.some((v) => v && promptNorm.includes(v))) {
-			throw new Error(
-				"spot-check prompt names the selected skill or its file — a routed task must reach it on its own",
-			);
-		}
-		const calls = [];
-		const callOrder = new Map();
-		const results = new Map();
-		let recordIndex = 0;
-		for (const r of recs) {
-			const m = r.message;
-			recordIndex += 1;
-			if (!m) continue;
-			// tool calls are assistant requests: one embedded in a system,
-			// user, or toolResult record is transcript corruption.
-			if (m.role !== "assistant" && Array.isArray(m.content)) {
-				for (const t of m.content) {
-					if (t?.type === "toolCall") {
-						throw new Error(
-							`toolCall in ${m.role} record — transcript corruption`,
-						);
-					}
-				}
-			}
-			if (Array.isArray(m.content))
-				for (const t of m.content) {
-					if (t?.type !== "toolCall") continue;
-					if (typeof t.id !== "string" || t.id === "") {
-						throw new Error(`toolCall without a usable id: ${JSON.stringify(t.id)}`);
-					}
-					if (callOrder.has(t.id)) {
-						throw new Error(`duplicate toolCall id: ${t.id}`);
-					}
-					callOrder.set(t.id, recordIndex);
-					calls.push(t);
-				}
-			if (r.type === "message" && m.role === "toolResult") {
-				if (typeof m.toolCallId !== "string" || m.toolCallId === "") {
-					throw new Error(
-						`toolResult without a usable toolCallId: ${JSON.stringify(m.toolCallId)}`,
-					);
-				}
-				if (results.has(m.toolCallId)) {
-					throw new Error(`duplicate toolResult for ${m.toolCallId}`);
-				}
-				results.set(m.toolCallId, { recordIndex, message: m });
-			}
-		}
-		// The tool graph must be temporally consistent: every call needs
-		// exactly one later matching result, every result an earlier call —
-		// a spliced transcript pairing a result with a later call fails.
-		const orphans = [...results.keys()].filter((id) => !callOrder.has(id));
-		const unanswered = calls.filter((t) => !results.has(t.id));
-		if (orphans.length > 0) {
-			throw new Error(`orphan toolResults without calls:\n${orphans.join("\n")}`);
-		}
-		if (unanswered.length > 0) {
-			throw new Error(
-				`tool calls without results:\n${unanswered.map((t) => t.id).join("\n")}`,
-			);
-		}
-		for (const t of calls) {
-			const r = results.get(t.id);
-			if (r && r.recordIndex < callOrder.get(t.id)) {
-				throw new Error(`toolResult for ${t.id} precedes its toolCall`);
-			}
-		}
-		// pi may advertise and read lexical paths through symlinked resources;
-		// canonicalize the read path first, so a lexical path through a
-		// symlinked checkout still matches, then compare canonically — an
-		// unresolvable or external path cannot vouch for the target. Read
-		// arguments (offset/limit) are not judged: the recorded result text
-		// must equal the current file contents, so only a read of the whole
-		// file can satisfy the check no matter what arguments were passed.
-		// The read must also occur after the recorded prompt: a read spliced
-		// before the user record was not caused by it.
-		const hit = calls.some((t) => {
-			const paired = results.get(t.id);
-			const r = paired?.message;
+		// The name comparison strips case, separators, and punctuation from
+		// both sides — so LiteratureReview, literature_review, "literature
+		// review", and SKILL.md all match their canonical forms.
+		const normalize = (s) =>
+			s.toLowerCase().normalize("NFKC").replace(/[^a-z0-9]/g, "");
+		const promptNorm = normalize(promptWanted);
+		const namesPrompt = (variants) =>
+			variants.some((v) => v && promptNorm.includes(v));
+		const { calls, callOrder, results } = collectToolGraph(recs);
+		if (skill !== undefined) {
+			const target = resolveAdvertisedSkill(root, skill, expected);
+			// The skill bytes are read exactly once: the paired read result must
+			// equal these validated bytes, and the attested digest hashes the same
+			// buffer — no second read can separate validated from attested bytes.
+			const skillBuf = fs.readFileSync(target);
+			const skillText = skillBuf.toString("utf8");
+			// A routed prompt must not name the selected skill or its file:
+			// steering the model there is instruction, not routing. The name is
+			// derived from the target's parent directory, not from the argument
+			// string.
+			const skillName = path.basename(path.dirname(target));
 			if (
-				!(
-					t.name === "read" &&
-					r &&
-					r.toolName === "read" &&
-					r.isError === false &&
-					t.arguments?.path
-				)
+				namesPrompt([
+					normalize(skillName),
+					normalize(path.basename(target)),
+					normalize(target),
+				])
 			) {
-				return false;
+				throw new Error(
+					"spot-check prompt names the selected skill or its file — a routed task must reach it on its own",
+				);
 			}
-			if (callOrder.get(t.id) <= userIndex) {
-				return false;
+			// pi may advertise and read lexical paths through symlinked resources;
+			// canonicalize the read path first, so a lexical path through a
+			// symlinked checkout still matches, then compare canonically — an
+			// unresolvable or external path cannot vouch for the target. Read
+			// arguments (offset/limit) are not judged: the recorded result text
+			// must equal the current file contents, so only a read of the whole
+			// file can satisfy the check no matter what arguments were passed.
+			// The read must also occur after the recorded prompt: a read spliced
+			// before the user record was not caused by it.
+			const hit = calls.some((t) => {
+				const paired = results.get(t.id);
+				const r = paired?.message;
+				if (
+					!(
+						t.name === "read" &&
+						r &&
+						r.toolName === "read" &&
+						r.isError === false &&
+						t.arguments?.path
+					)
+				) {
+					return false;
+				}
+				if (callOrder.get(t.id) <= userIndex) {
+					return false;
+				}
+				try {
+					if (fs.realpathSync(t.arguments.path) !== target) return false;
+				} catch {
+					return false;
+				}
+				const resultText = Array.isArray(r.content)
+					? r.content
+							.filter((c) => c?.type === "text")
+							.map((c) => c.text)
+							.join("")
+					: (typeof r.content === "string" ? r.content : "");
+				return resultText === skillText;
+			});
+			if (!hit) {
+				throw new Error("selected file never opened");
 			}
-			try {
-				if (fs.realpathSync(t.arguments.path) !== target) return false;
-			} catch {
-				return false;
-			}
-			const resultText = Array.isArray(r.content)
-				? r.content
-						.filter((c) => c?.type === "text")
-						.map((c) => c.text)
-						.join("")
-				: (typeof r.content === "string" ? r.content : "");
-			return resultText === skillText;
-		});
-		if (!hit) {
-			throw new Error("selected file never opened");
+			out += `\nselected-file-opened ${target}\nskill-content ${createHash("sha256").update(skillBuf).digest("hex")}`;
 		}
-		out += `\nselected-file-opened ${target}\nskill-content ${createHash("sha256").update(skillBuf).digest("hex")}`;
+		if (script !== undefined) {
+			// The script argument resolves like the skill argument, but scripts
+			// are not advertised: an existing regular file inside the checkout
+			// is the criterion. The bytes are read exactly once — the attested
+			// digest hashes the validated buffer.
+			const target = resolveCheckoutScript(root, script);
+			const scriptBuf = fs.readFileSync(target);
+			// A routed prompt must not name the selected script or its path:
+			// the script is part of the skill's capability, and naming it is
+			// instruction, not routing.
+			if (namesPrompt([normalize(path.basename(target)), normalize(target)])) {
+				throw new Error(
+					"spot-check prompt names the selected script or its path — a routed task must reach it on its own",
+				);
+			}
+			// Execution, not mention: a bash call qualifies when its command
+			// names the checkout's copy in program position, the call follows
+			// the recorded prompt, and the paired result reports no error. A
+			// copy of the script elsewhere on disk — or the path as an
+			// argument, comment, heredoc body, or redirection target — does
+			// not attest.
+			let hit = false;
+			let sawErroredRun = false;
+			for (const t of calls) {
+				const r = results.get(t.id)?.message;
+				if (
+					!(
+						t.name === "bash" &&
+						typeof t.arguments?.command === "string" &&
+						r &&
+						r.toolName === "bash"
+					)
+				) {
+					continue;
+				}
+				if (callOrder.get(t.id) <= userIndex) {
+					continue;
+				}
+				if (!commandResolvesToScript(t.arguments.command, target, root)) {
+					continue;
+				}
+				if (r.isError === false) {
+					hit = true;
+					break;
+				}
+				sawErroredRun = true;
+			}
+			if (!hit) {
+				throw new Error(
+					sawErroredRun
+						? "checkout script execution failed: the bash tool result is an error"
+						: `checkout script never executed: ${target}`,
+				);
+			}
+			out += `\nscript-executed ${target}\nscript-content ${createHash("sha256").update(scriptBuf).digest("hex")}`;
+		}
 	}
 	// Final state recheck: the audited bytes and the cited HEAD must still
 	// describe the tree at attestation time.
@@ -681,10 +956,10 @@ function manifestSkillRoot(root) {
 }
 
 function main(argv) {
-	const [dir, skill] = argv;
+	const [dir, skill, script] = argv;
 	const root = fs.realpathSync(".");
 	try {
-		console.log(auditSession(dir, root, skill));
+		console.log(auditSession(dir, root, skill, script));
 	} catch (e) {
 		console.error(e.message);
 		return 1;

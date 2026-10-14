@@ -78,6 +78,14 @@ node scripts/audit-dogfood.mjs "$sd2" "skills/literature-review/SKILL.md"
 
 On success the attestation carries every `clean` line plus `selected-file-opened` with the resolved skill path and the SKILL.md content digest — and the recorded prompt's digest, so the routed task itself is part of the durable record; keep it with the run's record.
 
+The script-executed attestation is a third optional argument on the same command — the checkout-relative path of a helper script. It turns "the skill was advertised and opened" into "the capability was used": a `bash` tool call recorded after the prompt whose command names the script **in program position** — the command word itself, or the program argument of an interpreter (`python3 …`), with wrappers (`timeout`, `env`) and an earlier `cd` in the command resolved — canonicalized to the checkout's copy, paired by `toolCallId` with a `toolResult` that reports no error. Mentions do not attest: the path as a `grep`/`cat` argument, in a comment, a heredoc body, or a redirection target is not execution; neither is a copy of the script run from outside the checkout, nor a nested `bash -c` string — the attested bytes are the checkout's at the audited HEAD. The routed prompt must not name the script or its path, for the same reason it must not name the skill.
+
+```sh
+node scripts/audit-dogfood.mjs "$sd2" "skills/theta-lit-search/SKILL.md" "skills/theta-lit-search/scripts/pubmed.py"
+```
+
+On success the attestation additionally carries `script-executed` with the resolved script path and `script-content`, the executed file's digest.
+
 ## Clean up after
 
 Dogfood sessions execute skill scripts; they leave scratch venvs and `__pycache__` inside vendored trees. The hash-pin seam fails on them by design, so clear them before committing:
