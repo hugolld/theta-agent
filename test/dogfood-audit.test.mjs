@@ -491,6 +491,8 @@ test("commandResolvesToScript attests execution positions only", (t) => {
 		"cd -P skills/literature-review && python3 scripts/search.py",
 		// &> is a combined-output redirection, not backgrounding
 		"cd skills/literature-review &>/dev/null && python3 scripts/search.py",
+		// a guarded pipeline that runs proves every member ran
+		"true && echo x | python3 skills/literature-review/scripts/search.py",
 		"set -e\npython3 skills/literature-review/scripts/search.py",
 		`python3 ${target} --query x 2>&1 | tee out.txt`,
 		// backslash-newline is a line continuation, not a word
@@ -587,6 +589,20 @@ test("commandResolvesToScript attests execution positions only", (t) => {
 		// segment — the cd is still subshell-confined
 		"cat f | FOO=bar cd skills/literature-review; python3 scripts/search.py || true",
 		"cat f | > out cd skills/literature-review; python3 scripts/search.py || true",
+		// a pipeline that is a skipped &&/|| operand runs none of its
+		// members; the trailing command supplies the exit status
+		"false && echo x | python3 skills/literature-review/scripts/search.py; echo done",
+		"true || echo y | python3 skills/literature-review/scripts/search.py; echo done",
+		"true || ( echo ) | python3 skills/literature-review/scripts/search.py; echo done",
+		"grep -q foo bar.txt && cat baz.txt | python3 skills/literature-review/scripts/search.py; echo done",
+		// process substitution is unmodelled and refused outright
+		`<(echo ${target}) x || true`,
+		`>(echo ${target}) x || true`,
+		// a `<< --` delimiter is the literal word --: the dash is not
+		// the <<- tab-stripping form
+		"cat << --\n-\npython3 skills/literature-review/scripts/search.py\n--\ntrue",
+		// timeout takes exactly one duration operand
+		"timeout 2 30 python3 skills/literature-review/scripts/search.py",
 		// a background-looking &> redirect moves the parent cwd — the
 		// relative word then resolves under the cd target, not the checkout
 		"cd /tmp &>/dev/null && python3 skills/literature-review/scripts/search.py",

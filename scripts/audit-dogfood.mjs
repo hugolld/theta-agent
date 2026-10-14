@@ -177,7 +177,7 @@ export function resolveCheckoutScript(rootArg, script) {
 function shellLex(command) {
 	const toks = [];
 	const heredocs = [];
-	let expectDelim = false;
+	let expectDelim = null; // "<<" | "<<-" while a delimiter is expected
 	const isOp = (c) => /[\s;&|<>()]/.test(c);
 	const isOpNoSpace = (c) => /[;&|<>()]/.test(c);
 	let i = 0;
@@ -227,7 +227,7 @@ function shellLex(command) {
 			while (j < command.length && /[<>&]/.test(command[j])) j++;
 			const op = command.slice(i, j);
 			toks.push({ t: "o", v: op });
-			expectDelim = op.includes("<<") && !op.includes("<<<");
+			expectDelim = op.includes("<<") && !op.includes("<<<") ? "<<" : null;
 			i = j;
 			continue;
 		}
@@ -236,12 +236,12 @@ function shellLex(command) {
 			const run = command.slice(i, j);
 			i = j;
 			// emit canonical operators, splitting runs: `);` is two
-			// operators, while &&, ||, <<, >>, <<<, &>, &>> stay whole
+			// operators, while &&, ||, <<, >>, <<<, <<-, &>, &>> stay whole
 			for (let k = 0; k < run.length; ) {
 				const three = run.slice(k, k + 3);
 				const two = run.slice(k, k + 2);
 				let op = run[k];
-				if (three === "<<<" || three === "&>>") op = three;
+				if (three === "<<<" || three === "&>>" || three === "<<-") op = three;
 				else if (
 					two === "&&" ||
 					two === "||" ||
@@ -252,8 +252,11 @@ function shellLex(command) {
 					op = two;
 				}
 				toks.push({ t: "o", v: op });
-				// a heredoc expects its delimiter next; a herestring does not
-				if (op.includes("<<")) expectDelim = !op.includes("<<<");
+				// a heredoc expects its delimiter next; a herestring does
+				// not, and `<<-` marks a tab-indented terminator
+				if (op === "<<") expectDelim = "<<";
+				else if (op === "<<-") expectDelim = "<<-";
+				else if (op === "<<<") expectDelim = null;
 				k += op.length;
 			}
 			continue;
@@ -306,11 +309,8 @@ function shellLex(command) {
 			}
 		}
 		if (expectDelim) {
-			heredocs.push({
-				delim: w.startsWith("-") ? w.slice(1) : w,
-				tabs: w.startsWith("-"),
-			});
-			expectDelim = false;
+			heredocs.push({ delim: w, tabs: expectDelim === "<<-" });
+			expectDelim = null;
 		}
 		// an empty word matters only as a quoted heredoc delimiter
 		if (w !== "" || quoted) toks.push({ t: "w", v: w });
@@ -446,6 +446,7 @@ export function commandResolvesToScript(command, target, root) {
 	let envChain = false; // the program word waits after env
 	let lastWrapper = null; // the wrapper whose args are being consumed
 	let headWord = null; // the word that opened the program phase
+	let timeoutNum = false; // timeout's one duration operand is consumed
 	const anchors = []; // the cwd at each open subshell
 	let i = 0;
 	while (i < toks.length) {
@@ -455,15 +456,20 @@ export function commandResolvesToScript(command, target, root) {
 			if (op.includes("<") || op.includes(">")) {
 				// a redirection's target is the next word — operator runs
 				// may split (`<>` lexes as `<` then `>`), so skip any
-				// stray operators before it
+				// stray operators before it. A `(` there is process
+				// substitution: unmodelled, refused outright.
 				i++;
-				while (i < toks.length && toks[i].t === "o") i++;
+				while (i < toks.length && toks[i].t === "o") {
+					if (toks[i].v === "(") return false;
+					i++;
+				}
 				i++;
 				continue;
 			}
 			envChain = false; // a new simple command begins
 			lastWrapper = null;
 			headWord = null;
+			timeoutNum = false;
 			if (op === "&&") {
 				guard = "and";
 				awaiting = true;
@@ -474,13 +480,18 @@ export function commandResolvesToScript(command, target, root) {
 				anchors.push(cwd); // a subshell starts at the parent cwd…
 			} else if (op === ")") {
 				cwd = anchors.pop() ?? cwd; // …and its cd dies with it
-				guard = "open";
 				awaiting = false;
+				// the guard persists: a subshell late in a pipeline may
+				// still be a guarded &&/|| operand
 				// `) (` adjacency (newlines aside) is a function
 				// definition's body: the body defines, it does not run
 				let k = i + 1;
 				while (k < toks.length && toks[k].t === "o" && toks[k].v === "\n") k++;
 				if (toks[k]?.t === "o" && toks[k].v === "(") return false;
+			} else if (op === "|") {
+				// pipeline members share the pipeline's reachability —
+				// a guarded pipeline guards every member
+				awaiting = false;
 			} else if (op === "\n" && awaiting) {
 				// the AND-OR list continues past the newline
 			} else {
@@ -538,7 +549,10 @@ export function commandResolvesToScript(command, target, root) {
 			// find it — and the search ends.
 			if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(w) && lastWrapper === null) continue;
 			if (/^-/.test(w) && lastWrapper !== null) continue;
-			if (/^\d+$/.test(w) && lastWrapper === "timeout") continue;
+			if (/^\d+$/.test(w) && lastWrapper === "timeout" && !timeoutNum) {
+				timeoutNum = true; // timeout takes exactly one duration
+				continue;
+			}
 			phase = "args";
 			continue;
 		}
