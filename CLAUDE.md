@@ -29,7 +29,9 @@ Current state: 0.0.2 — the M1 launcher (stage A of T9, PR #1) is merged: a thi
 1. Start the strike in a new git worktree on a feature branch.
 2. On the first commit, open a **draft** PR against `main`.
 3. Commit and push every further change to that PR branch.
-4. When the strike is complete, mark the PR ready, then run a dedicated PR review pass before merging to `main`. An adversarial review loop terminates when findings stay wording-level for two consecutive rounds — record the residual as a documented trust boundary instead of iterating. When handed an unbounded review goal ("repeat until clean"), restate this termination rule before starting; an adversarial reviewer regenerates findings indefinitely, and "clean" is not a stopping condition it can reach.
+4. Before marking the PR ready, run `node scripts/check-strike.mjs <spec#>` — every child of the spec issue must be landed on the branch or already closed (a closeout ticket for the post-merge steps is the expected open exception). Then mark the PR ready and run a dedicated PR review pass before merging to `main`.
+5. The adversarial loop's stop condition is judgment: once findings require crafted attack strings that honest usage would never produce, stop, record them as a residual trust boundary, and move on. "Findings stay wording-level for two consecutive rounds" applies only to findings a realistic session could trigger; if it has not fired within ~10 rounds, it will not — an adversarial reviewer regenerates findings indefinitely, and "clean" is not a stopping condition it can reach.
+6. While a review round is in flight, hold further commits on that branch; when its report arrives, triage against the SHA it reviewed.
 
 ## Publishing
 
