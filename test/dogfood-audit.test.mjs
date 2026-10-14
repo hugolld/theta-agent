@@ -492,6 +492,7 @@ test("commandResolvesToScript attests execution positions only", (t) => {
 		"command python3 skills/literature-review/scripts/search.py",
 		`python3 ${target} >& out.txt`,
 		"(exec true); python3 skills/literature-review/scripts/search.py",
+		"(exec python3); python3 skills/literature-review/scripts/search.py",
 		// a file redirect reopens a closed fd before the dup reads it
 		"1>&- > log.txt 2>&1 python3 skills/literature-review/scripts/search.py",
 		// exec'ing the script itself replaces the shell with it
@@ -712,10 +713,13 @@ test("commandResolvesToScript attests execution positions only", (t) => {
 		"exec cd skills/literature-review; python3 scripts/search.py",
 		// builtin runs only shell builtins — never a program
 		"builtin python3 skills/literature-review/scripts/search.py || true",
-		// mode flags run nothing: command prints the path, sudo -v refreshes
+		// mode flags run nothing: command prints the path, sudo -v/-l/-e
+		// list or edit instead of executing
 		"command -v skills/literature-review/scripts/search.py",
 		"command -v python3 skills/literature-review/scripts/search.py",
 		"sudo -v python3 skills/literature-review/scripts/search.py",
+		"sudo -l python3 skills/literature-review/scripts/search.py",
+		"EDITOR=true sudo -e skills/literature-review/scripts/search.py",
 		// an unknown wrapper flag fails the wrapper before the program
 		"command -q python3 skills/literature-review/scripts/search.py; echo ok",
 		"nice -Q python3 skills/literature-review/scripts/search.py; echo ok",

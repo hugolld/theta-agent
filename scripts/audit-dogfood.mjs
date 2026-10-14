@@ -376,12 +376,13 @@ const wrapperAcceptsFlag = (wrapper, flag) => {
 		case "stdbuf":
 			return /^-[oei]/.test(flag);
 		case "sudo":
+			// only execute-carrying flags; -l/-e/-V/-h/-k/-K run nothing
+			// and must not keep the program search alive
 			return (
-				/^-[AabCcDEegHhIiKkLlnPpRrSsTtUuVv]$/.test(flag) ||
+				/^-[AabCcDEgHiInPpRrSsTt]$/.test(flag) ||
 				flag === "--preserve-env" ||
 				flag === "--login" ||
 				flag === "--shell" ||
-				flag === "--validate" ||
 				flag.startsWith("--user=")
 			);
 		case "watch":
@@ -705,6 +706,7 @@ export function commandResolvesToScript(command, target, root) {
 				guard = frame?.guard ?? guard; // pipeline siblings keep it
 				awaiting = false;
 				pendingClose = true;
+				execPend = false; // a subshell replacement ends with it
 				// `) (` adjacency (newlines aside) is a function
 				// definition's body: the body defines, it does not run
 				let k = i + 1;
