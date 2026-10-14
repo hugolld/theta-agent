@@ -491,6 +491,10 @@ test("commandResolvesToScript attests execution positions only", (t) => {
 		"1>&- > log.txt 2>&1 python3 skills/literature-review/scripts/search.py",
 		// exec'ing the script itself replaces the shell with it
 		"exec python3 skills/literature-review/scripts/search.py",
+		// a redirect-only exec keeps the shell — later segments run
+		"exec 2>/dev/null; python3 skills/literature-review/scripts/search.py",
+		// an exit inside a subshell dies with it
+		"(exit 0); python3 skills/literature-review/scripts/search.py",
 		// an attestation before the exit still stands — the script ran
 		"python3 skills/literature-review/scripts/search.py; exit 0",
 		"skills/literature-review/scripts/search.py --query x",
@@ -684,6 +688,11 @@ test("commandResolvesToScript attests execution positions only", (t) => {
 		// bare exec >&- and the fd-move form close fds for the whole shell
 		"exec >&-; python3 skills/literature-review/scripts/search.py 2>&1; true",
 		"exec 2>&1-; python3 skills/literature-review/scripts/search.py 2>&1; true",
+		// a flag eats the exec'd interpreter's operand position — the
+		// shell was replaced either way, so later segments are phantom
+		"exec python3 -c 'print(1)'; python3 skills/literature-review/scripts/search.py",
+		"exec bash -c 'echo hi'; python3 skills/literature-review/scripts/search.py",
+		"exec python3; python3 skills/literature-review/scripts/search.py",
 		// a spaced `<< --` delimiter is the literal word `--`; only a
 		// dash attached to the operator makes the <<- tab-stripping form
 		"cat << --\n-\npython3 skills/literature-review/scripts/search.py\n--\ntrue",

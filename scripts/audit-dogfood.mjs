@@ -583,6 +583,7 @@ export function commandResolvesToScript(command, target, root) {
 	let timeoutNum = false; // timeout's one duration operand is consumed
 	let pendingClose = false; // the last operator was a closing paren
 	let execHeaded = false; // this segment's head is exec
+	let execPend = false; // exec's interpreter still awaits its operand
 	let segStart = 0; // token index where the current segment began
 	const frames = []; // cwd and guard at each open subshell
 	let i = 0;
@@ -608,6 +609,7 @@ export function commandResolvesToScript(command, target, root) {
 				}
 				if (
 					headWord === "exec" &&
+					frames.length === 0 &&
 					(op === ">&" || /^\d*>&$/.test(op)) &&
 					toks[i]?.t === "w" &&
 					(toks[i].v === "-" || /^\d+-$/.test(toks[i].v))
@@ -625,6 +627,8 @@ export function commandResolvesToScript(command, target, root) {
 			lastWrapper = null;
 			headWord = null;
 			timeoutNum = false;
+			// a replaced shell makes every later segment phantom
+			if (execPend) return false;
 			execHeaded = false;
 			if (op === "&&") {
 				guard = "and";
@@ -689,6 +693,9 @@ export function commandResolvesToScript(command, target, root) {
 			if (envChain && assignment) continue; // env K=V pairs keep waiting
 			if (/^-/.test(w) || /^\d+$/.test(w) || assignment) {
 				phase = "args";
+				// the operand position of an exec'd interpreter was eaten
+				// by a flag or value: the shell was replaced regardless
+				if (execHeaded) return false;
 				continue;
 			}
 			if (isInterpreter(w) || WRAPPERS.has(w)) {
@@ -728,8 +735,9 @@ export function commandResolvesToScript(command, target, root) {
 		}
 		if (COMPOUND.has(w)) return false; // control flow is refused outright
 		// exit ends the shell: no later segment runs; trap can arrange the
-		// same (a DEBUG/ERR handler exiting before the command)
-		if (w === "exit" || w === "trap") return false;
+		// same (a DEBUG/ERR handler exiting before the command). Both die
+		// with a subshell, so depth 0 only.
+		if (frames.length === 0 && (w === "exit" || w === "trap")) return false;
 		if (w === "set") {
 			// noexec parses without executing anything
 			for (let s = i; s < toks.length && toks[s].t === "w"; s++) {
@@ -821,6 +829,7 @@ export function commandResolvesToScript(command, target, root) {
 		phase = isInterpreter(w) ? "program" : "args";
 		envChain = w === "env";
 		headWord = w;
+		if (execHeaded && isInterpreter(w)) execPend = true;
 		if (provable && !redirectUnsafe(segStart) && resolvesTo(w, true)) return true;
 		// exec replaces the shell: an unresolved program word means every
 		// later segment is phantom — unless the word opens a program phase
