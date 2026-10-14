@@ -1,6 +1,6 @@
 ---
 name: theta-research-loop
-description: Walks a research task through Theta's six-stage co-researcher loop — frame, search, hypothesize, design, execute, report — and routes each stage into the skill library. Use when starting or structuring research. Literature reviews route to literature-review, lookups on PubMed, arXiv, and Semantic Scholar route to theta-lit-search, hypothesis work routes to hypothesis-generation. Stages without a routed skill yet run inline and gain dedicated skills in later milestones.
+description: Walks a research task through Theta's six-stage co-researcher loop — frame, search, hypothesize, design, execute, report — and routes each stage into the skill library. Use when starting or structuring research. Literature reviews route to literature-review, searches and lookups on PubMed, arXiv, and Semantic Scholar route to theta-lit-search, hypothesis work routes to hypothesis-generation. Stages without a routed skill yet run inline and gain dedicated skills in later milestones.
 license: MIT
 metadata:
   version: "0.1.0"
@@ -37,10 +37,10 @@ can pick them up without rework.
    criteria, constraints, and what would count as a negative result. Record the
    frame before any searching starts.
 2. **Search** — route to `literature-review` for systematic or scoping
-   searches, and to `theta-lit-search` for lookups on PubMed, arXiv, and
-   Semantic Scholar (its doctrine keeps `paper-lookup` general for every other
-   database). Track coverage and gaps; unreviewed web output never stands in for
-   full-text assessment.
+   reviews, and to `theta-lit-search` for searches and lookups on PubMed,
+   arXiv, and Semantic Scholar (its doctrine keeps `paper-lookup` general for
+   every other database). Track coverage and gaps; unreviewed web output never
+   stands in for full-text assessment.
 3. **Hypothesize** — route to `hypothesis-generation`. A hypothesis is a
    proposal to challenge: demand discriminating predictions and named rivals.
 4. **Design** — pick methods, data, and controls that could actually reject the

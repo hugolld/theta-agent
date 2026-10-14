@@ -21,7 +21,7 @@ The self-authored `theta-research-loop` skill; it walks frame, search, hypothesi
 _Avoid_: umbrella skill, router, meta-skill
 
 **Connector skill**:
-A Theta-owned skill wrapping scholarly APIs with helper scripts; search and metadata with enforcement in code. M2 ships theta-lit-search. Shape may differ at later milestones.
+A Theta-owned skill wrapping scholarly APIs with helper scripts; search and metadata with enforcement in code. M2 ships `theta-lit-search`. Shape may differ at later milestones.
 _Avoid_: plugin, API binding, registered tool
 
 **Re-sync**:
