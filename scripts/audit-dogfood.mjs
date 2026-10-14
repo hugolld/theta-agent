@@ -248,6 +248,14 @@ const INTERPRETERS = new Set(["python3", "python", "bash", "sh", "zsh", "env", "
 const WRAPPERS = new Set(["timeout", "nohup", "nice", "stdbuf", "watch", "sudo", "time"]);
 const isInterpreter = (w) => INTERPRETERS.has(w) || /^python\d+(\.\d+)?$/.test(w);
 
+// Control-flow keywords: whether the body ran is exactly what an
+// attestation would have to prove, and the audit does not model it — a
+// command headed by one of these words fails closed.
+const COMPOUND = new Set([
+	"if", "then", "elif", "else", "fi", "while", "until", "do", "done",
+	"for", "in", "case", "esac", "select", "function", "{", "}", "!",
+]);
+
 // True when the command EXECUTES the target script: a word in program
 // position — the command word itself, or the program word after an
 // interpreter or wrapper chain — resolves canonically to exactly the
@@ -258,9 +266,10 @@ const isInterpreter = (w) => INTERPRETERS.has(w) || /^python\d+(\.\d+)?$/.test(w
 // Short-circuit operators are modelled conservatively: a segment after
 // `&&` attests only when its chain runs to the end of the command (a
 // non-error overall result then proves every `&&`-chained segment ran);
-// a segment after `||` never attests — except after the word `false`,
-// which provably fails — because success and skip are indistinguishable
-// in the overall exit status.
+// a segment after `||` never attests, because success and skip are
+// indistinguishable in the overall exit status. Control flow (if, while,
+// case, for, brace groups) is refused outright — whether the body ran is
+// exactly what an attestation would have to prove.
 export function commandResolvesToScript(command, target, root) {
 	// cwd anchors relative words; null means the shell went somewhere the
 	// audit cannot know (cd through an expansion), so relative words can
@@ -296,19 +305,33 @@ export function commandResolvesToScript(command, target, root) {
 	// "and"/"or" follow a short-circuit operator.
 	let phase = "prefix";
 	let guard = "open";
-	let lastHead = null;
 	let i = 0;
 	while (i < toks.length) {
 		const tok = toks[i];
 		if (tok.t === "o") {
 			const op = tok.v;
 			if (op.includes("<<")) {
-				// heredoc: the body up to the delimiter word is data; a
-				// missing delimiter swallows the rest (the shell would be
+				// heredoc: the body runs to a line holding only the
+				// delimiter word — a mid-line occurrence is body text; a
+				// missing terminator swallows the rest (the shell would be
 				// waiting for one — nothing later can attest).
 				const delim = toks[i + 1]?.t === "w" ? toks[i + 1].v : null;
 				i += 2;
-				while (i < toks.length && !(toks[i].t === "w" && toks[i].v === delim)) i++;
+				if (delim !== null) {
+					while (i < toks.length) {
+						const loneLine =
+							toks[i].t === "w" &&
+							toks[i].v === delim &&
+							(i === 0 || (toks[i - 1].t === "o" && toks[i - 1].v === "\n")) &&
+							(toks[i + 1] === undefined ||
+								(toks[i + 1].t === "o" && toks[i + 1].v === "\n"));
+						if (loneLine) {
+							i++;
+							break;
+						}
+						i++;
+					}
+				}
 				continue;
 			}
 			if (op.includes("<") || op.includes(">")) {
@@ -316,7 +339,7 @@ export function commandResolvesToScript(command, target, root) {
 				continue;
 			}
 			if (op === "&&") guard = "and";
-			else if (op === "||") guard = lastHead === "false" ? "open" : "or";
+			else if (op === "||") guard = "or";
 			else if (op !== "(") guard = "open"; // a subshell group keeps the guard
 			phase = "prefix"; // every operator ends the simple command
 			i++;
@@ -335,26 +358,26 @@ export function commandResolvesToScript(command, target, root) {
 		if (phase === "program") {
 			if (isInterpreter(w) || WRAPPERS.has(w)) continue; // chained: env python3 x.py
 			phase = "args";
-			lastHead = w;
 			if (provable && resolvesTo(w)) return true;
 			continue;
 		}
 		// prefix phase: this word is the command word
+		if (COMPOUND.has(w)) return false; // control flow is refused outright
 		if (WRAPPERS.has(w)) continue;
 		if (w === "cd") {
-			// Consume the directory argument. A resolvable directory moves
-			// the anchor for later relative words (open segments only); a
-			// clean literal that fails to resolve is a failed cd — the
-			// anchor stays, and an `&&` chain then dies at the non-error
-			// result gate. An argument the audit cannot expand ($VARS, ~)
-			// or a bare cd took the shell somewhere unknowable: the anchor
-			// is lost and later relative words can no longer attest.
+			// Consume the directory argument. The anchor moves only when
+			// the cd provably ran and succeeded: open, or `&&`-guarded in
+			// a chain that reaches the command's end (the caller's
+			// non-error result gate then proves every chained segment
+			// exited 0). Any other cd — `||`-guarded, decoupled by a later
+			// separator, expansion-sourced, bare, or resolving to nothing
+			// on disk now — leaves the shell somewhere the audit cannot
+			// know, and later relative words can no longer attest.
 			const dir = toks[i]?.t === "w" ? toks[i].v : null;
 			if (dir === null) {
 				cwd = null; // bare cd goes HOME
 			} else {
 				i++;
-				const indirect = /[$`]/.test(dir) || dir.startsWith("~");
 				const p =
 					cwd === null
 						? (path.isAbsolute(dir) ? dir : null)
@@ -365,18 +388,15 @@ export function commandResolvesToScript(command, target, root) {
 						const r = fs.realpathSync(p);
 						if (fs.statSync(r).isDirectory()) real = r;
 					} catch {
-						// unresolvable: a failed cd, unless indirect
+						// unresolvable now: it may have existed at run time
 					}
 				}
-				if (real !== null && guard === "open") cwd = real;
-				else if (real === null && (indirect || p === null)) cwd = null;
+				cwd = real !== null && provable ? real : null;
 			}
 			phase = "args";
-			lastHead = "cd";
 			continue;
 		}
 		phase = isInterpreter(w) ? "program" : "args";
-		lastHead = w;
 		if (provable && resolvesTo(w)) return true;
 	}
 	return false;

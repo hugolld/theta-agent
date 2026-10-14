@@ -477,6 +477,9 @@ test("commandResolvesToScript attests execution positions only", (t) => {
 		"python3 'skills/literature-review/scripts/search.py' --query x",
 		"cd skills/literature-review && python3 scripts/search.py --query x",
 		"cd skills/literature-review; python3 scripts/search.py",
+		// a provably-run && chain may carry the cd (non-error overall
+		// result proves every chained segment ran and exited 0)
+		"git status && cd skills/literature-review && python3 scripts/search.py",
 		"skills/literature-review/scripts/search.py --query x",
 		"timeout 30 python3 skills/literature-review/scripts/search.py",
 		"env NCBI_API_KEY=k python3 skills/literature-review/scripts/search.py",
@@ -484,8 +487,6 @@ test("commandResolvesToScript attests execution positions only", (t) => {
 		"nohup nice -n 3 stdbuf -oL python3 skills/literature-review/scripts/search.py",
 		"set -e\npython3 skills/literature-review/scripts/search.py",
 		`python3 ${target} --query x 2>&1 | tee out.txt`,
-		// a provably-failing left side forces the || branch to run
-		"false || python3 skills/literature-review/scripts/search.py",
 	];
 	for (const command of hits) {
 		assert.equal(
@@ -523,11 +524,26 @@ test("commandResolvesToScript attests execution positions only", (t) => {
 		// when the chain reaches the command's end
 		`true || python3 ${target}`,
 		"echo done || python3 skills/literature-review/scripts/search.py",
+		"false || python3 skills/literature-review/scripts/search.py",
+		`true || false || python3 ${target}`,
+		`echo hi || ( false || python3 ${target} )`,
 		"true && python3 skills/literature-review/scripts/search.py; echo done",
 		"false && python3 skills/literature-review/scripts/search.py || true",
+		// control flow is refused outright — whether the body ran is what
+		// the attestation would have to prove
+		"if [ -f results.json ]; then\npython3 skills/literature-review/scripts/search.py\nfi",
+		"while false; do\npython3 skills/literature-review/scripts/search.py\ndone",
+		"case nope in match) python3 skills/literature-review/scripts/search.py;; esac",
+		"for i in; do\npython3 skills/literature-review/scripts/search.py\ndone",
+		// a heredoc body ends at a line holding only the delimiter — a
+		// mid-line occurrence is body text, not the terminator
+		`cat > /tmp/x.sh <<'EOF'\necho X EOF\npython3 skills/literature-review/scripts/search.py\nEOF`,
 		// a cd through an unresolvable expansion loses the anchor
 		"cd $SKILL_DIR && python3 scripts/search.py",
 		"cd ~/elsewhere && python3 skills/literature-review/scripts/search.py",
+		// a resolvable guarded cd moves the anchor when provable — the
+		// relative word then resolves under /tmp, not the checkout
+		"true && cd /tmp && python3 scripts/search.py",
 	];
 	for (const command of misses) {
 		assert.equal(
