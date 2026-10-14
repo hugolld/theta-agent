@@ -465,7 +465,7 @@ export function commandResolvesToScript(command, target, root) {
 	let headWord = null; // the word that opened the program phase
 	let timeoutNum = false; // timeout's one duration operand is consumed
 	let pendingClose = false; // the last operator was a closing paren
-	const anchors = []; // the cwd at each open subshell
+	const frames = []; // cwd and guard at each open subshell
 	let i = 0;
 	while (i < toks.length) {
 		const tok = toks[i];
@@ -498,13 +498,15 @@ export function commandResolvesToScript(command, target, root) {
 				guard = "or";
 				awaiting = true;
 			} else if (op === "(") {
-				anchors.push(cwd); // a subshell starts at the parent cwd…
+				// a subshell starts at the parent cwd and inherits the
+				// guard — a separator inside may not drop below it
+				frames.push({ cwd, guard });
 			} else if (op === ")") {
-				cwd = anchors.pop() ?? cwd; // …and its cd dies with it
+				const frame = frames.pop();
+				cwd = frame?.cwd ?? cwd; // …and its cd dies with it
+				guard = frame?.guard ?? guard; // pipeline siblings keep it
 				awaiting = false;
 				pendingClose = true;
-				// the guard persists: a subshell late in a pipeline may
-				// still be a guarded &&/|| operand
 				// `) (` adjacency (newlines aside) is a function
 				// definition's body: the body defines, it does not run
 				let k = i + 1;
@@ -517,7 +519,9 @@ export function commandResolvesToScript(command, target, root) {
 			} else if (op === "\n" && awaiting) {
 				// the AND-OR list continues past the newline
 			} else {
-				guard = "open";
+				// a separator resets to the innermost subshell's
+				// inherited guard, never below it
+				guard = frames.length > 0 ? frames[frames.length - 1].guard : "open";
 				awaiting = false;
 			}
 			phase = "prefix"; // every operator ends the simple command

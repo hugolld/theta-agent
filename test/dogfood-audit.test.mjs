@@ -607,6 +607,12 @@ test("commandResolvesToScript attests execution positions only", (t) => {
 		`env $(echo true) python3 skills/literature-review/scripts/search.py`,
 		// |& is a pipe variant: a skipped || operand runs no member
 		"true || x |& python3 skills/literature-review/scripts/search.py",
+		// a separator inside a skipped subshell operand may not drop the
+		// inherited guard — none of the group's words ran
+		`true || ( echo ; python3 ${target} )`,
+		"false && ( echo hi ; python3 skills/literature-review/scripts/search.py ) || true",
+		"false && echo $(true; python3 skills/literature-review/scripts/search.py) || true",
+		"true || (\n echo hi\n python3 skills/literature-review/scripts/search.py\n)",
 		// a pipelined cd via |& is still subshell-confined
 		"cd skills/literature-review |& python3 scripts/search.py || true",
 		"cat f |& FOO=bar cd skills/literature-review; python3 scripts/search.py || true",
