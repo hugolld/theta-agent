@@ -703,8 +703,16 @@ test("commandResolvesToScript attests execution positions only", (t) => {
 		"command trap 'exit 0' DEBUG; python3 skills/literature-review/scripts/search.py",
 		"command exit 0; python3 skills/literature-review/scripts/search.py",
 		"command set -n; python3 skills/literature-review/scripts/search.py",
-		// noclobber makes ordinary > redirections fail on existing files
+		// noclobber makes ordinary > redirections fail on existing files;
+		// restricted forbids '/' in command names
 		"set -C; python3 skills/literature-review/scripts/search.py",
+		"set -r; skills/literature-review/scripts/search.py; echo done",
+		// a read assigns CDPATH without the = spelling — shadowed like
+		// any other CDPATH mention
+		`read CDPATH <<< "/tmp/shd"; cd skills/literature-review && python3 scripts/search.py`,
+		// a PATH reassignment makes interpreter resolution unknowable
+		"PATH=/tmp/evil:$PATH python3 skills/literature-review/scripts/search.py",
+		"env PATH=/tmp/evil python3 skills/literature-review/scripts/search.py",
 		// glob-shaped redirect targets are ambiguous when they multi-match
 		`python3 ${target} > /tmp/*.log ; echo ok`,
 		// a fd-prefixed dup with a file word is an ambiguous redirect
@@ -720,6 +728,9 @@ test("commandResolvesToScript attests execution positions only", (t) => {
 		"sudo -v python3 skills/literature-review/scripts/search.py",
 		"sudo -l python3 skills/literature-review/scripts/search.py",
 		"EDITOR=true sudo -e skills/literature-review/scripts/search.py",
+		// sudo -p's value is the prompt string — the path word is not a
+		// program, and only the trailing command runs
+		"sudo -p skills/literature-review/scripts/search.py true",
 		// an unknown wrapper flag fails the wrapper before the program
 		"command -q python3 skills/literature-review/scripts/search.py; echo ok",
 		"nice -Q python3 skills/literature-review/scripts/search.py; echo ok",

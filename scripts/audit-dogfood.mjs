@@ -492,11 +492,12 @@ export function commandResolvesToScript(command, target, root) {
 	) {
 		toks.pop();
 	}
-	// A CDPATH assignment makes later bare-relative cds land somewhere the
+	// A CDPATH mention makes later bare-relative cds land somewhere the
 	// audit cannot know — bash searches CDPATH before the working
-	// directory. (`./x` and `../x` bypass it; so do absolute paths.)
+	// directory, and a `read CDPATH` assigns it without the = spelling.
+	// (`./x` and `../x` bypass it; so do absolute paths.)
 	const cdpathAt = toks.findIndex(
-		(t) => t.t === "w" && t.v.startsWith("CDPATH="),
+		(t) => t.t === "w" && (t.v === "CDPATH" || t.v.startsWith("CDPATH=")),
 	);
 	// Operators that decouple the overall exit status from the `&&` chain
 	// in progress: once one follows, the chain's later segments can no
@@ -641,6 +642,7 @@ export function commandResolvesToScript(command, target, root) {
 	let lastWrapper = null; // the wrapper whose args are being consumed
 	let headWord = null; // the word that opened the program phase
 	let timeoutNum = false; // timeout's one duration operand is consumed
+	let pendingValue = false; // the next word is a wrapper flag's value
 	let pendingClose = false; // the last operator was a closing paren
 	let execHeaded = false; // this segment's head is exec
 	let execPend = false; // exec's interpreter still awaits its operand
@@ -738,6 +740,11 @@ export function commandResolvesToScript(command, target, root) {
 		// expansion output the audit cannot model. Refused.
 		if (pendingClose) return false;
 		awaiting = false;
+		// the value of a value-taking wrapper flag is never a program
+		if (pendingValue) {
+			pendingValue = false;
+			continue;
+		}
 		// A guarded segment's program word attests only when its execution
 		// is provable: open segments always run; an `&&`-guarded one only
 		// inside a chain that reaches the command's end unbroken.
@@ -751,7 +758,11 @@ export function commandResolvesToScript(command, target, root) {
 			// consumes NAME=VALUE pairs). The program search ends, and no
 			// later word in this segment can attest.
 			const assignment = /^[A-Za-z_][A-Za-z0-9_]*=/.test(w);
-			if (envChain && assignment) continue; // env K=V pairs keep waiting
+			if (envChain && assignment) {
+				// a PATH reassignment makes interpreter resolution unknowable
+				if (w.startsWith("PATH=")) phase = "args";
+				continue; // env K=V pairs keep waiting
+			}
 			if (/^-/.test(w) || /^\d+$/.test(w) || assignment) {
 				phase = "args";
 				// the operand position of an exec'd interpreter was eaten
@@ -787,7 +798,11 @@ export function commandResolvesToScript(command, target, root) {
 			// numeric duration operand. A skippable-shaped word with no
 			// such home is itself the program — the shell would fail to
 			// find it — and the search ends.
-			if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(w) && lastWrapper === null) continue;
+			if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(w) && lastWrapper === null) {
+				// a PATH reassignment makes interpreter resolution unknowable
+				if (w.startsWith("PATH=")) phase = "args";
+				continue;
+			}
 			if (/^-/.test(w) && lastWrapper !== null) {
 				// mode flags that run nothing: command prints, sudo -v
 				// refreshes credentials
@@ -800,6 +815,9 @@ export function commandResolvesToScript(command, target, root) {
 				}
 				// an unknown flag fails the wrapper before the program runs
 				if (!wrapperAcceptsFlag(lastWrapper, w)) phase = "args";
+				// sudo's prompt string takes any value — the next word is
+				// consumed, never a program
+				if (lastWrapper === "sudo" && w === "-p") pendingValue = true;
 				continue;
 			}
 			if (/^\d+$/.test(w) && lastWrapper === "timeout" && !timeoutNum) {
@@ -827,10 +845,11 @@ export function commandResolvesToScript(command, target, root) {
 		}
 		if (w === "set") {
 			// noexec parses without executing anything; noclobber makes
-			// ordinary > redirections fail on existing files
+			// ordinary > redirections fail on existing files; restricted
+			// forbids '/' in command names
 			for (let s = i; s < toks.length && toks[s].t === "w"; s++) {
 				if (
-					/^-+[^-]*[nC]/.test(toks[s].v) ||
+					/^-+[^-]*[nCr]/.test(toks[s].v) ||
 					toks[s].v === "noexec" ||
 					toks[s].v === "noclobber"
 				) {
