@@ -236,13 +236,21 @@ function shellLex(command) {
 			const run = command.slice(i, j);
 			i = j;
 			// emit canonical operators, splitting runs: `);` is two
-			// operators, while &&, ||, <<, >>, <<< stay whole
+			// operators, while &&, ||, <<, >>, <<<, &>, &>> stay whole
 			for (let k = 0; k < run.length; ) {
 				const three = run.slice(k, k + 3);
 				const two = run.slice(k, k + 2);
 				let op = run[k];
-				if (three === "<<<") op = three;
-				else if (two === "&&" || two === "||" || two === "<<" || two === ">>") op = two;
+				if (three === "<<<" || three === "&>>") op = three;
+				else if (
+					two === "&&" ||
+					two === "||" ||
+					two === "<<" ||
+					two === ">>" ||
+					two === "&>"
+				) {
+					op = two;
+				}
 				toks.push({ t: "o", v: op });
 				// a heredoc expects its delimiter next; a herestring does not
 				if (op.includes("<<")) expectDelim = !op.includes("<<<");
@@ -269,6 +277,20 @@ function shellLex(command) {
 					if (command[q] === "\\" && /[$`"\\\n]/.test(command[q + 1] ?? "")) q++;
 					w += command[q] ?? "";
 				}
+				i = Math.min(k + 1, command.length);
+			} else if (c === "`") {
+				// command substitution: consume the span raw as one
+				// unresolvable word — the module refuses what it cannot
+				// model, and a hidden cd inside must not silently divert
+				// the anchor
+				quoted = true;
+				let k = i + 1;
+				while (k < command.length) {
+					if (command[k] === "\\") k += 2;
+					else if (command[k] === "`") break;
+					else k++;
+				}
+				w += command.slice(i, Math.min(k + 1, command.length));
 				i = Math.min(k + 1, command.length);
 			} else if (c === "\\") {
 				// backslash-newline (and backslash-\r\n) is a continuation
@@ -324,9 +346,6 @@ const COMPOUND = new Set([
 // both run it in a subshell, so a cd there never moves the parent cwd.
 // Redirections between the command and the `&` are stepped over.
 function subshellConfined(toks, cdIdx, after) {
-	const isBoundary = (v) =>
-		v === ";" || v === "\n" || v === "&" || v === "&&" || v === "||" ||
-		v === "(" || v === ")";
 	const isRedirect = (v) => v.includes("<") || v.includes(">");
 	let k = after;
 	while (k < toks.length && toks[k].t === "o") {
@@ -340,10 +359,17 @@ function subshellConfined(toks, cdIdx, after) {
 		if (v === "|" || v === "&") return true;
 		break; // any other operator ends the simple command
 	}
-	for (let b = cdIdx - 1; b >= 0 && toks[b].t === "o"; b--) {
-		const v = toks[b].v;
+	// Backward to the start of the pipeline segment: words of the same
+	// segment (an assignment or a redirect's target may precede the cd)
+	// belong to it, and a `|` before the boundary means the cd runs in a
+	// subshell.
+	for (let b = cdIdx - 1; b >= 0; b--) {
+		const t = toks[b];
+		if (t.t === "w") continue;
+		const v = t.v;
 		if (v === "|") return true;
-		if (isBoundary(v)) return false;
+		if (isRedirect(v)) continue;
+		return false; // a boundary or stray operator ends the look
 	}
 	return false;
 }
@@ -419,6 +445,7 @@ export function commandResolvesToScript(command, target, root) {
 	let awaiting = false;
 	let envChain = false; // the program word waits after env
 	let lastWrapper = null; // the wrapper whose args are being consumed
+	let headWord = null; // the word that opened the program phase
 	const anchors = []; // the cwd at each open subshell
 	let i = 0;
 	while (i < toks.length) {
@@ -436,6 +463,7 @@ export function commandResolvesToScript(command, target, root) {
 			}
 			envChain = false; // a new simple command begins
 			lastWrapper = null;
+			headWord = null;
 			if (op === "&&") {
 				guard = "and";
 				awaiting = true;
@@ -486,8 +514,15 @@ export function commandResolvesToScript(command, target, root) {
 				continue;
 			}
 			if (isInterpreter(w) || WRAPPERS.has(w)) {
-				envChain = w === "env"; // only env itself consumes pairs
-				continue; // env python3 x.py
+				// A wrapper (or env) execs its program word, which may
+				// itself be an interpreter — the chain continues. After a
+				// plain interpreter the word is the script operand
+				// (python3 env x.py runs a file named env): the search
+				// ends at the fall-through below.
+				if (headWord === "env" || WRAPPERS.has(headWord)) {
+					envChain = w === "env"; // only env itself consumes pairs
+					continue;
+				}
 			}
 			phase = "args";
 			if (provable && resolvesTo(w)) return true;
@@ -495,12 +530,13 @@ export function commandResolvesToScript(command, target, root) {
 		}
 		// prefix phase: this word is the command word
 		if (skippable) {
-			// Command-prefix material: assignments may precede any
-			// command, flags follow the wrapper they belong to, and only
-			// timeout always takes a numeric duration operand. A numeric
-			// or flag word with no such home is itself the program — the
-			// shell would fail to find it — and the search ends.
-			if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(w)) continue;
+			// Command-prefix material: assignments may precede the command
+			// word itself (before any wrapper is consumed), flags follow
+			// the wrapper they belong to, and only timeout always takes a
+			// numeric duration operand. A skippable-shaped word with no
+			// such home is itself the program — the shell would fail to
+			// find it — and the search ends.
+			if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(w) && lastWrapper === null) continue;
 			if (/^-/.test(w) && lastWrapper !== null) continue;
 			if (/^\d+$/.test(w) && lastWrapper === "timeout") continue;
 			phase = "args";
@@ -567,6 +603,7 @@ export function commandResolvesToScript(command, target, root) {
 		}
 		phase = isInterpreter(w) ? "program" : "args";
 		envChain = w === "env";
+		headWord = w;
 		if (provable && resolvesTo(w)) return true;
 	}
 	return false;

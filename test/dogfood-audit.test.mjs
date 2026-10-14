@@ -489,6 +489,8 @@ test("commandResolvesToScript attests execution positions only", (t) => {
 		"nohup nice stdbuf -oL python3 skills/literature-review/scripts/search.py",
 		// cd's own flags precede the directory operand
 		"cd -P skills/literature-review && python3 scripts/search.py",
+		// &> is a combined-output redirection, not backgrounding
+		"cd skills/literature-review &>/dev/null && python3 scripts/search.py",
 		"set -e\npython3 skills/literature-review/scripts/search.py",
 		`python3 ${target} --query x 2>&1 | tee out.txt`,
 		// backslash-newline is a line continuation, not a word
@@ -575,6 +577,22 @@ test("commandResolvesToScript attests execution positions only", (t) => {
 		"30 python3 skills/literature-review/scripts/search.py || true",
 		"time -p 30 python3 skills/literature-review/scripts/search.py || true",
 		"-v python3 skills/literature-review/scripts/search.py || true",
+		// an interpreter word after a plain interpreter is the script
+		// operand (python3 opens the file named env), not a chain
+		"python3 env skills/literature-review/scripts/search.py || true",
+		"bash env skills/literature-review/scripts/search.py || true",
+		// an assignment after a wrapper is its program operand
+		"nohup X=1 python3 skills/literature-review/scripts/search.py || true",
+		// an assignment or redirect may precede a cd inside one pipeline
+		// segment — the cd is still subshell-confined
+		"cat f | FOO=bar cd skills/literature-review; python3 scripts/search.py || true",
+		"cat f | > out cd skills/literature-review; python3 scripts/search.py || true",
+		// a background-looking &> redirect moves the parent cwd — the
+		// relative word then resolves under the cd target, not the checkout
+		"cd /tmp &>/dev/null && python3 skills/literature-review/scripts/search.py",
+		// a backtick substitution is opaque; its hidden cd cannot divert
+		// the anchor to the checkout's copy
+		"echo `cd /tmp; python3 skills/literature-review/scripts/search.py`",
 		// control flow is refused outright — whether the body ran is what
 		// the attestation would have to prove
 		"if [ -f results.json ]; then\npython3 skills/literature-review/scripts/search.py\nfi",
