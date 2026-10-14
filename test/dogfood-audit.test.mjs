@@ -616,8 +616,15 @@ test("commandResolvesToScript attests execution positions only", (t) => {
 		// a pipelined cd via |& is still subshell-confined
 		"cd skills/literature-review |& python3 scripts/search.py || true",
 		"cat f |& FOO=bar cd skills/literature-review; python3 scripts/search.py || true",
-		// a trailing slash cannot open a file
+		// a trailing slash (or /., /..) cannot open a file
 		`python3 ${target}/ || true`,
+		`python3 ${target}/. || echo ok`,
+		// bash opens redirections before running the command: a
+		// provably-failing redirection stops it, and a rescuing tail
+		// still exits 0
+		`python3 ${target} > /no/such/dir/f ; echo ok`,
+		`python3 ${target} > /no/such/dir/f || echo ok`,
+		`python3 ${target} > '' ; echo ok`,
 		// a spaced `<< --` delimiter is the literal word `--`; only a
 		// dash attached to the operator makes the <<- tab-stripping form
 		"cat << --\n-\npython3 skills/literature-review/scripts/search.py\n--\ntrue",

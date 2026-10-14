@@ -412,7 +412,9 @@ export function commandResolvesToScript(command, target, root) {
 	// no longer attest.
 	let cwd = root;
 	const resolvesTo = (w) => {
-		if (w === "" || w.endsWith("/")) return false; // open("file/") fails
+		// open("file/") and open("file/.") fail — realpath would collapse
+		// both onto the file, so reject the spellings first
+		if (w === "" || /\/(\.|\.\.)?$/.test(w)) return false;
 		if (!path.isAbsolute(w) && cwd === null) return false;
 		const p = path.isAbsolute(w) ? w : path.resolve(cwd, w);
 		try {
@@ -449,6 +451,44 @@ export function commandResolvesToScript(command, target, root) {
 		nextBreak[k] =
 			toks[k].t === "o" && breaksChain(toks[k].v) ? k : (nextBreak[k + 1] ?? -1);
 	}
+	// Bash opens a simple command's redirections BEFORE running it: a
+	// redirection that provably fails stops the command, and a rescuing
+	// tail (`; echo ok`) still exits 0. Taint every word of a segment
+	// whose redirection is provably failable — an absolute write target
+	// with no parent directory, an absolute read target that does not
+	// exist, or an empty/expansion-shaped target. Relative targets
+	// depend on the runtime cwd and stay untainted.
+	const tainted = new Array(toks.length).fill(false);
+	const endsSegment = (v) =>
+		v === ";" || v === "\n" || v === "&" || v === "&&" || v === "||" ||
+		v === "(" || v === ")" || isPipe(v);
+	for (let k = 0; k < toks.length; k++) {
+		const t = toks[k];
+		if (
+			t.t !== "o" ||
+			!(t.v.includes("<") || t.v.includes(">")) ||
+			t.v.includes("<<")
+		) {
+			continue;
+		}
+		let m = k + 1;
+		while (m < toks.length && toks[m].t === "o") m++;
+		const target = toks[m]?.t === "w" ? toks[m].v : undefined;
+		const unsafe =
+			target === undefined ||
+			target === "" ||
+			/[$`]/.test(target) ||
+			(path.isAbsolute(target) &&
+				(t.v.includes(">")
+					? !fs.existsSync(path.dirname(target))
+					: !fs.existsSync(target)));
+		if (!unsafe) continue;
+		let s = k;
+		while (s >= 0 && !(toks[s].t === "o" && endsSegment(toks[s].v))) s--;
+		let e = k;
+		while (e < toks.length && !(toks[e].t === "o" && endsSegment(toks[e].v))) e++;
+		for (let j = s + 1; j < e; j++) tainted[j] = true;
+	}
 	// Program-position state, per simple command (restarted at every
 	// operator): "prefix" = still consuming wrappers, flags, and
 	// assignments; "program" = the next word is the executed program;
@@ -479,8 +519,9 @@ export function commandResolvesToScript(command, target, root) {
 				// does not clear pendingClose — the word after it still
 				// completes a command substitution. The parse is more
 				// permissive than bash on invalid redirections (e.g. an
-				// ambiguous `2>&` target); such commands cannot exit 0,
-				// and the caller's non-error result gate closes them.
+				// ambiguous `2>&` target): those cannot pair with a
+				// non-error result unless a rescuing tail exits 0, and a
+				// provably-failing redirection taints the segment below.
 				i++;
 				while (i < toks.length && toks[i].t === "o") {
 					if (toks[i].v === "(") return false;
@@ -570,7 +611,7 @@ export function commandResolvesToScript(command, target, root) {
 				}
 			}
 			phase = "args";
-			if (provable && resolvesTo(w)) return true;
+			if (provable && !tainted[wordIdx] && resolvesTo(w)) return true;
 			continue;
 		}
 		// prefix phase: this word is the command word
@@ -638,7 +679,11 @@ export function commandResolvesToScript(command, target, root) {
 					}
 				}
 				if (!subshellCd) {
-					cwd = real !== null && provable && !cdpathShadowed ? real : null;
+					// a tainted cd may never have run — the anchor is lost
+					cwd =
+						real !== null && provable && !cdpathShadowed && !tainted[wordIdx]
+							? real
+							: null;
 				}
 			}
 			phase = "args";
@@ -652,7 +697,7 @@ export function commandResolvesToScript(command, target, root) {
 		phase = isInterpreter(w) ? "program" : "args";
 		envChain = w === "env";
 		headWord = w;
-		if (provable && resolvesTo(w)) return true;
+		if (provable && !tainted[wordIdx] && resolvesTo(w)) return true;
 	}
 	return false;
 }
