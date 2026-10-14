@@ -477,7 +477,10 @@ export function commandResolvesToScript(command, target, root) {
 				// stray operators before it. A `(` there is process
 				// substitution: unmodelled, refused outright. A redirect
 				// does not clear pendingClose — the word after it still
-				// completes a command substitution.
+				// completes a command substitution. The parse is more
+				// permissive than bash on invalid redirections (e.g. an
+				// ambiguous `2>&` target); such commands cannot exit 0,
+				// and the caller's non-error result gate closes them.
 				i++;
 				while (i < toks.length && toks[i].t === "o") {
 					if (toks[i].v === "(") return false;
