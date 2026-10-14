@@ -159,6 +159,11 @@ function makeTempRepo(t) {
 		path.join(repo, "skills", "literature-review", "scripts", "search.py"),
 		"# connector script\n",
 	);
+	// direct execution needs the execute bit
+	fs.chmodSync(
+		path.join(repo, "skills", "literature-review", "scripts", "search.py"),
+		0o755,
+	);
 	fs.mkdirSync(path.join(repo, "test"), { recursive: true });
 	fs.writeFileSync(
 		path.join(repo, "test", "expected-skills.json"),
@@ -636,6 +641,13 @@ test("commandResolvesToScript attests execution positions only", (t) => {
 		"python3 skills/literature-review/scripts/search.py < noinput.txt ; echo ok",
 		// fd duplication beyond 0-2 is a bad file descriptor
 		`python3 ${target} 2>&9 ; echo ok`,
+		// a `-` or digit target is a filename unless the operator is >&
+		"python3 skills/literature-review/scripts/search.py < - ; echo ok",
+		// CR is a word character to bash — the \r stays in the filename
+		"python3 skills/literature-review/scripts/search.py\r; echo ok",
+		"python3 skills/literature-review/scripts/search.py\r\necho ok",
+		// a slash-less command word goes through PATH, not the cwd
+		"cd skills/literature-review/scripts; search.py; echo ok",
 		// a redirection after ) applies to the whole parenthesized command
 		`(python3 ${target}) > /no/such/dir/f ; echo ok`,
 		// pushd -n never changes the directory
@@ -683,6 +695,18 @@ test("commandResolvesToScript attests execution positions only", (t) => {
 	}
 	// an alias of the checkout's copy executes the same bytes
 	assert.equal(commandResolvesToScript(`python3 ${alias}`, target, repo), true);
+	// a direct command word needs the execute bit and a slash: the
+	// checkout's non-executable files are interpreter operands only
+	const norexec = path.join(repo, "norexec.py");
+	fs.writeFileSync(norexec, "# not executable\n");
+	assert.equal(
+		commandResolvesToScript("norexec.py; echo ok", fs.realpathSync(norexec), repo),
+		false,
+	);
+	assert.equal(
+		commandResolvesToScript("./norexec.py; echo ok", fs.realpathSync(norexec), repo),
+		false,
+	);
 });
 
 test("resolveCheckoutScript accepts only existing files inside the checkout", (t) => {

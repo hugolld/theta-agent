@@ -178,14 +178,16 @@ function shellLex(command) {
 	const toks = [];
 	const heredocs = [];
 	let expectDelim = null; // "<<" | "<<-" while a delimiter is expected
-	const isOp = (c) => /[\s;&|<>()]/.test(c);
+	// A carriage return is a WORD character to bash (a pasted CRLF leaves
+	// the \r inside the filename); only \n ends a line.
+	const isOp = (c) => /[ \t\f\v\n;&|<>()]/.test(c);
 	const isOpNoSpace = (c) => /[;&|<>()]/.test(c);
 	let i = 0;
 	while (i < command.length) {
 		const ch = command[i];
-		if (ch === "\n" || ch === "\r") {
+		if (ch === "\n") {
 			if (heredocs.length > 0) {
-				i = ch === "\r" && command[i + 1] === "\n" ? i + 2 : i + 1;
+				i++;
 				for (const h of heredocs) {
 					let terminator = false;
 					while (i <= command.length) {
@@ -212,7 +214,7 @@ function shellLex(command) {
 			toks.push({ t: "o", v: "\n" });
 			continue;
 		}
-		if (/\s/.test(ch)) {
+		if (/[ \t\f\v]/.test(ch)) {
 			i++;
 			continue;
 		}
@@ -411,14 +413,22 @@ export function commandResolvesToScript(command, target, root) {
 	// audit cannot know (cd through an expansion), so relative words can
 	// no longer attest.
 	let cwd = root;
-	const resolvesTo = (w) => {
+	const resolvesTo = (w, direct = false) => {
 		// open("file/") and open("file/.") fail — realpath would collapse
 		// both onto the file, so reject the spellings first
 		if (w === "" || /\/(\.|\.\.)?$/.test(w)) return false;
+		// bash executes a slash-containing word directly; a slash-less one
+		// goes through PATH, which the audit does not model
+		if (direct && !w.includes("/")) return false;
 		if (!path.isAbsolute(w) && cwd === null) return false;
 		const p = path.isAbsolute(w) ? w : path.resolve(cwd, w);
 		try {
-			return fs.realpathSync(p) === target;
+			const real = fs.realpathSync(p);
+			if (real !== target) return false;
+			// direct execution needs the execute bit; an interpreter
+			// operand only needs to be openable
+			if (direct) fs.accessSync(real, fs.constants.X_OK);
+			return true;
 		} catch {
 			return false;
 		}
@@ -477,13 +487,15 @@ export function commandResolvesToScript(command, target, root) {
 				if (target === undefined || target === "" || /[$`]/.test(target)) {
 					return true;
 				}
-				// fd closing always succeeds; duplication needs an open fd,
-				// and only 0-2 are guaranteed
-				if (target === "-") {
+				// Only `>&digit` / `>&-` duplicate or close an fd (always
+				// succeeds; only 0-2 are guaranteed open) — after every
+				// other spelling the word is an ordinary filename
+				const isDup = t.v === ">&" || /^\d*>&$/.test(t.v);
+				if (isDup && target === "-") {
 					k = m + 1;
 					continue;
 				}
-				if (/^[0-9]+$/.test(target)) {
+				if (isDup && /^[0-9]+$/.test(target)) {
 					if (!/^[012]$/.test(target)) return true; // bad fd
 					k = m + 1;
 					continue;
@@ -507,6 +519,17 @@ export function commandResolvesToScript(command, target, root) {
 						st = fs.statSync(p);
 					} catch (e) {
 						if (e.code !== "ENOENT") return true; // ELOOP, EACCES…
+					}
+					if (st === null) {
+						// something exists at the path but does not resolve:
+						// a dangling symlink bash would open through
+						let entry = null;
+						try {
+							entry = fs.lstatSync(p);
+						} catch (e) {
+							if (e.code !== "ENOENT") return true;
+						}
+						if (entry !== null) return true;
 					}
 					try {
 						// an existing target must be a writable file; a new
@@ -752,7 +775,7 @@ export function commandResolvesToScript(command, target, root) {
 		phase = isInterpreter(w) ? "program" : "args";
 		envChain = w === "env";
 		headWord = w;
-		if (provable && !redirectUnsafe(segStart) && resolvesTo(w)) return true;
+		if (provable && !redirectUnsafe(segStart) && resolvesTo(w, true)) return true;
 	}
 	return false;
 }
