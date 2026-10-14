@@ -23,8 +23,8 @@ built as a [pi package](https://pi.dev) rather than a monolithic fork:
 - **Skills**: curated science skills (literature review, hypothesis generation,
   experimental design, statistics, domain libraries) following the open
   [Agent Skills](https://agentskills.io) specification
-- **Connectors**: literature and database tools (PubMed, arXiv, UniProt, …) as pi
-  extensions
+- **Connectors**: literature and database tools (PubMed, arXiv, UniProt, …) as
+  Theta-owned connector skills
 - **Compute**: remote Slurm-cluster jobs via an MCP compute gateway, with a
   light local sandbox for small tasks
 - **Models**: any of pi's available providers — bring your own key

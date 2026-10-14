@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 `theta-agent` — a **pi package** (extensions + skills for the [pi](https://pi.dev) coding agent) that grows into **Theta**, a science co-researcher agent for biology/biomedicine. It is the code repo of the Theta campaign; design decisions (T1–T10), milestone definitions, and task handoffs live in the campaign vault (path in `CLAUDE.local.md`). Treat the vault as read-only reference.
 
-Current state: 0.0.2 — the M1 launcher (stage A of T9, PR #1) is merged: a thin `bin/theta.mjs` that runs `pi -e <package-root>` so `npm i -g theta-agent && theta` works from 0.0.2 (macOS/Linux; Windows waits for M8, tracked in issue #2; at the M1 close-out the 0.0.2 publish was still pending with the owner). The M1 Tier-1 library ships complete: the K-Dense skills vendored verbatim per ADR 0001 (tracer PR #9, batch PR #10) plus the self-authored `theta-research-loop` orchestrator; re-syncs happen at milestone boundaries (`docs/agents/resync.md`).
+Current state: 0.0.2 on the registry, 0.1.0 at the M2 close-out (#24) — the M1 launcher (stage A of T9, PR #1) is merged: a thin `bin/theta.mjs` that runs `pi -e <package-root>` so `npm i -g theta-agent && theta` works from 0.0.2 (macOS/Linux; Windows waits for M8, tracked in issue #2). The M1 Tier-1 library ships complete: the K-Dense skills vendored verbatim per ADR 0001 (tracer PR #9, batch PR #10) plus the self-authored `theta-research-loop` orchestrator; re-syncs happen at milestone boundaries (`docs/agents/resync.md`). M2 ships the first connector skill, `theta-lit-search` (PubMed, arXiv, Semantic Scholar): search and get-by-identifier with pacing, in-200 error detection, and credential redaction enforced in its scripts (ADR 0002; script invariants in `docs/agents/connector-scripts.md`).
 
 ## pi-package rules
 
@@ -50,6 +50,10 @@ Default five-role vocabulary (each label string equals its role name). See `docs
 ### Domain docs
 
 Single-context: root `GLOSSARY.md` + `docs/adr/`. See `docs/agents/domain.md`.
+
+### Connector scripts
+
+Connector helper scripts (`theta-lit-search` today) share enforced invariants — exit-code contract, classification shape, provenance records. See `docs/agents/connector-scripts.md`.
 
 ### SKILL.md frontmatter
 
