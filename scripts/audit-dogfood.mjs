@@ -809,9 +809,20 @@ export function commandResolvesToScript(command, target, root) {
 		}
 		if (COMPOUND.has(w)) return false; // control flow is refused outright
 		// exit ends the shell: no later segment runs; trap can arrange the
-		// same (a DEBUG/ERR handler exiting before the command). Both die
-		// with a subshell, so depth 0 only.
-		if (frames.length === 0 && (w === "exit" || w === "trap")) return false;
+		// same (a DEBUG/ERR handler exiting before the command); eval,
+		// builtin, and source reparsing can end it from argument position.
+		// All die with a subshell, so depth 0 only.
+		if (
+			frames.length === 0 &&
+			(w === "exit" ||
+				w === "trap" ||
+				w === "eval" ||
+				w === "builtin" ||
+				w === "." ||
+				w === "source")
+		) {
+			return false;
+		}
 		if (w === "set") {
 			// noexec parses without executing anything; noclobber makes
 			// ordinary > redirections fail on existing files

@@ -723,6 +723,12 @@ test("commandResolvesToScript attests execution positions only", (t) => {
 		"timeout -Z 30 python3 skills/literature-review/scripts/search.py; echo ok",
 		// command-prefixing the exec-close still closes the shell's fd
 		"command exec 1>&-; python3 skills/literature-review/scripts/search.py 2>&1; echo done",
+		// eval/builtin/source can end or divert the shell from argument
+		// position — refused in command position
+		"eval exit 0 && python3 skills/literature-review/scripts/search.py",
+		"builtin exit 0; python3 skills/literature-review/scripts/search.py",
+		"command eval exit 0; python3 skills/literature-review/scripts/search.py",
+		"builtin cd /tmp; python3 skills/literature-review/scripts/search.py; true",
 		// a spaced `<< --` delimiter is the literal word `--`; only a
 		// dash attached to the operator makes the <<- tab-stripping form
 		"cat << --\n-\npython3 skills/literature-review/scripts/search.py\n--\ntrue",
