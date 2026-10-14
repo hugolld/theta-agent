@@ -604,6 +604,16 @@ export function commandResolvesToScript(command, target, root) {
 					if (toks[i].v === "(") return false;
 					i++;
 				}
+				if (
+					headWord === "exec" &&
+					(op === ">&" || /^\d*>&$/.test(op)) &&
+					toks[i]?.t === "w" &&
+					toks[i].v === "-"
+				) {
+					// exec with a redirect-only list closes the fd for the
+					// whole shell — a later segment's dup would abort it
+					return false;
+				}
 				i++;
 				continue;
 			}
@@ -712,6 +722,7 @@ export function commandResolvesToScript(command, target, root) {
 		if (COMPOUND.has(w)) return false; // control flow is refused outright
 		if (WRAPPERS.has(w)) {
 			lastWrapper = w;
+			headWord ??= w; // for exec-with-closes detection
 			continue;
 		}
 		if (w === "cd" || w === "pushd") {
@@ -733,9 +744,9 @@ export function commandResolvesToScript(command, target, root) {
 			while (toks[d]?.t === "w" && /^-/.test(toks[d].v) && toks[d].v !== "--") {
 				const flag = toks[d].v;
 				const known =
-					(w === "cd" && (flag === "-L" || flag === "-P")) ||
+					(w === "cd" && /^-[LP]+$/.test(flag)) ||
 					(w === "pushd" && (flag === "-n" || /^[+-]\d+$/.test(flag)));
-				if (w === "pushd" && flag === "-n") dry = true;
+				if (w === "pushd" && (flag === "-n" || /^[+-]\d+$/.test(flag))) dry = true;
 				if (!known) badFlag = true;
 				d++;
 			}

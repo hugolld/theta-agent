@@ -494,8 +494,9 @@ test("commandResolvesToScript attests execution positions only", (t) => {
 		"env NCBI_API_KEY=k python3 skills/literature-review/scripts/search.py",
 		"time sudo watch python3 skills/literature-review/scripts/search.py",
 		"nohup nice stdbuf -oL python3 skills/literature-review/scripts/search.py",
-		// cd's own flags precede the directory operand
+		// cd's own flags precede the directory operand (combined too)
 		"cd -P skills/literature-review && python3 scripts/search.py",
+		"cd -LP skills/literature-review && python3 scripts/search.py",
 		// &> is a combined-output redirection, not backgrounding
 		"cd skills/literature-review &>/dev/null && python3 scripts/search.py",
 		// a guarded pipeline that runs proves every member ran
@@ -661,6 +662,11 @@ test("commandResolvesToScript attests execution positions only", (t) => {
 		// bash rejects unknown cd/pushd options — the cd never ran
 		"cd -Q skills/literature-review; python3 scripts/search.py; echo ok",
 		"pushd -Q skills/literature-review; python3 scripts/search.py; echo ok",
+		// a pushd ±N operand never changes the directory either
+		"pushd -0 skills/literature-review; python3 scripts/search.py; echo ok",
+		// exec with a redirect-only list closes fds for the whole shell —
+		// a later segment's dup aborts the command
+		"exec 1>&-; python3 skills/literature-review/scripts/search.py 2>&1; true",
 		// a spaced `<< --` delimiter is the literal word `--`; only a
 		// dash attached to the operator makes the <<- tab-stripping form
 		"cat << --\n-\npython3 skills/literature-review/scripts/search.py\n--\ntrue",
