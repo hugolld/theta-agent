@@ -346,6 +346,10 @@ const WRAPPERS = new Set([
 ]);
 const isInterpreter = (w) => INTERPRETERS.has(w) || /^python\d+(\.\d+)?$/.test(w);
 
+// Pipe spellings: `|` and bash's `|&` share every semantic the audit
+// models (members run in subshells; a guarded pipeline guards all).
+const isPipe = (v) => v === "|" || v === "|&";
+
 // Control-flow keywords: whether the body ran is exactly what an
 // attestation would have to prove, and the audit does not model it — a
 // command headed by one of these words fails closed.
@@ -369,18 +373,18 @@ function subshellConfined(toks, cdIdx, after) {
 			k++; // the redirection's target word
 			continue;
 		}
-		if (v === "|" || v === "&") return true;
+		if (isPipe(v) || v === "&") return true;
 		break; // any other operator ends the simple command
 	}
 	// Backward to the start of the pipeline segment: words of the same
 	// segment (an assignment or a redirect's target may precede the cd)
-	// belong to it, and a `|` before the boundary means the cd runs in a
+	// belong to it, and a pipe before the boundary means the cd runs in a
 	// subshell.
 	for (let b = cdIdx - 1; b >= 0; b--) {
 		const t = toks[b];
 		if (t.t === "w") continue;
 		const v = t.v;
-		if (v === "|") return true;
+		if (isPipe(v)) return true;
 		if (isRedirect(v)) continue;
 		return false; // a boundary or stray operator ends the look
 	}
@@ -408,7 +412,7 @@ export function commandResolvesToScript(command, target, root) {
 	// no longer attest.
 	let cwd = root;
 	const resolvesTo = (w) => {
-		if (w === "") return false;
+		if (w === "" || w.endsWith("/")) return false; // open("file/") fails
 		if (!path.isAbsolute(w) && cwd === null) return false;
 		const p = path.isAbsolute(w) ? w : path.resolve(cwd, w);
 		try {
@@ -467,12 +471,13 @@ export function commandResolvesToScript(command, target, root) {
 		const tok = toks[i];
 		if (tok.t === "o") {
 			const op = tok.v;
-			pendingClose = false;
 			if (op.includes("<") || op.includes(">")) {
 				// a redirection's target is the next word — operator runs
 				// may split (`<>` lexes as `<` then `>`), so skip any
 				// stray operators before it. A `(` there is process
-				// substitution: unmodelled, refused outright.
+				// substitution: unmodelled, refused outright. A redirect
+				// does not clear pendingClose — the word after it still
+				// completes a command substitution.
 				i++;
 				while (i < toks.length && toks[i].t === "o") {
 					if (toks[i].v === "(") return false;
@@ -481,6 +486,7 @@ export function commandResolvesToScript(command, target, root) {
 				i++;
 				continue;
 			}
+			pendingClose = false;
 			envChain = false; // a new simple command begins
 			lastWrapper = null;
 			headWord = null;
@@ -504,7 +510,7 @@ export function commandResolvesToScript(command, target, root) {
 				let k = i + 1;
 				while (k < toks.length && toks[k].t === "o" && toks[k].v === "\n") k++;
 				if (toks[k]?.t === "o" && toks[k].v === "(") return false;
-			} else if (op === "|" || op === "|&") {
+			} else if (isPipe(op)) {
 				// pipeline members share the pipeline's reachability —
 				// a guarded pipeline guards every member
 				awaiting = false;
@@ -521,9 +527,10 @@ export function commandResolvesToScript(command, target, root) {
 		const wordIdx = i;
 		const w = tok.v;
 		i++;
-		// A word directly after `)` completes a command substitution or
-		// process substitution (`$(pwd)/x`, `>(…) x`) — expansion output
-		// the audit cannot model. Refused outright.
+		// A word directly after `)` — redirections between included, they
+		// do not clear the pending close — completes a command
+		// substitution or process substitution (`$(pwd)/x`, `>(…) x`):
+		// expansion output the audit cannot model. Refused.
 		if (pendingClose) return false;
 		awaiting = false;
 		// A guarded segment's program word attests only when its execution

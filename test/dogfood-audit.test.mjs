@@ -599,11 +599,19 @@ test("commandResolvesToScript attests execution positions only", (t) => {
 		`<(echo ${target}) x || true`,
 		`>(echo ${target}) x || true`,
 		// a word directly after ) completes a command substitution — its
-		// output is the real command word, and the audited path is argv
+		// output is the real command word, and the audited path is argv;
+		// a redirection in between does not clear the close
 		`$(echo true) python3 skills/literature-review/scripts/search.py`,
+		`$(echo true) > /dev/null python3 skills/literature-review/scripts/search.py`,
+		`$((1)) > /dev/null python3 skills/literature-review/scripts/search.py || true`,
 		`env $(echo true) python3 skills/literature-review/scripts/search.py`,
 		// |& is a pipe variant: a skipped || operand runs no member
 		"true || x |& python3 skills/literature-review/scripts/search.py",
+		// a pipelined cd via |& is still subshell-confined
+		"cd skills/literature-review |& python3 scripts/search.py || true",
+		"cat f |& FOO=bar cd skills/literature-review; python3 scripts/search.py || true",
+		// a trailing slash cannot open a file
+		`python3 ${target}/ || true`,
 		// a spaced `<< --` delimiter is the literal word `--`; only a
 		// dash attached to the operator makes the <<- tab-stripping form
 		"cat << --\n-\npython3 skills/literature-review/scripts/search.py\n--\ntrue",
