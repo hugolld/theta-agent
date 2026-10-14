@@ -319,6 +319,35 @@ const COMPOUND = new Set([
 	"for", "in", "case", "esac", "select", "function", "{", "}", "!",
 ]);
 
+// True when the simple command at cdIdx (whose last consumed word ends
+// just before `after`) is backgrounded with `&` or sits in a pipeline —
+// both run it in a subshell, so a cd there never moves the parent cwd.
+// Redirections between the command and the `&` are stepped over.
+function subshellConfined(toks, cdIdx, after) {
+	const isBoundary = (v) =>
+		v === ";" || v === "\n" || v === "&" || v === "&&" || v === "||" ||
+		v === "(" || v === ")";
+	const isRedirect = (v) => v.includes("<") || v.includes(">");
+	let k = after;
+	while (k < toks.length && toks[k].t === "o") {
+		const v = toks[k].v;
+		if (isRedirect(v)) {
+			k++;
+			while (k < toks.length && toks[k].t === "o") k++;
+			k++; // the redirection's target word
+			continue;
+		}
+		if (v === "|" || v === "&") return true;
+		break; // any other operator ends the simple command
+	}
+	for (let b = cdIdx - 1; b >= 0 && toks[b].t === "o"; b--) {
+		const v = toks[b].v;
+		if (v === "|") return true;
+		if (isBoundary(v)) return false;
+	}
+	return false;
+}
+
 // True when the command EXECUTES the target script: a word in program
 // position — the command word itself, or the program word after an
 // interpreter or wrapper chain — resolves canonically to exactly the
@@ -403,6 +432,7 @@ export function commandResolvesToScript(command, target, root) {
 				i++;
 				continue;
 			}
+			envChain = false; // a new simple command begins
 			if (op === "&&") {
 				guard = "and";
 				awaiting = true;
@@ -453,7 +483,7 @@ export function commandResolvesToScript(command, target, root) {
 				continue;
 			}
 			if (isInterpreter(w) || WRAPPERS.has(w)) {
-				if (w === "env") envChain = true;
+				envChain = w === "env"; // only env itself consumes pairs
 				continue; // env python3 x.py
 			}
 			phase = "args";
@@ -469,19 +499,19 @@ export function commandResolvesToScript(command, target, root) {
 			// the cd provably ran and succeeded in the parent shell:
 			// open and foreground, or `&&`-guarded in a chain that
 			// reaches the command's end (the caller's non-error result
-			// gate then proves every chained segment exited 0). A
-			// backgrounded cd moves only its subshell — the anchor stays
-			// exactly. Any other cd — `||`-guarded, decoupled by a later
-			// separator, CDPATH-shadowed, expansion-sourced, bare, or
-			// resolving to nothing on disk now — leaves the shell
-			// somewhere the audit cannot know, and later relative words
-			// can no longer attest.
+			// gate then proves every chained segment exited 0). A cd
+			// backgrounded with `&` or anywhere in a pipeline runs in a
+			// subshell — the parent anchor stays exactly. Any other cd —
+			// `||`-guarded, decoupled by a later separator,
+			// CDPATH-shadowed, expansion-sourced, bare, or resolving to
+			// nothing on disk now — leaves the shell somewhere the audit
+			// cannot know, and later relative words can no longer attest.
 			const dir = toks[i]?.t === "w" ? toks[i].v : null;
-			const backgrounded = toks[i + 1]?.t === "o" && toks[i + 1].v === "&";
 			if (dir === null) {
 				cwd = null; // bare cd goes HOME; bare pushd swaps
 			} else {
 				i++;
+				const subshellCd = subshellConfined(toks, wordIdx, i);
 				const cdpathShadowed =
 					cdpathAt !== -1 &&
 					cdpathAt < wordIdx &&
@@ -501,7 +531,7 @@ export function commandResolvesToScript(command, target, root) {
 						// unresolvable now: it may have existed at run time
 					}
 				}
-				if (!backgrounded) {
+				if (!subshellCd) {
 					cwd = real !== null && provable && !cdpathShadowed ? real : null;
 				}
 			}

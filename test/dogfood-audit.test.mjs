@@ -480,6 +480,8 @@ test("commandResolvesToScript attests execution positions only", (t) => {
 		// a provably-run && chain may carry the cd (non-error overall
 		// result proves every chained segment ran and exited 0)
 		"git status && cd skills/literature-review && python3 scripts/search.py",
+		// the cd is not in the pipeline — only the script invocation is
+		"cd skills/literature-review && python3 scripts/search.py | tee out.txt",
 		"skills/literature-review/scripts/search.py --query x",
 		"timeout 30 python3 skills/literature-review/scripts/search.py",
 		"env NCBI_API_KEY=k python3 skills/literature-review/scripts/search.py",
@@ -544,8 +546,14 @@ test("commandResolvesToScript attests execution positions only", (t) => {
 		"python3 -u skills/literature-review/scripts/search.py",
 		// a subshell's cd dies with it — the parent anchor governs after )
 		"(cd skills/literature-review); python3 scripts/search.py",
-		// a backgrounded cd moves only its subshell; the parent anchor holds
+		// a backgrounded or pipelined cd moves only its subshell
 		"cd skills/literature-review & python3 scripts/search.py",
+		"cd skills/literature-review > /dev/null & python3 scripts/search.py",
+		"cd skills/literature-review | cat; python3 scripts/search.py",
+		"cat f | cd skills/literature-review; python3 scripts/search.py",
+		// the env-pair exception dies at the chained interpreter: X=1 is
+		// python3's script operand, and the target is argv
+		"env python3 X=1 skills/literature-review/scripts/search.py",
 		// a CDPATH assignment shadows later bare-relative cds
 		"export CDPATH=/shadow; cd literature-review && python3 scripts/search.py",
 		"CDPATH=/shadow cd literature-review && python3 scripts/search.py",
