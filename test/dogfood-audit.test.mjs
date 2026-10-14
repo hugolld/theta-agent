@@ -675,6 +675,15 @@ test("commandResolvesToScript attests execution positions only", (t) => {
 		"exit 0; python3 skills/literature-review/scripts/search.py",
 		"exit 0 && python3 skills/literature-review/scripts/search.py",
 		"exec echo hi; python3 skills/literature-review/scripts/search.py",
+		// a DEBUG/ERR trap can exit before the command runs
+		"trap 'exit 0' DEBUG; python3 skills/literature-review/scripts/search.py",
+		// noexec parses without executing anything
+		"set -n; python3 skills/literature-review/scripts/search.py",
+		"set -o noexec; python3 skills/literature-review/scripts/search.py",
+		"set -en\npython3 skills/literature-review/scripts/search.py",
+		// bare exec >&- and the fd-move form close fds for the whole shell
+		"exec >&-; python3 skills/literature-review/scripts/search.py 2>&1; true",
+		"exec 2>&1-; python3 skills/literature-review/scripts/search.py 2>&1; true",
 		// a spaced `<< --` delimiter is the literal word `--`; only a
 		// dash attached to the operator makes the <<- tab-stripping form
 		"cat << --\n-\npython3 skills/literature-review/scripts/search.py\n--\ntrue",

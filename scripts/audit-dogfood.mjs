@@ -256,7 +256,8 @@ function shellLex(command) {
 					two === "|&" ||
 					two === "<<" ||
 					two === ">>" ||
-					two === "&>"
+					two === "&>" ||
+					two === ">&"
 				) {
 					op = two;
 				}
@@ -609,10 +610,11 @@ export function commandResolvesToScript(command, target, root) {
 					headWord === "exec" &&
 					(op === ">&" || /^\d*>&$/.test(op)) &&
 					toks[i]?.t === "w" &&
-					toks[i].v === "-"
+					(toks[i].v === "-" || /^\d+-$/.test(toks[i].v))
 				) {
-					// exec with a redirect-only list closes the fd for the
-					// whole shell — a later segment's dup would abort it
+					// exec with a redirect-only list closes (or moves, the
+					// N- form) the fd for the whole shell — a later
+					// segment's dup would abort it
 					return false;
 				}
 				i++;
@@ -725,8 +727,17 @@ export function commandResolvesToScript(command, target, root) {
 			continue;
 		}
 		if (COMPOUND.has(w)) return false; // control flow is refused outright
-		// exit ends the shell: no later segment runs
-		if (w === "exit") return false;
+		// exit ends the shell: no later segment runs; trap can arrange the
+		// same (a DEBUG/ERR handler exiting before the command)
+		if (w === "exit" || w === "trap") return false;
+		if (w === "set") {
+			// noexec parses without executing anything
+			for (let s = i; s < toks.length && toks[s].t === "w"; s++) {
+				if (/^-+[^-]*n/.test(toks[s].v) || toks[s].v === "noexec") {
+					return false;
+				}
+			}
+		}
 		if (WRAPPERS.has(w)) {
 			lastWrapper = w;
 			headWord ??= w; // for exec-with-closes detection
