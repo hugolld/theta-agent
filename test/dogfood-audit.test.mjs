@@ -487,6 +487,8 @@ test("commandResolvesToScript attests execution positions only", (t) => {
 		"git status && cd skills/literature-review && python3 scripts/search.py",
 		// the cd is not in the pipeline — only the script invocation is
 		"cd skills/literature-review && python3 scripts/search.py | tee out.txt",
+		// a command/builtin prefix passes the real program through
+		"command python3 skills/literature-review/scripts/search.py",
 		// a file redirect reopens a closed fd before the dup reads it
 		"1>&- > log.txt 2>&1 python3 skills/literature-review/scripts/search.py",
 		// exec'ing the script itself replaces the shell with it
@@ -693,6 +695,18 @@ test("commandResolvesToScript attests execution positions only", (t) => {
 		"exec python3 -c 'print(1)'; python3 skills/literature-review/scripts/search.py",
 		"exec bash -c 'echo hi'; python3 skills/literature-review/scripts/search.py",
 		"exec python3; python3 skills/literature-review/scripts/search.py",
+		// command/builtin prefixes re-enter the same checks
+		"command trap 'exit 0' DEBUG; python3 skills/literature-review/scripts/search.py",
+		"command exit 0; python3 skills/literature-review/scripts/search.py",
+		"command set -n; python3 skills/literature-review/scripts/search.py",
+		// noclobber makes ordinary > redirections fail on existing files
+		"set -C; python3 skills/literature-review/scripts/search.py",
+		// glob-shaped redirect targets are ambiguous when they multi-match
+		`python3 ${target} > /tmp/*.log ; echo ok`,
+		// a fd-prefixed dup with a file word is an ambiguous redirect
+		`python3 ${target} 2>&out.txt ; echo ok`,
+		// exec'ing a special builtin ends the shell
+		"exec cd skills/literature-review; python3 scripts/search.py",
 		// a spaced `<< --` delimiter is the literal word `--`; only a
 		// dash attached to the operator makes the <<- tab-stripping form
 		"cat << --\n-\npython3 skills/literature-review/scripts/search.py\n--\ntrue",

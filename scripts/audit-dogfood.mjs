@@ -186,6 +186,7 @@ function shellLex(command) {
 	while (i < command.length) {
 		const ch = command[i];
 		if (ch === "\n") {
+			expectDelim = null; // an unterminated << is invalid shell
 			if (heredocs.length > 0) {
 				i++;
 				for (const h of heredocs) {
@@ -262,9 +263,9 @@ function shellLex(command) {
 					op = two;
 				}
 				toks.push({ t: "o", v: op });
-				// a heredoc expects its delimiter next; a herestring does not
-				if (op === "<<") expectDelim = "<<";
-				else if (op === "<<<") expectDelim = null;
+				// a heredoc expects its delimiter next; every other
+				// operator ends that expectation
+				expectDelim = op === "<<" ? "<<" : null;
 				k += op.length;
 			}
 			// a dash attached to `<<` is the <<- operator, not the start
@@ -346,6 +347,7 @@ export function shellTokens(command) {
 const INTERPRETERS = new Set(["python3", "python", "bash", "sh", "zsh", "env", "uv"]);
 const WRAPPERS = new Set([
 	"timeout", "nohup", "nice", "stdbuf", "watch", "sudo", "time", "exec",
+	"command", "builtin",
 ]);
 const isInterpreter = (w) => INTERPRETERS.has(w) || /^python\d+(\.\d+)?$/.test(w);
 
@@ -415,6 +417,10 @@ export function commandResolvesToScript(command, target, root) {
 	// no longer attest.
 	let cwd = root;
 	const resolvesTo = (w, direct = false) => {
+		// expansion-shaped spellings ($X, ~x, `x`) expand to something
+		// else in the real shell — a same-named literal file proves
+		// nothing, so they never qualify
+		if (/[$`]/.test(w) || w.startsWith("~")) return false;
 		// open("file/") and open("file/.") fail — realpath would collapse
 		// both onto the file, so reject the spellings first
 		if (w === "" || /\/(\.|\.\.)?$/.test(w)) return false;
@@ -485,8 +491,16 @@ export function commandResolvesToScript(command, target, root) {
 				let m = k + 1;
 				while (m < toks.length && toks[m].t === "o") m++;
 				const target = toks[m]?.t === "w" ? toks[m].v : undefined;
-				// invalid or expansion-shaped targets cannot be judged
-				if (target === undefined || target === "" || /[$`]/.test(target)) {
+				// invalid, expansion-shaped, or glob-shaped targets cannot
+				// be judged (a multi-match glob is an ambiguous redirect)
+				if (
+					target === undefined ||
+					target === "" ||
+					/[$`]/.test(target) ||
+					target.includes("*") ||
+					target.includes("?") ||
+					target.includes("[")
+				) {
 					return true;
 				}
 				// Only `>&digit` / `>&-` duplicate or close an fd (only
@@ -504,6 +518,10 @@ export function commandResolvesToScript(command, target, root) {
 					k = m + 1;
 					continue;
 				}
+				// a fd-prefixed dup takes an fd operand only — a file word
+				// is bash's ambiguous redirect (the bare >&file form is a
+				// both-streams file redirect and falls through)
+				if (/^\d*>&$/.test(t.v)) return true;
 				const p =
 					cwd === null
 						? (path.isAbsolute(target) ? target : null)
@@ -739,9 +757,14 @@ export function commandResolvesToScript(command, target, root) {
 		// with a subshell, so depth 0 only.
 		if (frames.length === 0 && (w === "exit" || w === "trap")) return false;
 		if (w === "set") {
-			// noexec parses without executing anything
+			// noexec parses without executing anything; noclobber makes
+			// ordinary > redirections fail on existing files
 			for (let s = i; s < toks.length && toks[s].t === "w"; s++) {
-				if (/^-+[^-]*n/.test(toks[s].v) || toks[s].v === "noexec") {
+				if (
+					/^-+[^-]*[nC]/.test(toks[s].v) ||
+					toks[s].v === "noexec" ||
+					toks[s].v === "noclobber"
+				) {
 					return false;
 				}
 			}
@@ -753,6 +776,8 @@ export function commandResolvesToScript(command, target, root) {
 			continue;
 		}
 		if (w === "cd" || w === "pushd") {
+			// exec'ing a special builtin ends the shell too
+			if (execHeaded) return false;
 			// Consume the directory argument, past cd's own flags (-L,
 			// -P, …) and `--`. The anchor moves only when the cd provably
 			// ran and succeeded in the parent shell: open and foreground,
