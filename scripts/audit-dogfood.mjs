@@ -729,8 +729,14 @@ export function commandResolvesToScript(command, target, root) {
 			// cannot know, and later relative words can no longer attest.
 			let d = i;
 			let dry = false; // pushd -n never changes the directory
+			let badFlag = false; // bash rejects unknown cd/pushd options
 			while (toks[d]?.t === "w" && /^-/.test(toks[d].v) && toks[d].v !== "--") {
-				if (w === "pushd" && toks[d].v === "-n") dry = true;
+				const flag = toks[d].v;
+				const known =
+					(w === "cd" && (flag === "-L" || flag === "-P")) ||
+					(w === "pushd" && (flag === "-n" || /^[+-]\d+$/.test(flag)));
+				if (w === "pushd" && flag === "-n") dry = true;
+				if (!known) badFlag = true;
 				d++;
 			}
 			if (toks[d]?.t === "w" && toks[d].v === "--") d++;
@@ -761,10 +767,15 @@ export function commandResolvesToScript(command, target, root) {
 					}
 				}
 				if (!subshellCd && !dry) {
-					// a cd whose redirection may have failed, or that never
-					// provably ran, loses the anchor
+					// a cd whose redirection may have failed, whose options
+					// bash would reject, or that never provably ran loses
+					// the anchor
 					cwd =
-						real !== null && provable && !cdpathShadowed && !redirectUnsafe(segStart)
+						real !== null &&
+						provable &&
+						!cdpathShadowed &&
+						!badFlag &&
+						!redirectUnsafe(segStart)
 							? real
 							: null;
 				}

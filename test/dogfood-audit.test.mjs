@@ -658,6 +658,9 @@ test("commandResolvesToScript attests execution positions only", (t) => {
 		`(python3 ${target}) > /no/such/dir/f ; echo ok`,
 		// pushd -n never changes the directory
 		"pushd -n skills/literature-review ; python3 scripts/search.py",
+		// bash rejects unknown cd/pushd options — the cd never ran
+		"cd -Q skills/literature-review; python3 scripts/search.py; echo ok",
+		"pushd -Q skills/literature-review; python3 scripts/search.py; echo ok",
 		// a spaced `<< --` delimiter is the literal word `--`; only a
 		// dash attached to the operator makes the <<- tab-stripping form
 		"cat << --\n-\npython3 skills/literature-review/scripts/search.py\n--\ntrue",
