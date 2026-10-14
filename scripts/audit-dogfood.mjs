@@ -581,6 +581,7 @@ export function commandResolvesToScript(command, target, root) {
 	let headWord = null; // the word that opened the program phase
 	let timeoutNum = false; // timeout's one duration operand is consumed
 	let pendingClose = false; // the last operator was a closing paren
+	let execHeaded = false; // this segment's head is exec
 	let segStart = 0; // token index where the current segment began
 	const frames = []; // cwd and guard at each open subshell
 	let i = 0;
@@ -622,6 +623,7 @@ export function commandResolvesToScript(command, target, root) {
 			lastWrapper = null;
 			headWord = null;
 			timeoutNum = false;
+			execHeaded = false;
 			if (op === "&&") {
 				guard = "and";
 				awaiting = true;
@@ -700,6 +702,9 @@ export function commandResolvesToScript(command, target, root) {
 			}
 			phase = "args";
 			if (provable && !redirectUnsafe(segStart) && resolvesTo(w)) return true;
+			// exec replaces the shell: an unresolved program word means
+			// every later segment is phantom
+			if (execHeaded) return false;
 			continue;
 		}
 		// prefix phase: this word is the command word
@@ -720,9 +725,12 @@ export function commandResolvesToScript(command, target, root) {
 			continue;
 		}
 		if (COMPOUND.has(w)) return false; // control flow is refused outright
+		// exit ends the shell: no later segment runs
+		if (w === "exit") return false;
 		if (WRAPPERS.has(w)) {
 			lastWrapper = w;
 			headWord ??= w; // for exec-with-closes detection
+			if (w === "exec") execHeaded = true;
 			continue;
 		}
 		if (w === "cd" || w === "pushd") {
@@ -803,6 +811,10 @@ export function commandResolvesToScript(command, target, root) {
 		envChain = w === "env";
 		headWord = w;
 		if (provable && !redirectUnsafe(segStart) && resolvesTo(w, true)) return true;
+		// exec replaces the shell: an unresolved program word means every
+		// later segment is phantom — unless the word opens a program phase
+		// whose operand may still resolve
+		if (execHeaded && !isInterpreter(w)) return false;
 	}
 	return false;
 }

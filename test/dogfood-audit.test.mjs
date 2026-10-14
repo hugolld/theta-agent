@@ -489,6 +489,10 @@ test("commandResolvesToScript attests execution positions only", (t) => {
 		"cd skills/literature-review && python3 scripts/search.py | tee out.txt",
 		// a file redirect reopens a closed fd before the dup reads it
 		"1>&- > log.txt 2>&1 python3 skills/literature-review/scripts/search.py",
+		// exec'ing the script itself replaces the shell with it
+		"exec python3 skills/literature-review/scripts/search.py",
+		// an attestation before the exit still stands — the script ran
+		"python3 skills/literature-review/scripts/search.py; exit 0",
 		"skills/literature-review/scripts/search.py --query x",
 		"timeout 30 python3 skills/literature-review/scripts/search.py",
 		"env NCBI_API_KEY=k python3 skills/literature-review/scripts/search.py",
@@ -667,6 +671,10 @@ test("commandResolvesToScript attests execution positions only", (t) => {
 		// exec with a redirect-only list closes fds for the whole shell —
 		// a later segment's dup aborts the command
 		"exec 1>&-; python3 skills/literature-review/scripts/search.py 2>&1; true",
+		// exit and exec end the shell: no later segment runs
+		"exit 0; python3 skills/literature-review/scripts/search.py",
+		"exit 0 && python3 skills/literature-review/scripts/search.py",
+		"exec echo hi; python3 skills/literature-review/scripts/search.py",
 		// a spaced `<< --` delimiter is the literal word `--`; only a
 		// dash attached to the operator makes the <<- tab-stripping form
 		"cat << --\n-\npython3 skills/literature-review/scripts/search.py\n--\ntrue",
