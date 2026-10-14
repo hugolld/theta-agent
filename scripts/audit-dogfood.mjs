@@ -242,7 +242,7 @@ function shellLex(command) {
 			const run = command.slice(i, j);
 			i = j;
 			// emit canonical operators, splitting runs: `);` is two
-			// operators, while &&, ||, <<, >>, <<<, &>, &>> stay whole
+			// operators, while &&, ||, |&, <<, >>, <<<, &>, &>> stay whole
 			for (let k = 0; k < run.length; ) {
 				const three = run.slice(k, k + 3);
 				const two = run.slice(k, k + 2);
@@ -251,6 +251,7 @@ function shellLex(command) {
 				else if (
 					two === "&&" ||
 					two === "||" ||
+					two === "|&" ||
 					two === "<<" ||
 					two === ">>" ||
 					two === "&>"
@@ -459,12 +460,14 @@ export function commandResolvesToScript(command, target, root) {
 	let lastWrapper = null; // the wrapper whose args are being consumed
 	let headWord = null; // the word that opened the program phase
 	let timeoutNum = false; // timeout's one duration operand is consumed
+	let pendingClose = false; // the last operator was a closing paren
 	const anchors = []; // the cwd at each open subshell
 	let i = 0;
 	while (i < toks.length) {
 		const tok = toks[i];
 		if (tok.t === "o") {
 			const op = tok.v;
+			pendingClose = false;
 			if (op.includes("<") || op.includes(">")) {
 				// a redirection's target is the next word — operator runs
 				// may split (`<>` lexes as `<` then `>`), so skip any
@@ -493,6 +496,7 @@ export function commandResolvesToScript(command, target, root) {
 			} else if (op === ")") {
 				cwd = anchors.pop() ?? cwd; // …and its cd dies with it
 				awaiting = false;
+				pendingClose = true;
 				// the guard persists: a subshell late in a pipeline may
 				// still be a guarded &&/|| operand
 				// `) (` adjacency (newlines aside) is a function
@@ -500,7 +504,7 @@ export function commandResolvesToScript(command, target, root) {
 				let k = i + 1;
 				while (k < toks.length && toks[k].t === "o" && toks[k].v === "\n") k++;
 				if (toks[k]?.t === "o" && toks[k].v === "(") return false;
-			} else if (op === "|") {
+			} else if (op === "|" || op === "|&") {
 				// pipeline members share the pipeline's reachability —
 				// a guarded pipeline guards every member
 				awaiting = false;
@@ -517,6 +521,10 @@ export function commandResolvesToScript(command, target, root) {
 		const wordIdx = i;
 		const w = tok.v;
 		i++;
+		// A word directly after `)` completes a command substitution or
+		// process substitution (`$(pwd)/x`, `>(…) x`) — expansion output
+		// the audit cannot model. Refused outright.
+		if (pendingClose) return false;
 		awaiting = false;
 		// A guarded segment's program word attests only when its execution
 		// is provable: open segments always run; an `&&`-guarded one only

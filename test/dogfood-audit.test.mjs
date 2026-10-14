@@ -598,6 +598,12 @@ test("commandResolvesToScript attests execution positions only", (t) => {
 		// process substitution is unmodelled and refused outright
 		`<(echo ${target}) x || true`,
 		`>(echo ${target}) x || true`,
+		// a word directly after ) completes a command substitution — its
+		// output is the real command word, and the audited path is argv
+		`$(echo true) python3 skills/literature-review/scripts/search.py`,
+		`env $(echo true) python3 skills/literature-review/scripts/search.py`,
+		// |& is a pipe variant: a skipped || operand runs no member
+		"true || x |& python3 skills/literature-review/scripts/search.py",
 		// a spaced `<< --` delimiter is the literal word `--`; only a
 		// dash attached to the operator makes the <<- tab-stripping form
 		"cat << --\n-\npython3 skills/literature-review/scripts/search.py\n--\ntrue",
