@@ -451,44 +451,92 @@ export function commandResolvesToScript(command, target, root) {
 		nextBreak[k] =
 			toks[k].t === "o" && breaksChain(toks[k].v) ? k : (nextBreak[k + 1] ?? -1);
 	}
-	// Bash opens a simple command's redirections BEFORE running it: a
-	// redirection that provably fails stops the command, and a rescuing
-	// tail (`; echo ok`) still exits 0. Taint every word of a segment
-	// whose redirection is provably failable — an absolute write target
-	// with no parent directory, an absolute read target that does not
-	// exist, or an empty/expansion-shaped target. Relative targets
-	// depend on the runtime cwd and stay untainted.
-	const tainted = new Array(toks.length).fill(false);
+	// Bash opens a simple command's redirections BEFORE running it: one
+	// that provably fails stops the command, and a rescuing tail
+	// (`; echo ok`) still exits 0. An attestation therefore requires
+	// every redirection from its word to the next separator to look
+	// runnable against the anchor current at that point. `)` does not
+	// stop the scan — a redirection after it applies to the whole
+	// parenthesized command.
 	const endsSegment = (v) =>
 		v === ";" || v === "\n" || v === "&" || v === "&&" || v === "||" ||
-		v === "(" || v === ")" || isPipe(v);
-	for (let k = 0; k < toks.length; k++) {
-		const t = toks[k];
-		if (
-			t.t !== "o" ||
-			!(t.v.includes("<") || t.v.includes(">")) ||
-			t.v.includes("<<")
-		) {
-			continue;
+		v === "(" || isPipe(v);
+	const redirectUnsafe = (fromIdx) => {
+		let k = fromIdx;
+		while (k < toks.length && !(toks[k].t === "o" && endsSegment(toks[k].v))) {
+			const t = toks[k];
+			if (
+				t.t === "o" &&
+				(t.v.includes("<") || t.v.includes(">")) &&
+				!t.v.includes("<<")
+			) {
+				let m = k + 1;
+				while (m < toks.length && toks[m].t === "o") m++;
+				const target = toks[m]?.t === "w" ? toks[m].v : undefined;
+				// invalid or expansion-shaped targets cannot be judged
+				if (target === undefined || target === "" || /[$`]/.test(target)) {
+					return true;
+				}
+				// fd closing always succeeds; duplication needs an open fd,
+				// and only 0-2 are guaranteed
+				if (target === "-") {
+					k = m + 1;
+					continue;
+				}
+				if (/^[0-9]+$/.test(target)) {
+					if (!/^[012]$/.test(target)) return true; // bad fd
+					k = m + 1;
+					continue;
+				}
+				const p =
+					cwd === null
+						? (path.isAbsolute(target) ? target : null)
+						: (path.isAbsolute(target) ? target : path.resolve(cwd, target));
+				if (p === null) return true; // anchor unknown
+				const writing = t.v.includes(">");
+				if (writing) {
+					let dir;
+					try {
+						dir = fs.realpathSync(path.dirname(p)); // ENOTDIR/ELOOP
+					} catch {
+						return true;
+					}
+					if (!fs.statSync(dir).isDirectory()) return true;
+					let st = null;
+					try {
+						st = fs.statSync(p);
+					} catch (e) {
+						if (e.code !== "ENOENT") return true; // ELOOP, EACCES…
+					}
+					try {
+						// an existing target must be a writable file; a new
+						// one needs a writable directory to be created in
+						fs.accessSync(st !== null ? p : dir, fs.constants.W_OK);
+					} catch {
+						return true;
+					}
+					if (st?.isDirectory()) return true; // EISDIR
+				} else {
+					let real;
+					try {
+						real = fs.realpathSync(p); // ENOENT/ELOOP/ENOTDIR
+					} catch {
+						return true;
+					}
+					if (fs.statSync(real).isDirectory()) return true; // EISDIR
+					try {
+						fs.accessSync(real, fs.constants.R_OK);
+					} catch {
+						return true;
+					}
+				}
+				k = m + 1;
+				continue;
+			}
+			k++;
 		}
-		let m = k + 1;
-		while (m < toks.length && toks[m].t === "o") m++;
-		const target = toks[m]?.t === "w" ? toks[m].v : undefined;
-		const unsafe =
-			target === undefined ||
-			target === "" ||
-			/[$`]/.test(target) ||
-			(path.isAbsolute(target) &&
-				(t.v.includes(">")
-					? !fs.existsSync(path.dirname(target))
-					: !fs.existsSync(target)));
-		if (!unsafe) continue;
-		let s = k;
-		while (s >= 0 && !(toks[s].t === "o" && endsSegment(toks[s].v))) s--;
-		let e = k;
-		while (e < toks.length && !(toks[e].t === "o" && endsSegment(toks[e].v))) e++;
-		for (let j = s + 1; j < e; j++) tainted[j] = true;
-	}
+		return false;
+	};
 	// Program-position state, per simple command (restarted at every
 	// operator): "prefix" = still consuming wrappers, flags, and
 	// assignments; "program" = the next word is the executed program;
@@ -505,6 +553,7 @@ export function commandResolvesToScript(command, target, root) {
 	let headWord = null; // the word that opened the program phase
 	let timeoutNum = false; // timeout's one duration operand is consumed
 	let pendingClose = false; // the last operator was a closing paren
+	let segStart = 0; // token index where the current segment began
 	const frames = []; // cwd and guard at each open subshell
 	let i = 0;
 	while (i < toks.length) {
@@ -570,6 +619,7 @@ export function commandResolvesToScript(command, target, root) {
 			}
 			phase = "prefix"; // every operator ends the simple command
 			i++;
+			segStart = i;
 			continue;
 		}
 		const wordIdx = i;
@@ -611,7 +661,7 @@ export function commandResolvesToScript(command, target, root) {
 				}
 			}
 			phase = "args";
-			if (provable && !tainted[wordIdx] && resolvesTo(w)) return true;
+			if (provable && !redirectUnsafe(segStart) && resolvesTo(w)) return true;
 			continue;
 		}
 		// prefix phase: this word is the command word
@@ -644,13 +694,17 @@ export function commandResolvesToScript(command, target, root) {
 			// (the caller's non-error result gate then proves every
 			// chained segment exited 0). A cd backgrounded with `&` or
 			// anywhere in a pipeline runs in a subshell — the parent
-			// anchor stays exactly. Any other cd — `||`-guarded, decoupled
-			// by a later separator, CDPATH-shadowed, expansion-sourced,
-			// bare, or resolving to nothing on disk now — leaves the
-			// shell somewhere the audit cannot know, and later relative
-			// words can no longer attest.
+			// anchor stays exactly — and `pushd -n` is a dry run. Any
+			// other cd — `||`-guarded, decoupled by a later separator,
+			// CDPATH-shadowed, expansion-sourced, bare, or resolving to
+			// nothing on disk now — leaves the shell somewhere the audit
+			// cannot know, and later relative words can no longer attest.
 			let d = i;
-			while (toks[d]?.t === "w" && /^-/.test(toks[d].v) && toks[d].v !== "--") d++;
+			let dry = false; // pushd -n never changes the directory
+			while (toks[d]?.t === "w" && /^-/.test(toks[d].v) && toks[d].v !== "--") {
+				if (w === "pushd" && toks[d].v === "-n") dry = true;
+				d++;
+			}
 			if (toks[d]?.t === "w" && toks[d].v === "--") d++;
 			const dir = toks[d]?.t === "w" ? toks[d].v : null;
 			if (dir === null) {
@@ -678,10 +732,11 @@ export function commandResolvesToScript(command, target, root) {
 						// unresolvable now: it may have existed at run time
 					}
 				}
-				if (!subshellCd) {
-					// a tainted cd may never have run — the anchor is lost
+				if (!subshellCd && !dry) {
+					// a cd whose redirection may have failed, or that never
+					// provably ran, loses the anchor
 					cwd =
-						real !== null && provable && !cdpathShadowed && !tainted[wordIdx]
+						real !== null && provable && !cdpathShadowed && !redirectUnsafe(segStart)
 							? real
 							: null;
 				}
@@ -697,7 +752,7 @@ export function commandResolvesToScript(command, target, root) {
 		phase = isInterpreter(w) ? "program" : "args";
 		envChain = w === "env";
 		headWord = w;
-		if (provable && !tainted[wordIdx] && resolvesTo(w)) return true;
+		if (provable && !redirectUnsafe(segStart) && resolvesTo(w)) return true;
 	}
 	return false;
 }

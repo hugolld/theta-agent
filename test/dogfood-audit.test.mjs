@@ -625,6 +625,21 @@ test("commandResolvesToScript attests execution positions only", (t) => {
 		`python3 ${target} > /no/such/dir/f ; echo ok`,
 		`python3 ${target} > /no/such/dir/f || echo ok`,
 		`python3 ${target} > '' ; echo ok`,
+		// directory targets fail with EISDIR, file-as-parent with ENOTDIR,
+		// and unwritable paths with EPERM
+		`python3 ${target} > /tmp ; echo ok`,
+		`python3 ${target} < /tmp ; echo ok`,
+		`python3 ${target} > /etc/hosts/f ; echo ok`,
+		`python3 ${target} > /etc/hosts ; echo ok`,
+		// relative targets resolve against the pinned session cwd
+		"python3 skills/literature-review/scripts/search.py > out/nope.txt ; echo ok",
+		"python3 skills/literature-review/scripts/search.py < noinput.txt ; echo ok",
+		// fd duplication beyond 0-2 is a bad file descriptor
+		`python3 ${target} 2>&9 ; echo ok`,
+		// a redirection after ) applies to the whole parenthesized command
+		`(python3 ${target}) > /no/such/dir/f ; echo ok`,
+		// pushd -n never changes the directory
+		"pushd -n skills/literature-review ; python3 scripts/search.py",
 		// a spaced `<< --` delimiter is the literal word `--`; only a
 		// dash attached to the operator makes the <<- tab-stripping form
 		"cat << --\n-\npython3 skills/literature-review/scripts/search.py\n--\ntrue",
