@@ -403,6 +403,21 @@ function collectToolGraph(recs) {
 	return { calls, callOrder, results };
 }
 
+// The id-paired calls of one tool, recorded after the prompt — the shared
+// shape of both spot-check attestations. isError is left to the caller:
+// the read attestation accepts only non-error results, while the script
+// attestation also reports a resolved-but-errored run distinctly.
+function pairedCalls(tool, graph, userIndex) {
+	const out = [];
+	for (const t of graph.calls) {
+		const r = graph.results.get(t.id)?.message;
+		if (t.name !== tool || !r || r.toolName !== tool) continue;
+		if (graph.callOrder.get(t.id) <= userIndex) continue;
+		out.push({ call: t, result: r });
+	}
+	return out;
+}
+
 // Audits one dogfood session directory against the checkout at the current
 // HEAD and returns the attestation. Throws on any failure; `skill` (a
 // checkout-relative SKILL.md path) additionally requires a successful read
@@ -786,9 +801,9 @@ export function auditSession(dir, rootArg, skill, script) {
 		const normalize = (s) =>
 			s.toLowerCase().normalize("NFKC").replace(/[^a-z0-9]/g, "");
 		const promptNorm = normalize(promptWanted);
-		const namesPrompt = (variants) =>
+		const promptNamesAny = (variants) =>
 			variants.some((v) => v && promptNorm.includes(v));
-		const { calls, callOrder, results } = collectToolGraph(recs);
+		const graph = collectToolGraph(recs);
 		if (skill !== undefined) {
 			const target = resolveAdvertisedSkill(root, skill, expected);
 			// The skill bytes are read exactly once: the paired read result must
@@ -802,7 +817,7 @@ export function auditSession(dir, rootArg, skill, script) {
 			// string.
 			const skillName = path.basename(path.dirname(target));
 			if (
-				namesPrompt([
+				promptNamesAny([
 					normalize(skillName),
 					normalize(path.basename(target)),
 					normalize(target),
@@ -821,21 +836,8 @@ export function auditSession(dir, rootArg, skill, script) {
 			// file can satisfy the check no matter what arguments were passed.
 			// The read must also occur after the recorded prompt: a read spliced
 			// before the user record was not caused by it.
-			const hit = calls.some((t) => {
-				const paired = results.get(t.id);
-				const r = paired?.message;
-				if (
-					!(
-						t.name === "read" &&
-						r &&
-						r.toolName === "read" &&
-						r.isError === false &&
-						t.arguments?.path
-					)
-				) {
-					return false;
-				}
-				if (callOrder.get(t.id) <= userIndex) {
+			const hit = pairedCalls("read", graph, userIndex).some(({ call: t, result: r }) => {
+				if (!(r.isError === false && t.arguments?.path)) {
 					return false;
 				}
 				try {
@@ -866,7 +868,7 @@ export function auditSession(dir, rootArg, skill, script) {
 			// A routed prompt must not name the selected script or its path:
 			// the script is part of the skill's capability, and naming it is
 			// instruction, not routing.
-			if (namesPrompt([normalize(path.basename(target)), normalize(target)])) {
+			if (promptNamesAny([normalize(path.basename(target)), normalize(target)])) {
 				throw new Error(
 					"spot-check prompt names the selected script or its path — a routed task must reach it on its own",
 				);
@@ -879,21 +881,8 @@ export function auditSession(dir, rootArg, skill, script) {
 			// not attest.
 			let hit = false;
 			let sawErroredRun = false;
-			for (const t of calls) {
-				const r = results.get(t.id)?.message;
-				if (
-					!(
-						t.name === "bash" &&
-						typeof t.arguments?.command === "string" &&
-						r &&
-						r.toolName === "bash"
-					)
-				) {
-					continue;
-				}
-				if (callOrder.get(t.id) <= userIndex) {
-					continue;
-				}
+			for (const { call: t, result: r } of pairedCalls("bash", graph, userIndex)) {
+				if (typeof t.arguments?.command !== "string") continue;
 				if (!commandResolvesToScript(t.arguments.command, target, root)) {
 					continue;
 				}

@@ -480,6 +480,8 @@ test("commandResolvesToScript attests execution positions only", (t) => {
 		"skills/literature-review/scripts/search.py --query x",
 		"timeout 30 python3 skills/literature-review/scripts/search.py",
 		"env NCBI_API_KEY=k python3 skills/literature-review/scripts/search.py",
+		"time sudo watch python3 skills/literature-review/scripts/search.py",
+		"nohup nice -n 3 stdbuf -oL python3 skills/literature-review/scripts/search.py",
 		"set -e\npython3 skills/literature-review/scripts/search.py",
 		`python3 ${target} --query x 2>&1 | tee out.txt`,
 	];
