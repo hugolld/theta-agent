@@ -8,11 +8,14 @@
 
 ## Status
 
-**Very early development (0.0.2).** The architecture, skill-selection plan, and
-milestones are being designed in the open. M1 is built: the `theta` launcher plus
-the Tier-1 research-loop skill library — K-Dense skills vendored verbatim plus
-the self-authored `theta-research-loop` orchestrator (see [Vendored
-skills](#vendored-skills)). The milestones below continue from there.
+**Very early development (0.1.0).** The architecture, skill-selection plan, and
+milestones are being designed in the open. M1 and M2 are built: the `theta`
+launcher plus the Tier-1 research-loop skill library — K-Dense skills vendored
+verbatim plus the self-authored `theta-research-loop` orchestrator (see
+[Vendored skills](#vendored-skills)) — and the first connector skill,
+`theta-lit-search` (PubMed, arXiv, Semantic Scholar; connectors are skills per
+[ADR 0002](docs/adr/0002-connectors-are-skills-not-registered-tools.md)). The
+milestones below continue from there.
 
 ## What Theta will be
 
@@ -36,7 +39,7 @@ engine — macOS and Linux first, Windows later.
 ## Roadmap
 
 - [x] M1 — package skeleton, `theta` launcher (bin), Tier-1 research-loop skills
-- [ ] M2 — literature connectors (PubMed, arXiv, Semantic Scholar)
+- [x] M2 — literature connectors (PubMed, arXiv, Semantic Scholar)
 - [ ] M3 — research prompt + provenance entries
 - [ ] M4 — compute: Slurm MCP gateway + typed AlphaFold3 tool
 - [ ] M5 — safety gates + containerized execution
@@ -47,11 +50,11 @@ engine — macOS and Linux first, Windows later.
 ## Install
 
 ```sh
-pi install npm:theta-agent@0.0.2
+pi install npm:theta-agent@0.1.0
 ```
 
-Requires theta-agent ≥ 0.0.2 on the registry; earlier versions predate the
-launcher, and a version-pinned install fails loudly until 0.0.2 is
+Requires theta-agent ≥ 0.1.0 on the registry; earlier versions predate the
+connector skill, and a version-pinned install fails loudly until 0.1.0 is
 visible. If the registry is not there yet, run Theta from a checkout
 instead — see [Try it](#try-it).
 
@@ -73,12 +76,12 @@ from a checkout you can also name another directory with
 this way). Theta targets pi ≥ 0.99; if the launcher reports
 `pi not found`, install pi with the command above and retry.
 
-Once theta-agent ≥ 0.0.2 is on the registry (earlier versions predate
-the launcher — if the registry is not there yet, stay on the checkout
+Once theta-agent ≥ 0.1.0 is on the registry (earlier versions predate
+the connector skill — if the registry is not there yet, stay on the checkout
 path above), the installed form is:
 
 ```sh
-npm i -g theta-agent@0.0.2
+npm i -g theta-agent@0.1.0
 theta
 ```
 
