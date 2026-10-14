@@ -487,6 +487,8 @@ test("commandResolvesToScript attests execution positions only", (t) => {
 		"git status && cd skills/literature-review && python3 scripts/search.py",
 		// the cd is not in the pipeline — only the script invocation is
 		"cd skills/literature-review && python3 scripts/search.py | tee out.txt",
+		// a file redirect reopens a closed fd before the dup reads it
+		"1>&- > log.txt 2>&1 python3 skills/literature-review/scripts/search.py",
 		"skills/literature-review/scripts/search.py --query x",
 		"timeout 30 python3 skills/literature-review/scripts/search.py",
 		"env NCBI_API_KEY=k python3 skills/literature-review/scripts/search.py",
@@ -643,6 +645,10 @@ test("commandResolvesToScript attests execution positions only", (t) => {
 		`python3 ${target} 2>&9 ; echo ok`,
 		// a `-` or digit target is a filename unless the operator is >&
 		"python3 skills/literature-review/scripts/search.py < - ; echo ok",
+		// dup from an fd the same command closed is a bad descriptor —
+		// bash aborts the command before the program runs
+		"1>&- 2>&1 python3 skills/literature-review/scripts/search.py ; echo ok",
+		"2>&- 1>&2 python3 skills/literature-review/scripts/search.py ; echo ok",
 		// CR is a word character to bash — the \r stays in the filename
 		"python3 skills/literature-review/scripts/search.py\r; echo ok",
 		"python3 skills/literature-review/scripts/search.py\r\necho ok",

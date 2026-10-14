@@ -472,6 +472,7 @@ export function commandResolvesToScript(command, target, root) {
 		v === ";" || v === "\n" || v === "&" || v === "&&" || v === "||" ||
 		v === "(" || isPipe(v);
 	const redirectUnsafe = (fromIdx) => {
+		const closed = new Set(); // fds closed by N>&- in this scan
 		let k = fromIdx;
 		while (k < toks.length && !(toks[k].t === "o" && endsSegment(toks[k].v))) {
 			const t = toks[k];
@@ -487,16 +488,18 @@ export function commandResolvesToScript(command, target, root) {
 				if (target === undefined || target === "" || /[$`]/.test(target)) {
 					return true;
 				}
-				// Only `>&digit` / `>&-` duplicate or close an fd (always
-				// succeeds; only 0-2 are guaranteed open) — after every
-				// other spelling the word is an ordinary filename
+				// Only `>&digit` / `>&-` duplicate or close an fd (only
+				// 0-2 are guaranteed open; a closed source is a bad fd) —
+				// after every other spelling the word is a filename
 				const isDup = t.v === ">&" || /^\d*>&$/.test(t.v);
+				const fd = /^(\d+)/.exec(t.v)?.[1] ?? (t.v.includes(">") ? "1" : "0");
 				if (isDup && target === "-") {
+					closed.add(fd); // until a file redirect reopens it
 					k = m + 1;
 					continue;
 				}
 				if (isDup && /^[0-9]+$/.test(target)) {
-					if (!/^[012]$/.test(target)) return true; // bad fd
+					if (!/^[012]$/.test(target) || closed.has(target)) return true;
 					k = m + 1;
 					continue;
 				}
@@ -553,6 +556,8 @@ export function commandResolvesToScript(command, target, root) {
 						return true;
 					}
 				}
+				// a file redirect opens its fd, reopening a closed one
+				closed.delete(fd);
 				k = m + 1;
 				continue;
 			}
