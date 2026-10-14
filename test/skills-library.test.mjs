@@ -175,6 +175,81 @@ test("the orchestrator is self-authored and walks the six-stage loop", async () 
 	}
 });
 
+// The connector exit-code contract lives in three prose sites — the
+// theta-lit-search SKILL.md table (model-facing doctrine), each script's
+// module docstring (developer-facing), and docs/agents/connector-scripts.md
+// (repo conventions). Nothing structural keeps them agreeing; this test does.
+// The oracle below is the single source of truth: changing the contract means
+// changing it here deliberately, in the same commit as the sites.
+const EXIT_CODE_CONTRACT = [
+	[0, "success"],
+	[1, "usage"],
+	[2, "transport"],
+	[3, "api"],
+	[4, "throttled"],
+	[5, "credentials"],
+];
+
+test("the connector exit-code contract agrees across its three prose sites", async () => {
+	// SKILL.md's table carries the full contract: exact code set, and the
+	// first word of each meaning cell must be the code's keyword.
+	const { markdown } = await loadSkill("theta-lit-search");
+	const table = [...markdown.matchAll(/^\| (\d) \| ([A-Za-z-]+)/gm)].map(
+		(match) => [Number(match[1]), match[2].toLowerCase()],
+	);
+	assert.deepEqual(
+		table,
+		EXIT_CODE_CONTRACT,
+		"theta-lit-search: SKILL.md exit-code table drifted from the contract oracle",
+	);
+
+	// Each script's docstring repeats the codes it owns — a subset is fine
+	// (only Semantic Scholar owns the credentials code today), a different
+	// keyword for a shared code is not.
+	const docstring = (script) =>
+		readFile(new URL(`theta-lit-search/scripts/${script}`, skillsRoot), "utf8").then(
+			(source) => {
+				const open = source.indexOf('"""');
+				return source.slice(open, source.indexOf('"""', open + 3));
+			},
+		);
+	for (const [script, owned] of [
+		["pubmed.py", [0, 1, 2, 3, 4]],
+		["arxiv.py", [0, 1, 2, 3, 4]],
+		["semanticscholar.py", [0, 1, 2, 3, 4, 5]],
+	]) {
+		const codes = [...(await docstring(script)).matchAll(/^ {2}(\d) {2}([A-Za-z-]+)/gm)]
+			.map((match) => [Number(match[1]), match[2].toLowerCase()])
+			.filter(([code]) => EXIT_CODE_CONTRACT.some(([ownedCode]) => ownedCode === code));
+		assert.deepEqual(
+			codes.map(([code]) => code),
+			owned,
+			`${script}: docstring exit codes drifted`,
+		);
+		for (const [code, keyword] of codes) {
+			assert.equal(
+				keyword,
+				EXIT_CODE_CONTRACT.find(([ownedCode]) => ownedCode === code)?.[1],
+				`${script}: code ${code} keyword drifted`,
+			);
+		}
+	}
+
+	// The conventions note must name every code with its keyword (the
+	// "5 (credentials ...)" paren form included).
+	const note = await readFile(
+		new URL("../docs/agents/connector-scripts.md", import.meta.url),
+		"utf8",
+	);
+	for (const [code, keyword] of EXIT_CODE_CONTRACT) {
+		assert.match(
+			note,
+			new RegExp(`\\b${code}\\s*\\(?\\s*${keyword}\\b`, "i"),
+			`connector-scripts.md lost exit code ${code} (${keyword})`,
+		);
+	}
+});
+
 // Tier-2 infra per ADR 0001 / spec #5: K-Dense's compute stack is excluded —
 // theta-compute replaces it in M4. If one of these names ever ships, the
 // tiers have been crossed by accident.

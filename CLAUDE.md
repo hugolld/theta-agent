@@ -29,7 +29,7 @@ Current state: 0.0.2 on the registry, 0.1.0 at the M2 close-out (#24) — the M1
 1. Start the strike in a new git worktree on a feature branch.
 2. On the first commit, open a **draft** PR against `main`.
 3. Commit and push every further change to that PR branch.
-4. Before marking the PR ready, run `node scripts/check-strike.mjs <spec#>` — every child of the spec issue must be landed on the branch or already closed (a closeout ticket for the post-merge steps is the expected open exception). Then mark the PR ready and run a dedicated PR review pass before merging to `main`.
+4. Before marking the PR ready, run `node scripts/check-strike.mjs <spec#>` — every child of the spec issue must be landed on the branch or already closed (a closeout ticket for the post-merge steps is the expected open exception). Refresh the PR's title and body to cover every landed child, then mark the PR ready and run a dedicated PR review pass before merging to `main`.
 5. The adversarial loop's stop condition is judgment: once findings require crafted attack strings that honest usage would never produce, stop, record them as a residual trust boundary, and move on. "Findings stay wording-level for two consecutive rounds" applies only to findings a realistic session could trigger; if it has not fired within ~10 rounds, it will not — an adversarial reviewer regenerates findings indefinitely, and "clean" is not a stopping condition it can reach.
 6. While a review round is in flight, hold further commits on that branch; when its report arrives, triage against the SHA it reviewed.
 
@@ -49,7 +49,7 @@ Default five-role vocabulary (each label string equals its role name). See `docs
 
 ### Domain docs
 
-Single-context: root `GLOSSARY.md` + `docs/adr/`. See `docs/agents/domain.md`.
+Single-context: root `GLOSSARY.md` + `docs/adr/`. See `docs/agents/domain.md`. Glossary edits are suite-enforced: `_Avoid_` terms are banned from self-authored prose and every headword word must appear in it — the scan list lives in `test/skills-library.test.mjs`.
 
 ### Connector scripts
 
