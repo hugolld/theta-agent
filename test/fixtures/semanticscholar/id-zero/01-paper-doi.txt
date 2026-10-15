@@ -1,0 +1,2 @@
+# status: 404
+{"error": "Paper with id DOI:10.0000/does-not-exist not found"}

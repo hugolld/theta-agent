@@ -1,0 +1,52 @@
+{
+	"result": {
+		"uids": ["39114817", "37850042"],
+		"39114817": {
+			"uid": "39114817",
+			"pubdate": "2023 Aug 10",
+			"epubdate": "2023 Jul 31",
+			"source": "Nature",
+			"authors": [
+				{ "name": "Frasca D", "authtype": "Author" },
+				{ "name": "Blomberg BB", "authtype": "Author" }
+			],
+			"lastauthor": "Blomberg BB",
+			"title": "CRISPR-based gene editing approaches to restore immune cell function in aged organisms.",
+			"sortfirstauthor": "Frasca D",
+			"sortlastauthor": "Blomberg BB",
+			"fulljournalname": "Nature",
+			"volume": "620",
+			"issue": "7972",
+			"pubtype": ["Journal Article"],
+			"articleids": [
+				{ "idtype": "pubmed", "value": "39114817" },
+				{ "idtype": "doi", "value": "10.1038/s41586-023-06321-w" },
+				{ "idtype": "pii", "value": "s41586-023-06321-w" }
+			]
+		},
+		"37850042": {
+			"uid": "37850042",
+			"pubdate": "2023 Oct 15",
+			"epubdate": "2023 Sep 28",
+			"source": "Mol Ther",
+			"authors": [
+				{ "name": "Chen Z", "authtype": "Author" },
+				{ "name": "Rao L", "authtype": "Author" },
+				{ "name": "Wang Y", "authtype": "Author" },
+				{ "name": "Kim S", "authtype": "Author" }
+			],
+			"lastauthor": "Kim S",
+			"title": "Base editing of hematopoietic stem cells: a CRISPR gene therapy route without double-strand breaks.",
+			"sortfirstauthor": "Chen Z",
+			"sortlastauthor": "Kim S",
+			"fulljournalname": "Molecular Therapy",
+			"volume": "31",
+			"issue": "10",
+			"pubtype": ["Journal Article", "Review"],
+			"articleids": [
+				{ "idtype": "pubmed", "value": "37850042" },
+				{ "idtype": "doi", "value": "10.1016/j.ymthe.2023.09.014" }
+			]
+		}
+	}
+}

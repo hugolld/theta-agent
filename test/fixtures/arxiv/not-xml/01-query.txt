@@ -1,0 +1,1 @@
+upstream gateway error (plain text, no XML envelope)

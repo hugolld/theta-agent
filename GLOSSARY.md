@@ -17,8 +17,12 @@ The metadata block in a vendored `SKILL.md` recording upstream repo, release tag
 _Avoid_: attribution header, source note
 
 **Orchestrator**:
-The self-authored `theta-research-loop` skill; it walks frame, search, hypothesize, design, execute, report and routes work into the vendored library.
+The self-authored `theta-research-loop` skill; it walks frame, search, hypothesize, design, execute, report and routes work into the skill library.
 _Avoid_: umbrella skill, router, meta-skill
+
+**Connector skill**:
+A Theta-owned skill wrapping scholarly APIs with helper scripts; search and metadata with enforcement in code. M2 ships `theta-lit-search`. Shape may differ at later milestones.
+_Avoid_: plugin, API binding, registered tool
 
 **Re-sync**:
 The milestone-boundary re-vendor of changed upstream skills, updating provenance headers.

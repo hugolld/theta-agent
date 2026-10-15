@@ -133,11 +133,916 @@ export function resolveAdvertisedSkill(root, skill, expected) {
 	return target;
 }
 
+// Resolves the script argument to an absolute path and requires an existing
+// regular file inside the checkout — traversal and outside paths (including
+// symlinks that escape the checkout) are rejected. Unlike the skill
+// argument there is no advertisement set to check membership against, so
+// containment is the criterion.
+export function resolveCheckoutScript(rootArg, script) {
+	const root = fs.realpathSync(rootArg);
+	const lexical = path.resolve(root, script);
+	let target = lexical;
+	try {
+		target = fs.realpathSync(lexical);
+	} catch {
+		throw new Error(`script argument does not resolve on disk: ${script}`);
+	}
+	if (!fs.statSync(target).isFile() || !target.startsWith(root + path.sep)) {
+		throw new Error(`script argument must be a file inside the checkout, got: ${script}`);
+	}
+	return target;
+}
+
+// ---------------------------------------------------------------------------
+// Shell command inspection
+//
+// The script attestation judges a bash command STRING, not structured
+// arguments. These helpers implement a conservative POSIX-ish read: enough
+// shell to know which word is the program being executed, refusing
+// everything they cannot model. Unmodelled forms (expansions, arithmetic,
+// process substitution, nested `bash -c` strings) leave words unresolvable
+// and fail closed.
+
+// Lexes a command into an ordered mix of words and operators. Words carry
+// their quote-stripped value; operators are runs of `;&|<>()` (a leading
+// file-descriptor digit is absorbed: `2>&1` lexes as the operator `2>&`
+// followed by the word `1`) and unquoted newlines. Quoting groups,
+// backslash escapes (a backslash-newline is a line continuation and
+// contributes nothing), and `#` at word start comments to end of line. An
+// unterminated quote consumes the rest of the string — a command the shell
+// itself would reject. Heredoc bodies are consumed here, at the raw-line
+// level: the lines after the command line belong to each pending `<<`
+// delimiter in order, and the terminator is the delimiter ALONE on its
+// line — quote-stripped or whitespace-padded lookalikes are body text.
+function shellLex(command) {
+	const toks = [];
+	const heredocs = [];
+	let expectDelim = null; // "<<" | "<<-" while a delimiter is expected
+	// A carriage return is a WORD character to bash (a pasted CRLF leaves
+	// the \r inside the filename); only \n ends a line.
+	const isOp = (c) => /[ \t\f\v\n;&|<>()]/.test(c);
+	const isOpNoSpace = (c) => /[;&|<>()]/.test(c);
+	let i = 0;
+	while (i < command.length) {
+		const ch = command[i];
+		if (ch === "\n") {
+			expectDelim = null; // an unterminated << is invalid shell
+			if (heredocs.length > 0) {
+				i++;
+				for (const h of heredocs) {
+					let terminator = false;
+					while (i <= command.length) {
+						const nl = command.indexOf("\n", i);
+						const end = nl === -1 ? command.length : nl;
+						const line = command.slice(i, end);
+						if ((h.tabs ? line.replace(/^\t+/, "") : line) === h.delim) {
+							i = nl === -1 ? command.length : nl + 1;
+							terminator = true;
+							break;
+						}
+						if (nl === -1) {
+							i = command.length;
+							break;
+						}
+						i = nl + 1;
+					}
+					if (!terminator) i = command.length;
+				}
+				heredocs.length = 0;
+			} else {
+				i++;
+			}
+			toks.push({ t: "o", v: "\n" });
+			continue;
+		}
+		if (/[ \t\f\v]/.test(ch)) {
+			i++;
+			continue;
+		}
+		if (ch === "#") {
+			while (i < command.length && command[i] !== "\n") i++;
+			continue;
+		}
+		// fd-prefixed redirection: the digits join the following <>& run
+		let j = i;
+		while (j < command.length && /[0-9]/.test(command[j])) j++;
+		if (j > i && j < command.length && /[<>]/.test(command[j])) {
+			while (j < command.length && /[<>&]/.test(command[j])) j++;
+			const op = command.slice(i, j);
+			toks.push({ t: "o", v: op });
+			expectDelim = op.includes("<<") && !op.includes("<<<") ? "<<" : null;
+			i = j;
+			// a dash attached to the heredoc operator marks the
+			// tab-stripping form and belongs to the operator
+			if (expectDelim === "<<" && command[i] === "-") {
+				expectDelim = "<<-";
+				i++;
+			}
+			continue;
+		}
+		if (isOpNoSpace(ch)) {
+			while (j < command.length && isOpNoSpace(command[j])) j++;
+			const run = command.slice(i, j);
+			i = j;
+			// emit canonical operators, splitting runs: `);` is two
+			// operators, while &&, ||, |&, <<, >>, <<<, &>, &>> stay whole
+			for (let k = 0; k < run.length; ) {
+				const three = run.slice(k, k + 3);
+				const two = run.slice(k, k + 2);
+				let op = run[k];
+				if (three === "<<<" || three === "&>>") op = three;
+				else if (
+					two === "&&" ||
+					two === "||" ||
+					two === "|&" ||
+					two === "<<" ||
+					two === ">>" ||
+					two === "&>" ||
+					two === ">&"
+				) {
+					op = two;
+				}
+				toks.push({ t: "o", v: op });
+				// a heredoc expects its delimiter next; every other
+				// operator ends that expectation
+				expectDelim = op === "<<" ? "<<" : null;
+				k += op.length;
+			}
+			// a dash attached to `<<` is the <<- operator, not the start
+			// of the delimiter word
+			if (expectDelim === "<<" && command[i] === "-") {
+				expectDelim = "<<-";
+				i++;
+			}
+			continue;
+		}
+		// a word: quoting groups, backslash escapes the next character
+		let w = "";
+		let quoted = false;
+		while (i < command.length && !isOp(command[i])) {
+			const c = command[i];
+			if (c === "'") {
+				quoted = true;
+				let k = i + 1;
+				while (k < command.length && command[k] !== "'") k++;
+				w += command.slice(i + 1, k);
+				i = Math.min(k + 1, command.length);
+			} else if (c === '"') {
+				quoted = true;
+				let k = i + 1;
+				while (k < command.length && command[k] !== '"') k++;
+				for (let q = i + 1; q < k; q++) {
+					if (command[q] === "\\" && /[$`"\\\n]/.test(command[q + 1] ?? "")) q++;
+					w += command[q] ?? "";
+				}
+				i = Math.min(k + 1, command.length);
+			} else if (c === "`") {
+				// command substitution: consume the span raw as one
+				// unresolvable word — the module refuses what it cannot
+				// model, and a hidden cd inside must not silently divert
+				// the anchor
+				quoted = true;
+				let k = i + 1;
+				while (k < command.length) {
+					if (command[k] === "\\") k += 2;
+					else if (command[k] === "`") break;
+					else k++;
+				}
+				w += command.slice(i, Math.min(k + 1, command.length));
+				i = Math.min(k + 1, command.length);
+			} else if (c === "\\") {
+				// backslash-newline (and backslash-\r\n) is a continuation
+				if (command[i + 1] === "\n") i += 2;
+				else if (command[i + 1] === "\r" && command[i + 2] === "\n") i += 3;
+				else {
+					w += command[i + 1] ?? "";
+					i += 2;
+				}
+			} else {
+				w += c;
+				i++;
+			}
+		}
+		if (expectDelim) {
+			// the delimiter is the word as-is; `<<-` only changes how the
+			// terminator line is matched (leading tabs stripped)
+			heredocs.push({ delim: w, tabs: expectDelim === "<<-" });
+			expectDelim = null;
+		}
+		// an empty word matters only as a quoted heredoc delimiter
+		if (w !== "" || quoted) toks.push({ t: "w", v: w });
+	}
+	return toks;
+}
+
+// The command's words, quote-stripped, in order (operators dropped).
+export function shellTokens(command) {
+	return shellLex(command)
+		.filter((tok) => tok.t === "w")
+		.map((tok) => tok.v);
+}
+
+// Interpreters execute their first program word; wrappers pass through to a
+// program after their own flags, numeric arguments, and assignments.
+// (`builtin` runs only shell builtins, so it is not a wrapper.)
+const INTERPRETERS = new Set(["python3", "python", "bash", "sh", "zsh", "env", "uv"]);
+const WRAPPERS = new Set([
+	"timeout", "nohup", "nice", "stdbuf", "watch", "sudo", "time", "exec",
+	"command",
+]);
+
+// A wrapper's known flags: an unknown one fails the wrapper before the
+// program runs, so the program search ends. stdbuf's take glued values
+// (-oL); the lists stay deliberately short — an unlisted flag is only a
+// refusal, never a false attestation.
+const wrapperAcceptsFlag = (wrapper, flag) => {
+	switch (wrapper) {
+		case "command":
+			return flag === "-p" || flag === "-v" || flag === "-V";
+		case "nice":
+			return flag === "-n";
+		case "time":
+			return flag === "-p";
+		case "nohup":
+		case "exec":
+			return false;
+		case "timeout":
+			return (
+				flag === "-k" ||
+				flag === "-s" ||
+				flag === "--foreground" ||
+				flag === "--preserve-status"
+			);
+		case "stdbuf":
+			return /^-[oei]/.test(flag);
+		case "sudo":
+			// only execute-carrying flags; -l/-e/-V/-h/-k/-K run nothing
+			// and must not keep the program search alive
+			return (
+				/^-[AabCcDEgHiInPpRrSsTt]$/.test(flag) ||
+				flag === "--preserve-env" ||
+				flag === "--login" ||
+				flag === "--shell" ||
+				flag.startsWith("--user=")
+			);
+		case "watch":
+			return /^-[dgnptbcex]$/.test(flag);
+		default:
+			return false;
+	}
+};
+const isInterpreter = (w) => INTERPRETERS.has(w) || /^python\d+(\.\d+)?$/.test(w);
+
+// Pipe spellings: `|` and bash's `|&` share every semantic the audit
+// models (members run in subshells; a guarded pipeline guards all).
+const isPipe = (v) => v === "|" || v === "|&";
+
+// Control-flow keywords: whether the body ran is exactly what an
+// attestation would have to prove, and the audit does not model it — a
+// command headed by one of these words fails closed.
+const COMPOUND = new Set([
+	"if", "then", "elif", "else", "fi", "while", "until", "do", "done",
+	"for", "in", "case", "esac", "select", "function", "{", "}", "!",
+]);
+
+// True when the simple command at cdIdx (whose last consumed word ends
+// just before `after`) is backgrounded with `&` or sits in a pipeline —
+// both run it in a subshell, so a cd there never moves the parent cwd.
+// Redirections between the command and the `&` are stepped over.
+function subshellConfined(toks, cdIdx, after) {
+	const isRedirect = (v) => v.includes("<") || v.includes(">");
+	let k = after;
+	while (k < toks.length && toks[k].t === "o") {
+		const v = toks[k].v;
+		if (isRedirect(v)) {
+			k++;
+			while (k < toks.length && toks[k].t === "o") k++;
+			k++; // the redirection's target word
+			continue;
+		}
+		if (isPipe(v) || v === "&") return true;
+		break; // any other operator ends the simple command
+	}
+	// Backward to the start of the pipeline segment: words of the same
+	// segment (an assignment or a redirect's target may precede the cd)
+	// belong to it, and a pipe before the boundary means the cd runs in a
+	// subshell.
+	for (let b = cdIdx - 1; b >= 0; b--) {
+		const t = toks[b];
+		if (t.t === "w") continue;
+		const v = t.v;
+		if (isPipe(v)) return true;
+		if (isRedirect(v)) continue;
+		return false; // a boundary or stray operator ends the look
+	}
+	return false;
+}
+
+// True when the command EXECUTES the target script: a word in program
+// position — the command word itself, or the program word after an
+// interpreter or wrapper chain — resolves canonically to exactly the
+// target. Relative words resolve against the session cwd (or a `cd`
+// earlier in the command). Words that merely mention the path —
+// arguments, comments, heredoc bodies, redirection targets — never
+// attest, and neither does a copy of the script elsewhere on disk.
+// Short-circuit operators are modelled conservatively: a segment after
+// `&&` attests only when its chain runs to the command's end unbroken (a
+// non-error overall result then proves every `&&`-chained segment ran;
+// newlines directly after the operator continue the list); a segment
+// after `||` never attests, because success and skip are
+// indistinguishable in the overall exit status. Control flow (if, while,
+// case, for, brace groups) is refused outright — whether the body ran is
+// exactly what an attestation would have to prove.
+export function commandResolvesToScript(command, target, root) {
+	// cwd anchors relative words; null means the shell went somewhere the
+	// audit cannot know (cd through an expansion), so relative words can
+	// no longer attest.
+	let cwd = root;
+	const resolvesTo = (w, direct = false) => {
+		// expansion-shaped spellings ($X, ~x, `x`) expand to something
+		// else in the real shell — a same-named literal file proves
+		// nothing, so they never qualify
+		if (/[$`]/.test(w) || w.startsWith("~")) return false;
+		// open("file/") and open("file/.") fail — realpath would collapse
+		// both onto the file, so reject the spellings first
+		if (w === "" || /\/(\.|\.\.)?$/.test(w)) return false;
+		// bash executes a slash-containing word directly; a slash-less one
+		// goes through PATH, which the audit does not model
+		if (direct && !w.includes("/")) return false;
+		if (!path.isAbsolute(w) && cwd === null) return false;
+		const p = path.isAbsolute(w) ? w : path.resolve(cwd, w);
+		try {
+			const real = fs.realpathSync(p);
+			if (real !== target) return false;
+			// direct execution needs the execute bit; an interpreter
+			// operand only needs to be openable
+			if (direct) fs.accessSync(real, fs.constants.X_OK);
+			return true;
+		} catch {
+			return false;
+		}
+	};
+	const toks = shellLex(command);
+	// A trailing newline ends the last line, not a statement — the
+	// &&-tail proof must not count it as a break.
+	while (
+		toks.length > 0 &&
+		toks[toks.length - 1].t === "o" &&
+		toks[toks.length - 1].v === "\n"
+	) {
+		toks.pop();
+	}
+	// A CDPATH mention makes later bare-relative cds land somewhere the
+	// audit cannot know — bash searches CDPATH before the working
+	// directory, and a `read CDPATH` assigns it without the = spelling.
+	// (`./x` and `../x` bypass it; so do absolute paths.)
+	const cdpathAt = toks.findIndex(
+		(t) => t.t === "w" && (t.v === "CDPATH" || t.v.startsWith("CDPATH=")),
+	);
+	// Operators that decouple the overall exit status from the `&&` chain
+	// in progress: once one follows, the chain's later segments can no
+	// longer be proven to have run. `|` is deliberately absent — pipeline
+	// members run unconditionally.
+	const breaksChain = (op) =>
+		op === ";" || op === "\n" || op === "&" || op === "||" || op === ")";
+	// Index of the next chain-breaking operator at or after each token.
+	const nextBreak = new Array(toks.length).fill(-1);
+	for (let k = toks.length - 1; k >= 0; k--) {
+		nextBreak[k] =
+			toks[k].t === "o" && breaksChain(toks[k].v) ? k : (nextBreak[k + 1] ?? -1);
+	}
+	// Bash opens a simple command's redirections BEFORE running it: one
+	// that provably fails stops the command, and a rescuing tail
+	// (`; echo ok`) still exits 0. An attestation therefore requires
+	// every redirection from its word to the next separator to look
+	// runnable against the anchor current at that point. `)` does not
+	// stop the scan — a redirection after it applies to the whole
+	// parenthesized command.
+	const endsSegment = (v) =>
+		v === ";" || v === "\n" || v === "&" || v === "&&" || v === "||" ||
+		v === "(" || isPipe(v);
+	const redirectUnsafe = (fromIdx) => {
+		const closed = new Set(); // fds closed by N>&- in this scan
+		let k = fromIdx;
+		while (k < toks.length && !(toks[k].t === "o" && endsSegment(toks[k].v))) {
+			const t = toks[k];
+			if (
+				t.t === "o" &&
+				(t.v.includes("<") || t.v.includes(">")) &&
+				!t.v.includes("<<")
+			) {
+				let m = k + 1;
+				while (m < toks.length && toks[m].t === "o") m++;
+				const target = toks[m]?.t === "w" ? toks[m].v : undefined;
+				// invalid, expansion-shaped, or glob-shaped targets cannot
+				// be judged (a multi-match glob is an ambiguous redirect)
+				if (
+					target === undefined ||
+					target === "" ||
+					/[$`]/.test(target) ||
+					target.includes("*") ||
+					target.includes("?") ||
+					target.includes("[")
+				) {
+					return true;
+				}
+				// Only `>&digit` / `>&-` duplicate or close an fd (only
+				// 0-2 are guaranteed open; a closed source is a bad fd) —
+				// after every other spelling the word is a filename
+				const isDup = t.v === ">&" || /^\d*>&$/.test(t.v);
+				const fd = /^(\d+)/.exec(t.v)?.[1] ?? (t.v.includes(">") ? "1" : "0");
+				if (isDup && target === "-") {
+					closed.add(fd); // until a file redirect reopens it
+					k = m + 1;
+					continue;
+				}
+				if (isDup && /^[0-9]+$/.test(target)) {
+					if (!/^[012]$/.test(target) || closed.has(target)) return true;
+					k = m + 1;
+					continue;
+				}
+				// a fd-prefixed dup takes an fd operand only — a file word
+				// is bash's ambiguous redirect (the bare >&file form is a
+				// both-streams file redirect and falls through)
+				if (/^\d+>&$/.test(t.v)) return true;
+				const p =
+					cwd === null
+						? (path.isAbsolute(target) ? target : null)
+						: (path.isAbsolute(target) ? target : path.resolve(cwd, target));
+				if (p === null) return true; // anchor unknown
+				const writing = t.v.includes(">");
+				if (writing) {
+					let dir;
+					try {
+						dir = fs.realpathSync(path.dirname(p)); // ENOTDIR/ELOOP
+					} catch {
+						return true;
+					}
+					if (!fs.statSync(dir).isDirectory()) return true;
+					let st = null;
+					try {
+						st = fs.statSync(p);
+					} catch (e) {
+						if (e.code !== "ENOENT") return true; // ELOOP, EACCES…
+					}
+					if (st === null) {
+						// something exists at the path but does not resolve:
+						// a dangling symlink bash would open through
+						let entry = null;
+						try {
+							entry = fs.lstatSync(p);
+						} catch (e) {
+							if (e.code !== "ENOENT") return true;
+						}
+						if (entry !== null) return true;
+					}
+					try {
+						// an existing target must be a writable file; a new
+						// one needs a writable directory to be created in
+						fs.accessSync(st !== null ? p : dir, fs.constants.W_OK);
+					} catch {
+						return true;
+					}
+					if (st?.isDirectory()) return true; // EISDIR
+				} else {
+					let real;
+					try {
+						real = fs.realpathSync(p); // ENOENT/ELOOP/ENOTDIR
+					} catch {
+						return true;
+					}
+					if (fs.statSync(real).isDirectory()) return true; // EISDIR
+					try {
+						fs.accessSync(real, fs.constants.R_OK);
+					} catch {
+						return true;
+					}
+				}
+				// a file redirect opens its fd, reopening a closed one
+				closed.delete(fd);
+				k = m + 1;
+				continue;
+			}
+			k++;
+		}
+		return false;
+	};
+	// Program-position state, per simple command (restarted at every
+	// operator): "prefix" = still consuming wrappers, flags, and
+	// assignments; "program" = the next word is the executed program;
+	// "args" = the program word is behind us and nothing later executes.
+	// Reachability of the current segment: "open" runs unconditionally,
+	// "and"/"or" follow a short-circuit operator. `awaiting` marks an
+	// &&/|| operand still expected — a newline (or comment line) directly
+	// after the operator continues the list instead of ending it.
+	let phase = "prefix";
+	let guard = "open";
+	let awaiting = false;
+	let envChain = false; // the program word waits after env
+	let lastWrapper = null; // the wrapper whose args are being consumed
+	let headWord = null; // the word that opened the program phase
+	let timeoutNum = false; // timeout's one duration operand is consumed
+	let pendingValue = false; // the next word is a wrapper flag's value
+	let pendingClose = false; // the last operator was a closing paren
+	let execHeaded = false; // this segment's head is exec
+	let execPend = false; // exec's interpreter still awaits its operand
+	let segStart = 0; // token index where the current segment began
+	const frames = []; // cwd and guard at each open subshell
+	let i = 0;
+	while (i < toks.length) {
+		const tok = toks[i];
+		if (tok.t === "o") {
+			const op = tok.v;
+			if (op.includes("<") || op.includes(">")) {
+				// a redirection's target is the next word — operator runs
+				// may split (`<>` lexes as `<` then `>`), so skip any
+				// stray operators before it. A `(` there is process
+				// substitution: unmodelled, refused outright. A redirect
+				// does not clear pendingClose — the word after it still
+				// completes a command substitution. The parse is more
+				// permissive than bash on invalid redirections (e.g. an
+				// ambiguous `2>&` target): those cannot pair with a
+				// non-error result unless a rescuing tail exits 0, and a
+				// provably-failing redirection taints the segment below.
+				i++;
+				while (i < toks.length && toks[i].t === "o") {
+					if (toks[i].v === "(") return false;
+					i++;
+				}
+				if (
+					execHeaded &&
+					frames.length === 0 &&
+					(op === ">&" || /^\d*>&$/.test(op)) &&
+					toks[i]?.t === "w" &&
+					(toks[i].v === "-" || /^\d+-$/.test(toks[i].v))
+				) {
+					// exec with a redirect-only list closes (or moves, the
+					// N- form) the fd for the whole shell — a later
+					// segment's dup would abort it
+					return false;
+				}
+				i++;
+				continue;
+			}
+			pendingClose = false;
+			envChain = false; // a new simple command begins
+			lastWrapper = null;
+			headWord = null;
+			timeoutNum = false;
+			// a replaced shell makes every later segment phantom
+			if (execPend && frames.length === 0) return false;
+			execHeaded = false;
+			if (op === "&&") {
+				guard = "and";
+				awaiting = true;
+			} else if (op === "||") {
+				guard = "or";
+				awaiting = true;
+			} else if (op === "(") {
+				// a subshell starts at the parent cwd and inherits the
+				// guard — a separator inside may not drop below it
+				frames.push({ cwd, guard });
+			} else if (op === ")") {
+				const frame = frames.pop();
+				cwd = frame?.cwd ?? cwd; // …and its cd dies with it
+				guard = frame?.guard ?? guard; // pipeline siblings keep it
+				awaiting = false;
+				pendingClose = true;
+				execPend = false; // a subshell replacement ends with it
+				// `) (` adjacency (newlines aside) is a function
+				// definition's body: the body defines, it does not run
+				let k = i + 1;
+				while (k < toks.length && toks[k].t === "o" && toks[k].v === "\n") k++;
+				if (toks[k]?.t === "o" && toks[k].v === "(") return false;
+			} else if (isPipe(op)) {
+				// pipeline members share the pipeline's reachability —
+				// a guarded pipeline guards every member
+				awaiting = false;
+			} else if (op === "\n" && awaiting) {
+				// the AND-OR list continues past the newline
+			} else {
+				// a separator resets to the innermost subshell's
+				// inherited guard, never below it
+				guard = frames.length > 0 ? frames[frames.length - 1].guard : "open";
+				awaiting = false;
+			}
+			phase = "prefix"; // every operator ends the simple command
+			i++;
+			segStart = i;
+			continue;
+		}
+		const wordIdx = i;
+		const w = tok.v;
+		i++;
+		// A word directly after `)` — redirections between included, they
+		// do not clear the pending close — completes a command
+		// substitution or process substitution (`$(pwd)/x`, `>(…) x`):
+		// expansion output the audit cannot model. Refused.
+		if (pendingClose) return false;
+		awaiting = false;
+		// the value of a value-taking wrapper flag is never a program
+		if (pendingValue) {
+			pendingValue = false;
+			continue;
+		}
+		// A guarded segment's program word attests only when its execution
+		// is provable: open segments always run; an `&&`-guarded one only
+		// inside a chain that reaches the command's end unbroken.
+		const provable = guard === "open" || (guard === "and" && nextBreak[wordIdx] === -1);
+		const skippable = /^-/.test(w) || /^\d+$/.test(w) || /^[A-Za-z_][A-Za-z0-9_]*=/.test(w);
+		if (phase === "args") continue;
+		if (phase === "program") {
+			// An interpreter flag may take the next word as its value — or
+			// be the read-stdin operand `-`; a numeric or assignment word
+			// would itself be the script operand (env is the exception: it
+			// consumes NAME=VALUE pairs). The program search ends, and no
+			// later word in this segment can attest.
+			const assignment = /^[A-Za-z_][A-Za-z0-9_]*=/.test(w);
+			if (envChain && assignment) {
+				// a PATH reassignment makes interpreter resolution unknowable
+				if (w.startsWith("PATH=")) phase = "args";
+				continue; // env K=V pairs keep waiting
+			}
+			if (/^-/.test(w) || /^\d+$/.test(w) || assignment) {
+				phase = "args";
+				// the operand position of an exec'd interpreter was eaten
+				// by a flag or value: the shell was replaced regardless —
+				// a subshell replacement dies with its subshell
+				if (execHeaded && frames.length === 0) return false;
+				continue;
+			}
+			if (isInterpreter(w) || WRAPPERS.has(w)) {
+				// A wrapper (or env) execs its program word, which may
+				// itself be an interpreter — the chain continues. After a
+				// plain interpreter the word is the script operand
+				// (python3 env x.py runs a file named env): the search
+				// ends at the fall-through below.
+				if (headWord === "env" || WRAPPERS.has(headWord)) {
+					envChain = w === "env"; // only env itself consumes pairs
+					continue;
+				}
+			}
+			phase = "args";
+			if (provable && !redirectUnsafe(segStart) && resolvesTo(w)) return true;
+			// exec replaces the shell: an unresolved program word means
+			// every later segment is phantom — unless the replacement is
+			// subshell-confined
+			if (execHeaded && frames.length === 0) return false;
+			continue;
+		}
+		// prefix phase: this word is the command word
+		if (skippable) {
+			// Command-prefix material: assignments may precede the command
+			// word itself (before any wrapper is consumed), flags follow
+			// the wrapper they belong to, and only timeout always takes a
+			// numeric duration operand. A skippable-shaped word with no
+			// such home is itself the program — the shell would fail to
+			// find it — and the search ends.
+			if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(w) && lastWrapper === null) {
+				// a PATH reassignment makes interpreter resolution unknowable
+				if (w.startsWith("PATH=")) phase = "args";
+				continue;
+			}
+			if (/^-/.test(w) && lastWrapper !== null) {
+				// mode flags that run nothing: command prints, sudo -v
+				// refreshes credentials
+				if (
+					(lastWrapper === "command" && /^-[vV]$/.test(w)) ||
+					(lastWrapper === "sudo" && w === "-v")
+				) {
+					phase = "args";
+					continue;
+				}
+				// an unknown flag fails the wrapper before the program runs
+				if (!wrapperAcceptsFlag(lastWrapper, w)) phase = "args";
+				// sudo's prompt string takes any value — the next word is
+				// consumed, never a program
+				if (lastWrapper === "sudo" && w === "-p") pendingValue = true;
+				continue;
+			}
+			if (/^\d+$/.test(w) && lastWrapper === "timeout" && !timeoutNum) {
+				timeoutNum = true; // timeout takes exactly one duration
+				continue;
+			}
+			phase = "args";
+			continue;
+		}
+		if (COMPOUND.has(w)) return false; // control flow is refused outright
+		// exit ends the shell: no later segment runs; trap can arrange the
+		// same (a DEBUG/ERR handler exiting before the command); eval,
+		// builtin, and source reparsing can end it from argument position.
+		// All die with a subshell, so depth 0 only.
+		if (
+			frames.length === 0 &&
+			(w === "exit" ||
+				w === "trap" ||
+				w === "eval" ||
+				w === "builtin" ||
+				w === "." ||
+				w === "source")
+		) {
+			return false;
+		}
+		if (w === "set") {
+			// noexec parses without executing anything; noclobber makes
+			// ordinary > redirections fail on existing files; restricted
+			// forbids '/' in command names
+			for (let s = i; s < toks.length && toks[s].t === "w"; s++) {
+				if (
+					/^-+[^-]*[nCr]/.test(toks[s].v) ||
+					toks[s].v === "noexec" ||
+					toks[s].v === "noclobber"
+				) {
+					return false;
+				}
+			}
+		}
+		if (WRAPPERS.has(w)) {
+			lastWrapper = w;
+			headWord ??= w; // for exec-with-closes detection
+			if (w === "exec") execHeaded = true;
+			continue;
+		}
+		if (w === "cd" || w === "pushd") {
+			// exec'ing a special builtin ends the shell too
+			if (execHeaded && frames.length === 0) return false;
+			// Consume the directory argument, past cd's own flags (-L,
+			// -P, …) and `--`. The anchor moves only when the cd provably
+			// ran and succeeded in the parent shell: open and foreground,
+			// or `&&`-guarded in a chain that reaches the command's end
+			// (the caller's non-error result gate then proves every
+			// chained segment exited 0). A cd backgrounded with `&` or
+			// anywhere in a pipeline runs in a subshell — the parent
+			// anchor stays exactly — and `pushd -n` is a dry run. Any
+			// other cd — `||`-guarded, decoupled by a later separator,
+			// CDPATH-shadowed, expansion-sourced, bare, or resolving to
+			// nothing on disk now — leaves the shell somewhere the audit
+			// cannot know, and later relative words can no longer attest.
+			let d = i;
+			let dry = false; // pushd -n never changes the directory
+			let badFlag = false; // bash rejects unknown cd/pushd options
+			while (toks[d]?.t === "w" && /^-/.test(toks[d].v) && toks[d].v !== "--") {
+				const flag = toks[d].v;
+				const known =
+					(w === "cd" && /^-[LP]+$/.test(flag)) ||
+					(w === "pushd" && (flag === "-n" || /^[+-]\d+$/.test(flag)));
+				if (w === "pushd" && (flag === "-n" || /^[+-]\d+$/.test(flag))) dry = true;
+				if (!known) badFlag = true;
+				d++;
+			}
+			if (toks[d]?.t === "w" && toks[d].v === "--") d++;
+			const dir = toks[d]?.t === "w" ? toks[d].v : null;
+			if (dir === null) {
+				cwd = null; // bare cd goes HOME; bare pushd swaps
+				i = d;
+			} else {
+				i = d + 1;
+				const subshellCd = subshellConfined(toks, wordIdx, i);
+				const cdpathShadowed =
+					cdpathAt !== -1 &&
+					cdpathAt < wordIdx &&
+					!path.isAbsolute(dir) &&
+					!dir.startsWith("./") &&
+					!dir.startsWith("../");
+				const p =
+					cwd === null
+						? (path.isAbsolute(dir) ? dir : null)
+						: (path.isAbsolute(dir) ? dir : path.resolve(cwd, dir));
+				let real = null;
+				if (p !== null) {
+					try {
+						const r = fs.realpathSync(p);
+						if (fs.statSync(r).isDirectory()) real = r;
+					} catch {
+						// unresolvable now: it may have existed at run time
+					}
+				}
+				if (!subshellCd && !dry) {
+					// a cd whose redirection may have failed, whose options
+					// bash would reject, or that never provably ran loses
+					// the anchor
+					cwd =
+						real !== null &&
+						provable &&
+						!cdpathShadowed &&
+						!badFlag &&
+						!redirectUnsafe(segStart)
+							? real
+							: null;
+				}
+			}
+			phase = "args";
+			continue;
+		}
+		if (w === "popd") {
+			cwd = null; // restores an older directory the audit never knew
+			phase = "args";
+			continue;
+		}
+		phase = isInterpreter(w) ? "program" : "args";
+		envChain = w === "env";
+		headWord = w;
+		if (execHeaded && isInterpreter(w)) execPend = true;
+		if (provable && !redirectUnsafe(segStart) && resolvesTo(w, true)) return true;
+		// exec replaces the shell: an unresolved program word means every
+		// later segment is phantom — unless the word opens a program phase
+		// whose operand may still resolve
+		if (execHeaded && frames.length === 0 && !isInterpreter(w)) return false;
+	}
+	return false;
+}
+
+// Collects the tool-call/result graph the spot-check attestations search.
+// tool calls are assistant requests: one embedded in a system, user, or
+// toolResult record is transcript corruption. The graph must be temporally
+// consistent: every call needs exactly one later matching result, every
+// result an earlier call — a spliced transcript pairing a result with a
+// later call fails.
+function collectToolGraph(recs) {
+	const calls = [];
+	const callOrder = new Map();
+	const results = new Map();
+	let recordIndex = 0;
+	for (const r of recs) {
+		const m = r.message;
+		recordIndex += 1;
+		if (!m) continue;
+		// tool calls are assistant requests: one embedded in a system,
+		// user, or toolResult record is transcript corruption.
+		if (m.role !== "assistant" && Array.isArray(m.content)) {
+			for (const t of m.content) {
+				if (t?.type === "toolCall") {
+					throw new Error(
+						`toolCall in ${m.role} record — transcript corruption`,
+					);
+				}
+			}
+		}
+		if (Array.isArray(m.content))
+			for (const t of m.content) {
+				if (t?.type !== "toolCall") continue;
+				if (typeof t.id !== "string" || t.id === "") {
+					throw new Error(`toolCall without a usable id: ${JSON.stringify(t.id)}`);
+				}
+				if (callOrder.has(t.id)) {
+					throw new Error(`duplicate toolCall id: ${t.id}`);
+				}
+				callOrder.set(t.id, recordIndex);
+				calls.push(t);
+			}
+		if (r.type === "message" && m.role === "toolResult") {
+			if (typeof m.toolCallId !== "string" || m.toolCallId === "") {
+				throw new Error(
+					`toolResult without a usable toolCallId: ${JSON.stringify(m.toolCallId)}`,
+				);
+			}
+			if (results.has(m.toolCallId)) {
+				throw new Error(`duplicate toolResult for ${m.toolCallId}`);
+			}
+			results.set(m.toolCallId, { recordIndex, message: m });
+		}
+	}
+	const orphans = [...results.keys()].filter((id) => !callOrder.has(id));
+	const unanswered = calls.filter((t) => !results.has(t.id));
+	if (orphans.length > 0) {
+		throw new Error(`orphan toolResults without calls:\n${orphans.join("\n")}`);
+	}
+	if (unanswered.length > 0) {
+		throw new Error(
+			`tool calls without results:\n${unanswered.map((t) => t.id).join("\n")}`,
+		);
+	}
+	for (const t of calls) {
+		const r = results.get(t.id);
+		if (r && r.recordIndex < callOrder.get(t.id)) {
+			throw new Error(`toolResult for ${t.id} precedes its toolCall`);
+		}
+	}
+	return { calls, callOrder, results };
+}
+
+// The id-paired calls of one tool, recorded after the prompt — the shared
+// shape of both spot-check attestations. isError is left to the caller:
+// the read attestation accepts only non-error results, while the script
+// attestation also reports a resolved-but-errored run distinctly.
+function pairedCalls(tool, graph, userIndex) {
+	const out = [];
+	for (const t of graph.calls) {
+		const r = graph.results.get(t.id)?.message;
+		if (t.name !== tool || !r || r.toolName !== tool) continue;
+		if (graph.callOrder.get(t.id) <= userIndex) continue;
+		out.push({ call: t, result: r });
+	}
+	return out;
+}
+
 // Audits one dogfood session directory against the checkout at the current
 // HEAD and returns the attestation. Throws on any failure; `skill` (a
 // checkout-relative SKILL.md path) additionally requires a successful read
-// tool call on that exact file.
-export function auditSession(dir, rootArg, skill) {
+// tool call on that exact file; `script` (a checkout-relative script path)
+// additionally requires a bash tool call that executed that exact file,
+// paired with a non-error tool result.
+export function auditSession(dir, rootArg, skill, script) {
 	const root = fs.realpathSync(rootArg);
 	// Mount aliases (e.g. /var vs /private/var on macOS) give the same tree
 	// two spellings; lexical containment accepts either spelling of root.
@@ -497,28 +1402,9 @@ export function auditSession(dir, rootArg, skill) {
 		`model ${wantModel[1]}\n` +
 		`inventory ${shaText(inventoryText)}\n` +
 		`prompt ${shaText(promptWanted)}`;
-	if (skill !== undefined) {
-		const target = resolveAdvertisedSkill(root, skill, expected);
-		// The skill bytes are read exactly once: the paired read result must
-		// equal these validated bytes, and the attested digest hashes the same
-		// buffer — no second read can separate validated from attested bytes.
-		const skillBuf = fs.readFileSync(target);
-		const skillText = skillBuf.toString("utf8");
-		// A routed prompt must not name the selected skill or its file:
-		// steering the model there is instruction, not routing. The name is
-		// derived from the target's parent directory, not from the argument
-		// string, and the comparison strips case, separators, and punctuation
-		// from both sides — so LiteratureReview, literature_review,
-		// "literature review", and SKILL.md all match their canonical forms.
-		const normalize = (s) =>
-			s.toLowerCase().normalize("NFKC").replace(/[^a-z0-9]/g, "");
-		const promptNorm = normalize(promptWanted);
-		const skillName = path.basename(path.dirname(target));
-		const promptVariants = [
-			normalize(skillName),
-			normalize(path.basename(target)),
-			normalize(target),
-		];
+	// The spot-check attestations — skill read, script execution — share one
+	// tool-call/result graph and one prompt-neutrality gate.
+	if (skill !== undefined || script !== undefined) {
 		// Cross-script lookalikes (Cyrillic і for Latin i) survive NFKC, so
 		// the recorded prompt must be pure ASCII: the operator's task is
 		// English text, and anything else fails closed.
@@ -527,116 +1413,112 @@ export function auditSession(dir, rootArg, skill) {
 				"spot-check prompt contains non-ASCII characters — cross-script lookalikes are not auditable",
 			);
 		}
-		if (promptVariants.some((v) => v && promptNorm.includes(v))) {
-			throw new Error(
-				"spot-check prompt names the selected skill or its file — a routed task must reach it on its own",
-			);
-		}
-		const calls = [];
-		const callOrder = new Map();
-		const results = new Map();
-		let recordIndex = 0;
-		for (const r of recs) {
-			const m = r.message;
-			recordIndex += 1;
-			if (!m) continue;
-			// tool calls are assistant requests: one embedded in a system,
-			// user, or toolResult record is transcript corruption.
-			if (m.role !== "assistant" && Array.isArray(m.content)) {
-				for (const t of m.content) {
-					if (t?.type === "toolCall") {
-						throw new Error(
-							`toolCall in ${m.role} record — transcript corruption`,
-						);
-					}
-				}
-			}
-			if (Array.isArray(m.content))
-				for (const t of m.content) {
-					if (t?.type !== "toolCall") continue;
-					if (typeof t.id !== "string" || t.id === "") {
-						throw new Error(`toolCall without a usable id: ${JSON.stringify(t.id)}`);
-					}
-					if (callOrder.has(t.id)) {
-						throw new Error(`duplicate toolCall id: ${t.id}`);
-					}
-					callOrder.set(t.id, recordIndex);
-					calls.push(t);
-				}
-			if (r.type === "message" && m.role === "toolResult") {
-				if (typeof m.toolCallId !== "string" || m.toolCallId === "") {
-					throw new Error(
-						`toolResult without a usable toolCallId: ${JSON.stringify(m.toolCallId)}`,
-					);
-				}
-				if (results.has(m.toolCallId)) {
-					throw new Error(`duplicate toolResult for ${m.toolCallId}`);
-				}
-				results.set(m.toolCallId, { recordIndex, message: m });
-			}
-		}
-		// The tool graph must be temporally consistent: every call needs
-		// exactly one later matching result, every result an earlier call —
-		// a spliced transcript pairing a result with a later call fails.
-		const orphans = [...results.keys()].filter((id) => !callOrder.has(id));
-		const unanswered = calls.filter((t) => !results.has(t.id));
-		if (orphans.length > 0) {
-			throw new Error(`orphan toolResults without calls:\n${orphans.join("\n")}`);
-		}
-		if (unanswered.length > 0) {
-			throw new Error(
-				`tool calls without results:\n${unanswered.map((t) => t.id).join("\n")}`,
-			);
-		}
-		for (const t of calls) {
-			const r = results.get(t.id);
-			if (r && r.recordIndex < callOrder.get(t.id)) {
-				throw new Error(`toolResult for ${t.id} precedes its toolCall`);
-			}
-		}
-		// pi may advertise and read lexical paths through symlinked resources;
-		// canonicalize the read path first, so a lexical path through a
-		// symlinked checkout still matches, then compare canonically — an
-		// unresolvable or external path cannot vouch for the target. Read
-		// arguments (offset/limit) are not judged: the recorded result text
-		// must equal the current file contents, so only a read of the whole
-		// file can satisfy the check no matter what arguments were passed.
-		// The read must also occur after the recorded prompt: a read spliced
-		// before the user record was not caused by it.
-		const hit = calls.some((t) => {
-			const paired = results.get(t.id);
-			const r = paired?.message;
+		// The name comparison strips case, separators, and punctuation from
+		// both sides — so LiteratureReview, literature_review, "literature
+		// review", and SKILL.md all match their canonical forms.
+		const normalize = (s) =>
+			s.toLowerCase().normalize("NFKC").replace(/[^a-z0-9]/g, "");
+		const promptNorm = normalize(promptWanted);
+		const promptNamesAny = (variants) =>
+			variants.some((v) => v && promptNorm.includes(v));
+		const graph = collectToolGraph(recs);
+		if (skill !== undefined) {
+			const target = resolveAdvertisedSkill(root, skill, expected);
+			// The skill bytes are read exactly once: the paired read result must
+			// equal these validated bytes, and the attested digest hashes the same
+			// buffer — no second read can separate validated from attested bytes.
+			const skillBuf = fs.readFileSync(target);
+			const skillText = skillBuf.toString("utf8");
+			// A routed prompt must not name the selected skill or its file:
+			// steering the model there is instruction, not routing. The name is
+			// derived from the target's parent directory, not from the argument
+			// string.
+			const skillName = path.basename(path.dirname(target));
 			if (
-				!(
-					t.name === "read" &&
-					r &&
-					r.toolName === "read" &&
-					r.isError === false &&
-					t.arguments?.path
-				)
+				promptNamesAny([
+					normalize(skillName),
+					normalize(path.basename(target)),
+					normalize(target),
+				])
 			) {
-				return false;
+				throw new Error(
+					"spot-check prompt names the selected skill or its file — a routed task must reach it on its own",
+				);
 			}
-			if (callOrder.get(t.id) <= userIndex) {
-				return false;
+			// pi may advertise and read lexical paths through symlinked resources;
+			// canonicalize the read path first, so a lexical path through a
+			// symlinked checkout still matches, then compare canonically — an
+			// unresolvable or external path cannot vouch for the target. Read
+			// arguments (offset/limit) are not judged: the recorded result text
+			// must equal the current file contents, so only a read of the whole
+			// file can satisfy the check no matter what arguments were passed.
+			// The read must also occur after the recorded prompt: a read spliced
+			// before the user record was not caused by it.
+			const hit = pairedCalls("read", graph, userIndex).some(({ call: t, result: r }) => {
+				if (!(r.isError === false && t.arguments?.path)) {
+					return false;
+				}
+				try {
+					if (fs.realpathSync(t.arguments.path) !== target) return false;
+				} catch {
+					return false;
+				}
+				const resultText = Array.isArray(r.content)
+					? r.content
+							.filter((c) => c?.type === "text")
+							.map((c) => c.text)
+							.join("")
+					: (typeof r.content === "string" ? r.content : "");
+				return resultText === skillText;
+			});
+			if (!hit) {
+				throw new Error("selected file never opened");
 			}
-			try {
-				if (fs.realpathSync(t.arguments.path) !== target) return false;
-			} catch {
-				return false;
-			}
-			const resultText = Array.isArray(r.content)
-				? r.content
-						.filter((c) => c?.type === "text")
-						.map((c) => c.text)
-						.join("")
-				: (typeof r.content === "string" ? r.content : "");
-			return resultText === skillText;
-		});
-		if (!hit) {
-			throw new Error("selected file never opened");
+			out += `\nselected-file-opened ${target}\nskill-content ${createHash("sha256").update(skillBuf).digest("hex")}`;
 		}
-		out += `\nselected-file-opened ${target}\nskill-content ${createHash("sha256").update(skillBuf).digest("hex")}`;
+		if (script !== undefined) {
+			// The script argument resolves like the skill argument, but scripts
+			// are not advertised: an existing regular file inside the checkout
+			// is the criterion. The bytes are read exactly once — the attested
+			// digest hashes the validated buffer.
+			const target = resolveCheckoutScript(root, script);
+			const scriptBuf = fs.readFileSync(target);
+			// A routed prompt must not name the selected script or its path:
+			// the script is part of the skill's capability, and naming it is
+			// instruction, not routing.
+			if (promptNamesAny([normalize(path.basename(target)), normalize(target)])) {
+				throw new Error(
+					"spot-check prompt names the selected script or its path — a routed task must reach it on its own",
+				);
+			}
+			// Execution, not mention: a bash call qualifies when its command
+			// names the checkout's copy in program position, the call follows
+			// the recorded prompt, and the paired result reports no error. A
+			// copy of the script elsewhere on disk — or the path as an
+			// argument, comment, heredoc body, or redirection target — does
+			// not attest.
+			let hit = false;
+			let sawErroredRun = false;
+			for (const { call: t, result: r } of pairedCalls("bash", graph, userIndex)) {
+				if (typeof t.arguments?.command !== "string") continue;
+				if (!commandResolvesToScript(t.arguments.command, target, root)) {
+					continue;
+				}
+				if (r.isError === false) {
+					hit = true;
+					break;
+				}
+				sawErroredRun = true;
+			}
+			if (!hit) {
+				throw new Error(
+					sawErroredRun
+						? "checkout script execution failed: the bash tool result is an error"
+						: `checkout script never executed: ${target}`,
+				);
+			}
+			out += `\nscript-executed ${target}\nscript-content ${createHash("sha256").update(scriptBuf).digest("hex")}`;
+		}
 	}
 	// Final state recheck: the audited bytes and the cited HEAD must still
 	// describe the tree at attestation time.
@@ -681,10 +1563,10 @@ function manifestSkillRoot(root) {
 }
 
 function main(argv) {
-	const [dir, skill] = argv;
+	const [dir, skill, script] = argv;
 	const root = fs.realpathSync(".");
 	try {
-		console.log(auditSession(dir, root, skill));
+		console.log(auditSession(dir, root, skill, script));
 	} catch (e) {
 		console.error(e.message);
 		return 1;

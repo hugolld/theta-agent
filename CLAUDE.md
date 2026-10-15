@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 `theta-agent` — a **pi package** (extensions + skills for the [pi](https://pi.dev) coding agent) that grows into **Theta**, a science co-researcher agent for biology/biomedicine. It is the code repo of the Theta campaign; design decisions (T1–T10), milestone definitions, and task handoffs live in the campaign vault (path in `CLAUDE.local.md`). Treat the vault as read-only reference.
 
-Current state: 0.0.2 — the M1 launcher (stage A of T9, PR #1) is merged: a thin `bin/theta.mjs` that runs `pi -e <package-root>` so `npm i -g theta-agent && theta` works from 0.0.2 (macOS/Linux; Windows waits for M8, tracked in issue #2; at the M1 close-out the 0.0.2 publish was still pending with the owner). The M1 Tier-1 library ships complete: the K-Dense skills vendored verbatim per ADR 0001 (tracer PR #9, batch PR #10) plus the self-authored `theta-research-loop` orchestrator; re-syncs happen at milestone boundaries (`docs/agents/resync.md`).
+Current state: 0.1.0 — M2 is built. The M1 base ships the `theta` launcher (a thin `bin/theta.mjs` that runs `pi -e <package-root>`; macOS/Linux — Windows waits for M8, tracked in issue #2) and the Tier-1 library: K-Dense skills vendored verbatim per ADR 0001 plus the self-authored `theta-research-loop` orchestrator, with re-syncs at milestone boundaries (`docs/agents/resync.md`). M2 adds the first connector skill, `theta-lit-search` (PubMed, arXiv, Semantic Scholar), landed tracer-first: search and get-by-identifier with pacing, in-200 error detection, and credential redaction enforced in its scripts (ADR 0002; script invariants in `docs/agents/connector-scripts.md`).
 
 ## pi-package rules
 
@@ -29,7 +29,9 @@ Current state: 0.0.2 — the M1 launcher (stage A of T9, PR #1) is merged: a thi
 1. Start the strike in a new git worktree on a feature branch.
 2. On the first commit, open a **draft** PR against `main`.
 3. Commit and push every further change to that PR branch.
-4. When the strike is complete, mark the PR ready, then run a dedicated PR review pass before merging to `main`. An adversarial review loop terminates when findings stay wording-level for two consecutive rounds — record the residual as a documented trust boundary instead of iterating. When handed an unbounded review goal ("repeat until clean"), restate this termination rule before starting; an adversarial reviewer regenerates findings indefinitely, and "clean" is not a stopping condition it can reach.
+4. Before marking the PR ready, run `node scripts/check-strike.mjs <spec#>` — every child of the spec issue must be landed on the branch or already closed (a closeout ticket for the post-merge steps is the expected open exception). Refresh the PR's title and body to cover every landed child, then mark the PR ready and run a dedicated PR review pass before merging to `main`.
+5. The adversarial loop's stop condition is judgment: once findings require crafted attack strings that honest usage would never produce, stop, record them as a residual trust boundary, and move on. "Findings stay wording-level for two consecutive rounds" applies only to findings a realistic session could trigger; if it has not fired within ~10 rounds, it will not — an adversarial reviewer regenerates findings indefinitely, and "clean" is not a stopping condition it can reach.
+6. While a review round is in flight, hold further commits on that branch; when its report arrives, triage against the SHA it reviewed.
 
 ## Publishing
 
@@ -47,4 +49,12 @@ Default five-role vocabulary (each label string equals its role name). See `docs
 
 ### Domain docs
 
-Single-context: root `GLOSSARY.md` + `docs/adr/`. See `docs/agents/domain.md`.
+Single-context: root `GLOSSARY.md` + `docs/adr/`. See `docs/agents/domain.md`. Glossary edits are suite-enforced: `_Avoid_` terms are banned from self-authored prose and every headword word must appear in it — the scan list lives in `test/skills-library.test.mjs`.
+
+### Connector scripts
+
+Connector helper scripts (`theta-lit-search` today) share enforced invariants — exit-code contract, classification shape, provenance records. See `docs/agents/connector-scripts.md`.
+
+### SKILL.md frontmatter
+
+Descriptions are capped at 1..1024 chars and must stay plain-scalar-safe (no `: ` sequences in the value). `test/skills-library.test.mjs` enforces both: it parses frontmatter with the `yaml` package — the same engine pi runs — so invalid YAML fails the suite instead of pi silently dropping the skill.

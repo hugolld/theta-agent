@@ -1,6 +1,6 @@
 ---
 name: theta-research-loop
-description: Walks a research task through Theta's six-stage co-researcher loop — frame, search, hypothesize, design, execute, report — and routes each stage into the vendored science skill library. Use when starting or structuring research. Literature questions route to literature-review, hypothesis work routes to hypothesis-generation. Stages without a routed skill yet run inline and gain dedicated skills in later milestones.
+description: Walks a research task through Theta's six-stage co-researcher loop — frame, search, hypothesize, design, execute, report — and routes each stage into the skill library. Use when starting or structuring research. Literature reviews route to literature-review, searches and lookups on PubMed, arXiv, and Semantic Scholar route to theta-lit-search, hypothesis work routes to hypothesis-generation. Stages without a routed skill yet run inline and gain dedicated skills in later milestones.
 license: MIT
 metadata:
   version: "0.1.0"
@@ -11,7 +11,7 @@ metadata:
 
 This skill is Theta's own voice (the **orchestrator**, per ADR 0001): it turns a
 scientist's request into a disciplined loop and routes each stage into the
-vendored K-Dense skill library. It carries no domain methods of its own — the
+skill library. It carries no domain methods of its own — the
 library holds the methods; this skill holds the order and the provenance
 discipline.
 
@@ -20,7 +20,7 @@ discipline.
 | Stage | Question answered | Routed skill |
 |---|---|---|
 | 1. Frame | What is being asked, and what counts as an answer? | — (inline for now) |
-| 2. Search | What is already known? | `literature-review` |
+| 2. Search | What is already known? | `literature-review`, `theta-lit-search` |
 | 3. Hypothesize | Which candidate explanations survive? | `hypothesis-generation` |
 | 4. Design | What test would discriminate? | — (inline for now) |
 | 5. Execute | What do the data say? | — (inline for now) |
@@ -37,8 +37,10 @@ can pick them up without rework.
    criteria, constraints, and what would count as a negative result. Record the
    frame before any searching starts.
 2. **Search** — route to `literature-review` for systematic or scoping
-   searches. Track coverage and gaps; unreviewed web output never stands in for
-   full-text assessment.
+   reviews, and to `theta-lit-search` for searches and lookups on PubMed,
+   arXiv, and Semantic Scholar (its doctrine keeps `paper-lookup` general for
+   every other database). Track coverage and gaps; unreviewed web output never
+   stands in for full-text assessment.
 3. **Hypothesize** — route to `hypothesis-generation`. A hypothesis is a
    proposal to challenge: demand discriminating predictions and named rivals.
 4. **Design** — pick methods, data, and controls that could actually reject the

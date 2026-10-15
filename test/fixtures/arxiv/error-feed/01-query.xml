@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom" xmlns:opensearch="http://a9.com/-/spec/opensearch/1.1/">
+  <link href="https://export.arxiv.org/api/query?search_query=all%3Aanything&amp;id_list=&amp;start=0&amp;max_results=8" rel="self" type="application/atom+xml"/>
+  <title type="html">ArXiv Query: search_query=all:anything&amp;id_list=&amp;start=0&amp;max_results=8</title>
+  <id>https://export.arxiv.org/api/eRrOrFeEd0yhzUXga</id>
+  <updated>2026-10-13T00:00:00-04:00</updated>
+  <opensearch:totalResults>1</opensearch:totalResults>
+  <opensearch:startIndex>0</opensearch:startIndex>
+  <opensearch:itemsPerPage>1</opensearch:itemsPerPage>
+  <entry>
+    <id>http://arxiv.org/api/errors#incorrect_parameter_format</id>
+    <title type="html">Error</title>
+    <summary>start must be an integer</summary>
+    <updated>2026-10-13T00:00:00-04:00</updated>
+    <link href="https://info.arxiv.org/help/api/user-manual.html#3.4" rel="alternate" type="text/html"/>
+  </entry>
+</feed>

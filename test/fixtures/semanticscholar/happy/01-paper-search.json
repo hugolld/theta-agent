@@ -1,0 +1,49 @@
+{
+	"total": 8741,
+	"offset": 0,
+	"next": 2,
+	"data": [
+		{
+			"paperId": "6a3a57e6be7a53f8e2e4dc4e58c40dd95d1e0af6",
+			"title": "Sequence- and structure-resolved modeling of CRISPR off-target\nactivity  across  guide designs",
+			"authors": [
+				{
+					"authorId": "47067833",
+					"name": "Aisha Rahman"
+				},
+				{
+					"authorId": "10821671",
+					"name": "Marcus Webb"
+				},
+				{
+					"authorId": "1741101",
+					"name": "Li Wei"
+				},
+				{
+					"authorId": "2074837884",
+					"name": "Sofia Marino"
+				}
+			],
+			"year": 2024,
+			"venue": "Nature Biotechnology",
+			"citationCount": 87,
+			"influentialCitationCount": 12,
+			"externalIds": {
+				"DOI": "10.1038/s41587-024-02123-4",
+				"PubMed": "38443812"
+			},
+			"publicationDate": "2024-03-06"
+		},
+		{
+			"paperId": "9f2c9c1f1eb9f52bf9c1a2ad2b6f0ba7d43f04cb",
+			"title": "Off-target evaluation toolkit for base editors",
+			"authors": [],
+			"year": null,
+			"venue": "",
+			"citationCount": 0,
+			"influentialCitationCount": 0,
+			"externalIds": {},
+			"publicationDate": null
+		}
+	]
+}

@@ -78,6 +78,27 @@ node scripts/audit-dogfood.mjs "$sd2" "skills/literature-review/SKILL.md"
 
 On success the attestation carries every `clean` line plus `selected-file-opened` with the resolved skill path and the SKILL.md content digest — and the recorded prompt's digest, so the routed task itself is part of the durable record; keep it with the run's record.
 
+The script-executed attestation is a third optional argument on the same command — the checkout-relative path of a helper script. It turns "the skill was advertised and opened" into "the capability was used": a `bash` tool call recorded after the prompt whose command names the script **in program position** — the command word itself (direct execution needs a slash in the word and the execute bit), or the program argument of an interpreter (`python3 …`, `env …`), with wrappers (`timeout`, …) and an earlier `cd` in the command resolved (`pushd` behaves like cd — `-n` is a dry run — and `popd` loses the anchor) — canonicalized to the checkout's copy, paired by `toolCallId` with a `toolResult` that reports no error. Short-circuits are judged conservatively: a segment after `&&` attests only when its chain runs to the command's end (a non-error overall result then proves the chain ran), a segment after `||` never attests (the overall exit status cannot prove it ran), control-flow commands (`if`, `while`, `case`, `for`, brace groups, function definitions) are refused outright — as are `trap`, `eval`, `builtin`, `source`, and noexec, noclobber, or restricted `set`, and `exit`/`exec` at top level end the shell so nothing after them attests (subshell-confined forms die with their subshell) — and a `cd` whose successful run the audit cannot prove — `||`-guarded, decoupled by a later separator, CDPATH-shadowed, expansion-sourced, or unresolvable now — makes later relative paths unattestable, while a backgrounded or pipelined cd moves only its subshell and the parent anchor holds. Bash opens a command's redirections before running it, so a redirection that provably fails — a missing parent directory, a directory as the target, a dangling symlink, an unreadable or unwritable path, a bad file descriptor — taints the whole invocation, judged against the anchor current at that point. Mentions do not attest: the path as a `grep`/`cat` argument, in a comment, a heredoc body, or a redirection target is not execution (stdin-fed interpreters are refused with the other stdin forms); neither is a copy of the script run from outside the checkout, nor a nested `bash -c` string — the attested bytes are the checkout's at the audited HEAD. The tool environment's ambient `CDPATH` and `PATH` are outside the audit — any in-command `CDPATH` mention (a `read` can assign it without the `=` spelling) shadows relative cds, and a `PATH=` reassignment in the same segment as the invocation ends its program search.
+
+The routed prompt must not name the script or its path, for the same reason it must not name the skill. Some genuine executions are refused rather than guessed — interpreter flag prefixes (`python3 -u …`), conditional chains inside subshells, adjacent subshell sequences, `~` paths, control flow: a refused spot-check means redoing the run with a plain invocation, never weakening the gate.
+
+```sh
+node scripts/audit-dogfood.mjs "$sd2" "skills/theta-lit-search/SKILL.md" "skills/theta-lit-search/scripts/pubmed.py"
+```
+
+On success the attestation additionally carries `script-executed` with the resolved script path and `script-content`, the executed file's digest.
+
+### Residuals
+
+The script-executed attestation's residual trust boundaries, accumulated across the #21 adversarial review loop and co-located here. The loop stopped by judgment once its findings reached the crafted-command class, per its own termination rule.
+
+1. Interpreter rebinding in an *earlier* segment of the same call — a standalone `PATH=` assignment, `hash -p`, `alias` after `shopt -s expand_aliases` — is not tracked across segments.
+2. A wrapper flag whose value word is a terminator (`sudo -p; exit 0`) eats it before the terminator refusal fires.
+3. A script truncated by a redirect and then restored inside the session passes the clean-tree gate.
+4. The shell model is conservative but not complete — the same trust boundary as deliberate tampering. A command adversarially crafted around an unmodelled corner of the grammar — fd duplication chains, wrapper flag values, environment-assigning builtins — can in principle pair a non-execution with a non-error result. The auditor's job is honest dogfood evidence under the operator's prompt-quality voucher, not defense against a hostile command craftsman.
+5. When the invocation is followed by `;`, `&`, or `||` commands in the same bash call — or runs inside `$( )` or a pipeline tail — the call's recorded exit status is the last command's: the execution attestation stands unless the trailing context could have skipped or stopped it, but the non-error result no longer speaks for the script's own exit.
+6. A redirection onto the script's own path would truncate it before the interpreter opens it — deliberate in-session tampering territory, but it means the attested bytes are the tree's bytes at audit time, not a copy of what executed.
+
 ## Clean up after
 
 Dogfood sessions execute skill scripts; they leave scratch venvs and `__pycache__` inside vendored trees. The hash-pin seam fails on them by design, so clear them before committing:

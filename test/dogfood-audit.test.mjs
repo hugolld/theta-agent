@@ -10,6 +10,9 @@ import {
 	decodeXmlEntities,
 	extractLocations,
 	resolveAdvertisedSkill,
+	resolveCheckoutScript,
+	shellTokens,
+	commandResolvesToScript,
 	auditSession,
 } from "../scripts/audit-dogfood.mjs";
 
@@ -149,6 +152,18 @@ function makeTempRepo(t) {
 		path.join(repo, "skills", "literature-review", "SKILL.md"),
 		"skill content\n",
 	);
+	fs.mkdirSync(path.join(repo, "skills", "literature-review", "scripts"), {
+		recursive: true,
+	});
+	fs.writeFileSync(
+		path.join(repo, "skills", "literature-review", "scripts", "search.py"),
+		"# connector script\n",
+	);
+	// direct execution needs the execute bit
+	fs.chmodSync(
+		path.join(repo, "skills", "literature-review", "scripts", "search.py"),
+		0o755,
+	);
 	fs.mkdirSync(path.join(repo, "test"), { recursive: true });
 	fs.writeFileSync(
 		path.join(repo, "test", "expected-skills.json"),
@@ -265,6 +280,44 @@ function buildSession(t, repo, overrides = {}) {
 				},
 			}),
 		);
+	}
+	if (overrides.bashCommand !== undefined) {
+		const bashPair = [
+			({
+				type: "message",
+				message: {
+					role: "assistant",
+					provider: "zai-coding-cn",
+					model: "glm-5.3-flash",
+					content: [
+						{
+							type: "toolCall",
+							id: "call_bash",
+							name: "bash",
+							arguments: { command: overrides.bashCommand, timeout: 60 },
+						},
+					],
+				},
+			}),
+			({
+				type: "message",
+				message: {
+					role: "toolResult",
+					toolCallId: "call_bash",
+					toolName: overrides.bashToolName ?? "bash",
+					isError: overrides.bashIsError ?? false,
+					content: [
+						{
+							type: "text",
+							text: overrides.bashResultText ?? "1. query\n2. provenance\n",
+						},
+					],
+				},
+			}),
+		];
+		// a bash call spliced in before the user record was not caused by it
+		if (overrides.bashBeforePrompt) records.splice(3, 0, ...bashPair);
+		else records.push(...bashPair);
 	}
 	// a completed one-shot ends with the assistant's response
 	records.push(
@@ -396,6 +449,468 @@ test("auditSession attests skill use when paired and errors otherwise", (t) => {
 	assert.throws(
 		() => auditIn(repo, () => auditSession(camelSteer, repo, "skills/literature-review/SKILL.md")),
 		/names the selected skill/,
+	);
+});
+
+test("shellTokens splits commands the way a shell reads them", () => {
+	assert.deepEqual(shellTokens(`python3 'skills/a/search.py' --query "two words"`), [
+		"python3",
+		"skills/a/search.py",
+		"--query",
+		"two words",
+	]);
+	assert.deepEqual(shellTokens("a.py;cd /tmp&&b.py | c.py"), [
+		"a.py",
+		"cd",
+		"/tmp",
+		"b.py",
+		"c.py",
+	]);
+	assert.deepEqual(shellTokens("echo a # python3 skills/a/search.py"), ["echo", "a"]);
+	assert.deepEqual(shellTokens("# whole line\nx.py"), ["x.py"]);
+	assert.deepEqual(shellTokens("out=$(pwd)/x.py 2>&1"), ["out=$", "pwd", "/x.py", "1"]);
+	assert.deepEqual(shellTokens("py\\thon x"), ["python", "x"]);
+	assert.deepEqual(shellTokens("echo 'unclosed"), ["echo", "unclosed"]);
+});
+
+test("commandResolvesToScript attests execution positions only", (t) => {
+	const repo = fs.realpathSync(makeTempRepo(t));
+	const target = `${repo}/skills/literature-review/scripts/search.py`;
+	const hits = [
+		`python3 ${target} --query "p53" --json`,
+		"python3 skills/literature-review/scripts/search.py --pmid 1",
+		"python3 'skills/literature-review/scripts/search.py' --query x",
+		"cd skills/literature-review && python3 scripts/search.py --query x",
+		"cd skills/literature-review; python3 scripts/search.py",
+		// a provably-run && chain may carry the cd (non-error overall
+		// result proves every chained segment ran and exited 0)
+		"git status && cd skills/literature-review && python3 scripts/search.py",
+		// the cd is not in the pipeline — only the script invocation is
+		"cd skills/literature-review && python3 scripts/search.py | tee out.txt",
+		// a command prefix passes the real program through; >& file is a
+		// both-streams redirect; a subshell replacement dies with it
+		"command python3 skills/literature-review/scripts/search.py",
+		`python3 ${target} >& out.txt`,
+		"(exec true); python3 skills/literature-review/scripts/search.py",
+		"(exec python3); python3 skills/literature-review/scripts/search.py",
+		// a file redirect reopens a closed fd before the dup reads it
+		"1>&- > log.txt 2>&1 python3 skills/literature-review/scripts/search.py",
+		// exec'ing the script itself replaces the shell with it
+		"exec python3 skills/literature-review/scripts/search.py",
+		// a redirect-only exec keeps the shell — later segments run
+		"exec 2>/dev/null; python3 skills/literature-review/scripts/search.py",
+		// an exit inside a subshell dies with it
+		"(exit 0); python3 skills/literature-review/scripts/search.py",
+		// an attestation before the exit still stands — the script ran
+		"python3 skills/literature-review/scripts/search.py; exit 0",
+		"skills/literature-review/scripts/search.py --query x",
+		"timeout 30 python3 skills/literature-review/scripts/search.py",
+		"env NCBI_API_KEY=k python3 skills/literature-review/scripts/search.py",
+		"time sudo watch python3 skills/literature-review/scripts/search.py",
+		"nohup nice stdbuf -oL python3 skills/literature-review/scripts/search.py",
+		// cd's own flags precede the directory operand (combined too)
+		"cd -P skills/literature-review && python3 scripts/search.py",
+		"cd -LP skills/literature-review && python3 scripts/search.py",
+		// &> is a combined-output redirection, not backgrounding
+		"cd skills/literature-review &>/dev/null && python3 scripts/search.py",
+		// a guarded pipeline that runs proves every member ran
+		"true && echo x | python3 skills/literature-review/scripts/search.py",
+		"set -e\npython3 skills/literature-review/scripts/search.py",
+		`python3 ${target} --query x 2>&1 | tee out.txt`,
+		// backslash-newline is a line continuation, not a word
+		"python3 \\\nskills/literature-review/scripts/search.py --query x",
+		// a trailing newline ends the line, not the chain
+		"true && python3 skills/literature-review/scripts/search.py\n",
+		"cat <<EOF && python3 skills/literature-review/scripts/search.py\nbody\nEOF",
+	];
+	for (const command of hits) {
+		assert.equal(
+			commandResolvesToScript(command, target, repo),
+			true,
+			`expected hit: ${command}`,
+		);
+	}
+	const copyDir = fs.mkdtempSync(path.join(os.tmpdir(), "script-copy-"));
+	t.after(() => fs.rmSync(copyDir, { recursive: true, force: true }));
+	fs.copyFileSync(target, path.join(copyDir, "search.py"));
+	const alias = path.join(os.tmpdir(), `alias-${process.pid}-${Date.now()}.py`);
+	fs.symlinkSync(target, alias);
+	t.after(() => fs.rmSync(alias, { force: true }));
+	const misses = [
+		// argument mentions are not execution
+		`cat ${target}`,
+		`grep -q foo ${target}`,
+		`ls ${repo}/skills/literature-review/scripts/`,
+		`echo python3 ${target}`,
+		// a copy outside the checkout is not the checkout's script
+		`python3 ${copyDir}/search.py --query x`,
+		// redirection targets and heredoc bodies mention without executing
+		`echo hi > ${target}`,
+		`cat > /tmp/x.sh <<'EOF'\npython3 ${target}\nEOF`,
+		// comments are not commands
+		`echo hi # python3 ${target}`,
+		// unmodelled expansion fails closed
+		"python3 $SCRIPT --query x",
+		"python3 $(echo skills/literature-review/scripts/search.py)",
+		// a nested command string is one word, not a command
+		`bash -c "python3 ${target}"`,
+		// short-circuited segments never attest: the overall exit status
+		// cannot prove a ||-guarded word ran, and an &&-chained one only
+		// when the chain reaches the command's end — newlines directly
+		// after &&/|| continue the list
+		`true || python3 ${target}`,
+		"echo done || python3 skills/literature-review/scripts/search.py",
+		"false || python3 skills/literature-review/scripts/search.py",
+		`true || false || python3 ${target}`,
+		`echo hi || ( false || python3 ${target} )`,
+		"true && python3 skills/literature-review/scripts/search.py; echo done",
+		"false && python3 skills/literature-review/scripts/search.py || true",
+		"false &&\npython3 skills/literature-review/scripts/search.py; echo done",
+		"true ||\npython3 skills/literature-review/scripts/search.py; echo done",
+		"false && # note\npython3 skills/literature-review/scripts/search.py; echo done",
+		// interpreter flags may eat the program word — the search ends
+		"python3 - skills/literature-review/scripts/search.py < /dev/null",
+		"python3 -W skills/literature-review/scripts/search.py < /dev/null",
+		"python3 -u skills/literature-review/scripts/search.py",
+		// a subshell's cd dies with it — the parent anchor governs after )
+		"(cd skills/literature-review); python3 scripts/search.py",
+		// a backgrounded or pipelined cd moves only its subshell
+		"cd skills/literature-review & python3 scripts/search.py",
+		"cd skills/literature-review > /dev/null & python3 scripts/search.py",
+		"cd skills/literature-review | cat; python3 scripts/search.py",
+		"cat f | cd skills/literature-review; python3 scripts/search.py",
+		// the env-pair exception dies at the chained interpreter: X=1 is
+		// python3's script operand, and the target is argv
+		"env python3 X=1 skills/literature-review/scripts/search.py",
+		// a CDPATH assignment shadows later bare-relative cds
+		"export CDPATH=/shadow; cd literature-review && python3 scripts/search.py",
+		"CDPATH=/shadow cd literature-review && python3 scripts/search.py",
+		// a function definition's () body defines; it does not run
+		`f() ( python3 ${target} )`,
+		// leading split redirects open the file; they do not run it
+		`<> ${target} cat`,
+		`>& ${target} true`,
+		// a numeric or assignment word would itself be the script operand
+		"python3 30 skills/literature-review/scripts/search.py",
+		"python3 A=1 skills/literature-review/scripts/search.py",
+		// a bare "run" word is a program, not a uv prefix
+		"PATH=.:$PATH run python3 skills/literature-review/scripts/search.py",
+		"uv run python3 skills/literature-review/scripts/search.py",
+		// a numeric or flag word with no wrapper to own it IS the program;
+		// its not-found failure can be swallowed by `|| true`
+		"30 python3 skills/literature-review/scripts/search.py || true",
+		"time -p 30 python3 skills/literature-review/scripts/search.py || true",
+		"-v python3 skills/literature-review/scripts/search.py || true",
+		// an interpreter word after a plain interpreter is the script
+		// operand (python3 opens the file named env), not a chain
+		"python3 env skills/literature-review/scripts/search.py || true",
+		"bash env skills/literature-review/scripts/search.py || true",
+		// an assignment after a wrapper is its program operand
+		"nohup X=1 python3 skills/literature-review/scripts/search.py || true",
+		// an assignment or redirect may precede a cd inside one pipeline
+		// segment — the cd is still subshell-confined
+		"cat f | FOO=bar cd skills/literature-review; python3 scripts/search.py || true",
+		"cat f | > out cd skills/literature-review; python3 scripts/search.py || true",
+		// a pipeline that is a skipped &&/|| operand runs none of its
+		// members; the trailing command supplies the exit status
+		"false && echo x | python3 skills/literature-review/scripts/search.py; echo done",
+		"true || echo y | python3 skills/literature-review/scripts/search.py; echo done",
+		"true || ( echo ) | python3 skills/literature-review/scripts/search.py; echo done",
+		"grep -q foo bar.txt && cat baz.txt | python3 skills/literature-review/scripts/search.py; echo done",
+		// process substitution is unmodelled and refused outright
+		`<(echo ${target}) x || true`,
+		`>(echo ${target}) x || true`,
+		// a word directly after ) completes a command substitution — its
+		// output is the real command word, and the audited path is argv;
+		// a redirection in between does not clear the close
+		`$(echo true) python3 skills/literature-review/scripts/search.py`,
+		`$(echo true) > /dev/null python3 skills/literature-review/scripts/search.py`,
+		`$((1)) > /dev/null python3 skills/literature-review/scripts/search.py || true`,
+		`env $(echo true) python3 skills/literature-review/scripts/search.py`,
+		// |& is a pipe variant: a skipped || operand runs no member
+		"true || x |& python3 skills/literature-review/scripts/search.py",
+		// a separator inside a skipped subshell operand may not drop the
+		// inherited guard — none of the group's words ran
+		`true || ( echo ; python3 ${target} )`,
+		"false && ( echo hi ; python3 skills/literature-review/scripts/search.py ) || true",
+		"false && echo $(true; python3 skills/literature-review/scripts/search.py) || true",
+		"true || (\n echo hi\n python3 skills/literature-review/scripts/search.py\n)",
+		// a pipelined cd via |& is still subshell-confined
+		"cd skills/literature-review |& python3 scripts/search.py || true",
+		"cat f |& FOO=bar cd skills/literature-review; python3 scripts/search.py || true",
+		// a trailing slash (or /., /..) cannot open a file
+		`python3 ${target}/ || true`,
+		`python3 ${target}/. || echo ok`,
+		// bash opens redirections before running the command: a
+		// provably-failing redirection stops it, and a rescuing tail
+		// still exits 0
+		`python3 ${target} > /no/such/dir/f ; echo ok`,
+		`python3 ${target} > /no/such/dir/f || echo ok`,
+		`python3 ${target} > '' ; echo ok`,
+		// directory targets fail with EISDIR, file-as-parent with ENOTDIR,
+		// and unwritable paths with EPERM
+		`python3 ${target} > /tmp ; echo ok`,
+		`python3 ${target} < /tmp ; echo ok`,
+		`python3 ${target} > /etc/hosts/f ; echo ok`,
+		`python3 ${target} > /etc/hosts ; echo ok`,
+		// relative targets resolve against the pinned session cwd
+		"python3 skills/literature-review/scripts/search.py > out/nope.txt ; echo ok",
+		"python3 skills/literature-review/scripts/search.py < noinput.txt ; echo ok",
+		// fd duplication beyond 0-2 is a bad file descriptor
+		`python3 ${target} 2>&9 ; echo ok`,
+		// a `-` or digit target is a filename unless the operator is >&
+		"python3 skills/literature-review/scripts/search.py < - ; echo ok",
+		// dup from an fd the same command closed is a bad descriptor —
+		// bash aborts the command before the program runs
+		"1>&- 2>&1 python3 skills/literature-review/scripts/search.py ; echo ok",
+		"2>&- 1>&2 python3 skills/literature-review/scripts/search.py ; echo ok",
+		// CR is a word character to bash — the \r stays in the filename
+		"python3 skills/literature-review/scripts/search.py\r; echo ok",
+		"python3 skills/literature-review/scripts/search.py\r\necho ok",
+		// a slash-less command word goes through PATH, not the cwd
+		"cd skills/literature-review/scripts; search.py; echo ok",
+		// a redirection after ) applies to the whole parenthesized command
+		`(python3 ${target}) > /no/such/dir/f ; echo ok`,
+		// pushd -n never changes the directory
+		"pushd -n skills/literature-review ; python3 scripts/search.py",
+		// bash rejects unknown cd/pushd options — the cd never ran
+		"cd -Q skills/literature-review; python3 scripts/search.py; echo ok",
+		"pushd -Q skills/literature-review; python3 scripts/search.py; echo ok",
+		// a pushd ±N operand never changes the directory either
+		"pushd -0 skills/literature-review; python3 scripts/search.py; echo ok",
+		// exec with a redirect-only list closes fds for the whole shell —
+		// a later segment's dup aborts the command
+		"exec 1>&-; python3 skills/literature-review/scripts/search.py 2>&1; true",
+		// exit and exec end the shell: no later segment runs
+		"exit 0; python3 skills/literature-review/scripts/search.py",
+		"exit 0 && python3 skills/literature-review/scripts/search.py",
+		"exec echo hi; python3 skills/literature-review/scripts/search.py",
+		// a DEBUG/ERR trap can exit before the command runs
+		"trap 'exit 0' DEBUG; python3 skills/literature-review/scripts/search.py",
+		// noexec parses without executing anything
+		"set -n; python3 skills/literature-review/scripts/search.py",
+		"set -o noexec; python3 skills/literature-review/scripts/search.py",
+		"set -en\npython3 skills/literature-review/scripts/search.py",
+		// bare exec >&- and the fd-move form close fds for the whole shell
+		"exec >&-; python3 skills/literature-review/scripts/search.py 2>&1; true",
+		"exec 2>&1-; python3 skills/literature-review/scripts/search.py 2>&1; true",
+		// a flag eats the exec'd interpreter's operand position — the
+		// shell was replaced either way, so later segments are phantom
+		"exec python3 -c 'print(1)'; python3 skills/literature-review/scripts/search.py",
+		"exec bash -c 'echo hi'; python3 skills/literature-review/scripts/search.py",
+		"exec python3; python3 skills/literature-review/scripts/search.py",
+		// command/builtin prefixes re-enter the same checks
+		"command trap 'exit 0' DEBUG; python3 skills/literature-review/scripts/search.py",
+		"command exit 0; python3 skills/literature-review/scripts/search.py",
+		"command set -n; python3 skills/literature-review/scripts/search.py",
+		// noclobber makes ordinary > redirections fail on existing files;
+		// restricted forbids '/' in command names
+		"set -C; python3 skills/literature-review/scripts/search.py",
+		"set -r; skills/literature-review/scripts/search.py; echo done",
+		// a read assigns CDPATH without the = spelling — shadowed like
+		// any other CDPATH mention
+		`read CDPATH <<< "/tmp/shd"; cd skills/literature-review && python3 scripts/search.py`,
+		// a PATH reassignment makes interpreter resolution unknowable
+		"PATH=/tmp/evil:$PATH python3 skills/literature-review/scripts/search.py",
+		"env PATH=/tmp/evil python3 skills/literature-review/scripts/search.py",
+		// glob-shaped redirect targets are ambiguous when they multi-match
+		`python3 ${target} > /tmp/*.log ; echo ok`,
+		// a fd-prefixed dup with a file word is an ambiguous redirect
+		`python3 ${target} 2>&out.txt ; echo ok`,
+		// exec'ing a special builtin ends the shell
+		"exec cd skills/literature-review; python3 scripts/search.py",
+		// builtin runs only shell builtins — never a program
+		"builtin python3 skills/literature-review/scripts/search.py || true",
+		// mode flags run nothing: command prints the path, sudo -v/-l/-e
+		// list or edit instead of executing
+		"command -v skills/literature-review/scripts/search.py",
+		"command -v python3 skills/literature-review/scripts/search.py",
+		"sudo -v python3 skills/literature-review/scripts/search.py",
+		"sudo -l python3 skills/literature-review/scripts/search.py",
+		"EDITOR=true sudo -e skills/literature-review/scripts/search.py",
+		// sudo -p's value is the prompt string — the path word is not a
+		// program, and only the trailing command runs
+		"sudo -p skills/literature-review/scripts/search.py true",
+		// an unknown wrapper flag fails the wrapper before the program
+		"command -q python3 skills/literature-review/scripts/search.py; echo ok",
+		"nice -Q python3 skills/literature-review/scripts/search.py; echo ok",
+		"nohup -Z python3 skills/literature-review/scripts/search.py; echo ok",
+		"timeout -Z 30 python3 skills/literature-review/scripts/search.py; echo ok",
+		// command-prefixing the exec-close still closes the shell's fd
+		"command exec 1>&-; python3 skills/literature-review/scripts/search.py 2>&1; echo done",
+		// eval/builtin/source can end or divert the shell from argument
+		// position — refused in command position
+		"eval exit 0 && python3 skills/literature-review/scripts/search.py",
+		"builtin exit 0; python3 skills/literature-review/scripts/search.py",
+		"command eval exit 0; python3 skills/literature-review/scripts/search.py",
+		"builtin cd /tmp; python3 skills/literature-review/scripts/search.py; true",
+		// a spaced `<< --` delimiter is the literal word `--`; only a
+		// dash attached to the operator makes the <<- tab-stripping form
+		"cat << --\n-\npython3 skills/literature-review/scripts/search.py\n--\ntrue",
+		// the <<- terminator strips leading tabs only — a `-EOF` line is
+		// body text, whatever the audit's spelling of the delimiter
+		"cat <<-EOF\n-EOF\npython3 skills/literature-review/scripts/search.py\nEOF\ntrue",
+		"cat <<- 'EOF'\npython3 skills/literature-review/scripts/search.py\nEOF",
+		"cat <<-X\npython3 skills/literature-review/scripts/search.py\nX",
+		// timeout takes exactly one duration operand
+		"timeout 2 30 python3 skills/literature-review/scripts/search.py",
+		// a background-looking &> redirect moves the parent cwd — the
+		// relative word then resolves under the cd target, not the checkout
+		"cd /tmp &>/dev/null && python3 skills/literature-review/scripts/search.py",
+		// a backtick substitution is opaque; its hidden cd cannot divert
+		// the anchor to the checkout's copy
+		"echo `cd /tmp; python3 skills/literature-review/scripts/search.py`",
+		// control flow is refused outright — whether the body ran is what
+		// the attestation would have to prove
+		"if [ -f results.json ]; then\npython3 skills/literature-review/scripts/search.py\nfi",
+		"while false; do\npython3 skills/literature-review/scripts/search.py\ndone",
+		"case nope in match) python3 skills/literature-review/scripts/search.py;; esac",
+		"for i in; do\npython3 skills/literature-review/scripts/search.py\ndone",
+		// a heredoc body ends at a raw line holding only the delimiter —
+		// quoted, padded, and mid-line lookalikes are body text
+		`cat > /tmp/x.sh <<'EOF'\necho X EOF\npython3 skills/literature-review/scripts/search.py\nEOF`,
+		`cat > /tmp/x.sh <<'EOF'\n"EOF"\npython3 skills/literature-review/scripts/search.py\nEOF`,
+		`cat <<A <<B\nx\nA\npython3 skills/literature-review/scripts/search.py\nB`,
+		// a cd through an unresolvable expansion loses the anchor
+		"cd $SKILL_DIR && python3 scripts/search.py",
+		"cd ~/elsewhere && python3 skills/literature-review/scripts/search.py",
+		// a resolvable guarded cd moves the anchor when provable — the
+		// relative word then resolves under /tmp, not the checkout
+		"true && cd /tmp && python3 scripts/search.py",
+	];
+	for (const command of misses) {
+		assert.equal(
+			commandResolvesToScript(command, target, repo),
+			false,
+			`expected miss: ${command}`,
+		);
+	}
+	// an alias of the checkout's copy executes the same bytes
+	assert.equal(commandResolvesToScript(`python3 ${alias}`, target, repo), true);
+	// a direct command word needs the execute bit and a slash: the
+	// checkout's non-executable files are interpreter operands only
+	const norexec = path.join(repo, "norexec.py");
+	fs.writeFileSync(norexec, "# not executable\n");
+	assert.equal(
+		commandResolvesToScript("norexec.py; echo ok", fs.realpathSync(norexec), repo),
+		false,
+	);
+	assert.equal(
+		commandResolvesToScript("./norexec.py; echo ok", fs.realpathSync(norexec), repo),
+		false,
+	);
+});
+
+test("resolveCheckoutScript accepts only existing files inside the checkout", (t) => {
+	const repo = makeTempRepo(t);
+	const real = fs.realpathSync(repo);
+	const rel = "skills/literature-review/scripts/search.py";
+	assert.equal(resolveCheckoutScript(repo, rel), `${real}/skills/literature-review/scripts/search.py`);
+	assert.equal(
+		resolveCheckoutScript(repo, `./${rel}`),
+		`${real}/skills/literature-review/scripts/search.py`,
+	);
+	assert.throws(
+		() => resolveCheckoutScript(repo, "/etc/hosts"),
+		/must be a file inside the checkout/,
+	);
+	assert.throws(
+		() => resolveCheckoutScript(repo, "skills/literature-review"),
+		/must be a file inside the checkout/,
+	);
+	assert.throws(
+		() => resolveCheckoutScript(repo, "skills/literature-review/scripts/nope.py"),
+		/does not resolve on disk/,
+	);
+});
+
+test("auditSession attests script execution when the checkout's script ran", (t) => {
+	const repo = makeTempRepo(t);
+	const real = fs.realpathSync(repo);
+	const abs = `${real}/skills/literature-review/scripts/search.py`;
+	const arg = "skills/literature-review/scripts/search.py";
+
+	// pass: read + executed script, both attestations in one invocation
+	const ran = buildSession(t, repo, {
+		toolResultIsError: false,
+		bashCommand: `python3 ${abs} --query "p53 AND therapy" --json`,
+	});
+	const out = auditIn(repo, () =>
+		auditSession(ran, repo, "skills/literature-review/SKILL.md", arg),
+	);
+	assert.ok(out.includes(`script-executed ${abs}`), out);
+	assert.match(out, /script-content [0-9a-f]{64}/);
+	assert.ok(out.indexOf("script-executed") > out.indexOf("selected-file-opened"));
+
+	// the doctrine's own invocation shape (cd + relative path) attests
+	const doctrine = buildSession(t, repo, {
+		bashCommand: "cd skills/literature-review && python3 scripts/search.py --query p53",
+	});
+	const doctrineOut = auditIn(repo, () => auditSession(doctrine, repo, undefined, arg));
+	assert.ok(doctrineOut.includes(`script-executed ${abs}`));
+
+	// script not run: nothing in the session executed it
+	const notRun = buildSession(t, repo, { toolResultIsError: false });
+	assert.throws(
+		() => auditIn(repo, () => auditSession(notRun, repo, undefined, arg)),
+		/checkout script never executed/,
+	);
+
+	// error result: the bash call resolved to the script but failed
+	const errored = buildSession(t, repo, {
+		bashCommand: `python3 ${abs} --query x`,
+		bashIsError: true,
+	});
+	assert.throws(
+		() => auditIn(repo, () => auditSession(errored, repo, undefined, arg)),
+		/checkout script execution failed/,
+	);
+
+	// non-checkout copy executed: same bytes, wrong tree — does not attest
+	const copyDir = fs.mkdtempSync(path.join(os.tmpdir(), "script-copy-"));
+	t.after(() => fs.rmSync(copyDir, { recursive: true, force: true }));
+	fs.copyFileSync(abs, path.join(copyDir, "search.py"));
+	const copied = buildSession(t, repo, {
+		bashCommand: `python3 ${copyDir}/search.py --query x`,
+	});
+	assert.throws(
+		() => auditIn(repo, () => auditSession(copied, repo, undefined, arg)),
+		/checkout script never executed/,
+	);
+
+	// a bash call spliced in before the prompt was not caused by the task
+	const spliced = buildSession(t, repo, {
+		bashCommand: `python3 ${abs}`,
+		bashBeforePrompt: true,
+	});
+	assert.throws(
+		() => auditIn(repo, () => auditSession(spliced, repo, undefined, arg)),
+		/checkout script never executed/,
+	);
+
+	// a prompt naming the script steers instead of routing
+	const steered = buildSession(t, repo, {
+		bashCommand: `python3 ${abs}`,
+		transcriptPrompt: "run scripts/search.py and show me the output",
+	});
+	fs.writeFileSync(
+		path.join(steered, "prompt.txt"),
+		"run scripts/search.py and show me the output",
+	);
+	assert.throws(
+		() => auditIn(repo, () => auditSession(steered, repo, undefined, arg)),
+		/names the selected script/,
+	);
+
+	// the script argument itself must be a checkout file
+	const plain = buildSession(t, repo, {});
+	assert.throws(
+		() => auditIn(repo, () => auditSession(plain, repo, undefined, "/etc/hosts")),
+		/must be a file inside the checkout/,
+	);
+	assert.throws(
+		() => auditIn(repo, () => auditSession(plain, repo, undefined, "nope/missing.py")),
+		/does not resolve on disk/,
 	);
 });
 
@@ -710,4 +1225,19 @@ test("auditSession accepts a sanitized real pi transcript (golden)", (t) => {
 	const out = auditIn(repo, () => auditSession(dir, repo));
 	assert.match(out, /^clean /);
 	assert.match(out, /provider zai-coding-cn/);
+	// The golden transcript mentions checkout paths in bash commands only
+	// as grep/ls/wc ARGUMENTS — real-pi command shapes that must NOT
+	// attest as script execution.
+	assert.throws(
+		() =>
+			auditIn(repo, () =>
+				auditSession(
+					dir,
+					repo,
+					undefined,
+					"skills/literature-review/references/core_workflow.md",
+				),
+			),
+		/checkout script never executed/,
+	);
 });
