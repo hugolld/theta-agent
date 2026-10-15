@@ -109,7 +109,9 @@ function main(argv) {
 	} else if (prBody) {
 		console.log("\nno evidence attestation in the PR body — freshness check skipped.");
 	} else {
-		console.log("\nno PR body found (no PR yet?) — freshness check skipped.");
+		console.log(
+			"\nno PR body available (no PR, empty body, or detached HEAD) — freshness check skipped.",
+		);
 	}
 	console.log("\nstrike complete: every child is landed or closed.");
 	return 0;
