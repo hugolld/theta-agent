@@ -29,13 +29,13 @@ Current state: 0.1.0 — M2 is built. The M1 base ships the `theta` launcher (a 
 1. Start the strike in a new git worktree on a feature branch.
 2. On the first commit, open a **draft** PR against `main`.
 3. Commit and push every further change to that PR branch.
-4. Before marking the PR ready, run `node scripts/check-strike.mjs <spec#>` — every child of the spec issue must be landed on the branch or already closed (a closeout ticket for the post-merge steps is the expected open exception). Refresh the PR's title and body to cover every landed child, then mark the PR ready and run a dedicated PR review pass before merging to `main`.
+4. Before marking the PR ready, run `node scripts/check-strike.mjs <spec#>` — every child of the spec issue must be landed on the branch or already closed (a closeout ticket for the post-merge steps is the expected open exception). The same gate fails a PR whose body attests dogfood evidence at an SHA that is not HEAD — recapture the pair, never rebind the words. Refresh the PR's title and body to cover every landed child, then mark the PR ready and run a dedicated PR review pass before merging to `main`. For milestone-sized PRs, consider one external-model review round before merge — M2's Codex round caught a defect class two same-model rounds missed.
 5. The adversarial loop's stop condition is judgment: once findings require crafted attack strings that honest usage would never produce, stop, record them as a residual trust boundary, and move on. "Findings stay wording-level for two consecutive rounds" applies only to findings a realistic session could trigger; if it has not fired within ~10 rounds, it will not — an adversarial reviewer regenerates findings indefinitely, and "clean" is not a stopping condition it can reach.
 6. While a review round is in flight, hold further commits on that branch; when its report arrives, triage against the SHA it reviewed.
 
 ## Publishing
 
-`npm publish` is owner-only (browser 2FA; non-interactive publishes fail with `EOTP`). Prepare the release, commit, push — then stop and let the owner publish.
+`npm publish` is owner-only (browser 2FA; non-interactive publishes fail with `EOTP`). Prepare the release, commit, push — then stop and let the owner publish. It runs from the repo checkout — the committed `.npmrc` pins `registry.npmjs.org` (the machine default is npmmirror). A publish that fails `E404` before any OTP prompt is a lapsed npmjs token, not a missing package: run `npm login` from inside the repo, then retry.
 
 ## Agent skills
 
