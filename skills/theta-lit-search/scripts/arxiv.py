@@ -403,12 +403,12 @@ def build_parser() -> Parser:
 
 def parse_args(argv: list[str] | None) -> argparse.Namespace:
 	args = build_parser().parse_args(argv)
+	if not 1 <= args.retmax <= MAX_RESULTS:
+		fail(f"arxiv.py: --retmax must be 1..{MAX_RESULTS}", 1)
 	if args.query is not None:
 		args.query = args.query.strip()
 		if not args.query:
 			fail("arxiv.py: --query must be a non-empty term", 1)
-		if not 1 <= args.retmax <= MAX_RESULTS:
-			fail(f"arxiv.py: --retmax must be 1..{MAX_RESULTS}", 1)
 	else:
 		args.arxiv_ids = [identifier.strip() for identifier in args.arxiv_id.split(",")]
 		for identifier in args.arxiv_ids:

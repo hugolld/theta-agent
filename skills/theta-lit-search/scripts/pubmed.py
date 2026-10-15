@@ -339,12 +339,12 @@ def build_parser() -> Parser:
 
 def parse_args(argv: list[str] | None) -> argparse.Namespace:
 	args = build_parser().parse_args(argv)
+	if not 1 <= args.retmax <= MAX_UIDS:
+		fail(f"pubmed.py: --retmax must be 1..{MAX_UIDS}", 1)
 	if args.query is not None:
 		args.query = args.query.strip()
 		if not args.query:
 			fail("pubmed.py: --query must be a non-empty term", 1)
-		if not 1 <= args.retmax <= MAX_UIDS:
-			fail(f"pubmed.py: --retmax must be 1..{MAX_UIDS}", 1)
 	else:
 		args.pmids = [pmid.strip() for pmid in args.pmid.split(",")]
 		for pmid in args.pmids:

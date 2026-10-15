@@ -255,6 +255,8 @@ test("usage errors exit 1 without touching the network", { skip: skipReason }, (
 		["--query", "x", "--retmax", "0"],
 		["--query", "x", "--sort", "citationCount"],
 		["--query", "x", "--order", "sideways"],
+		["--arxiv-id", "1706.03762", "--retmax", "500"],
+		["--arxiv-id", "1706.03762", "--retmax", "0"],
 		["--arxiv-id", "not-an-id"],
 		["--arxiv-id", ""],
 		["--arxiv-id", "1706.03762", "--query", "both"],

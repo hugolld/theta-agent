@@ -195,6 +195,8 @@ test("usage errors exit 1 without touching the network", { skip: skipReason }, (
 		["--query", "x", "--retmax", "500"],
 		["--query", "x", "--retmax", "0"],
 		["--query", "x", "--sort", "citation_count"],
+		["--pmid", "123", "--retmax", "500"],
+		["--pmid", "123", "--retmax", "0"],
 		["--pmid", "not-a-pmid"],
 		["--pmid", "123", "--query", "both"],
 	];
