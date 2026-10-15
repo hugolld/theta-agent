@@ -155,6 +155,26 @@ test("per-PMID error inside HTTP 200 exits 3 with nothing on stdout", { skip: sk
 	assert.ok(run.stderr.includes("cannot get document summary"));
 });
 
+test("wrong-type result.uids inside HTTP 200 exits 3, not a confident empty answer", { skip: skipReason }, () => {
+	// The Codex closeout round: a string uids iterates to zero items, which
+	// once answered a malformed 200 with exit 0 and count 0.
+	const run = runPubmed(["--pmid", "39114817", "--json"], {
+		fixtureDir: "summary-uids-string/",
+	});
+	assert.equal(run.status, 3);
+	assert.equal(run.stdout, "");
+	assert.ok(run.stderr.includes("result.uids list"));
+});
+
+test("wrong-type esearchresult.idlist inside HTTP 200 exits 3", { skip: skipReason }, () => {
+	const run = runPubmed(["--query", "anything", "--json"], {
+		fixtureDir: "search-idlist-object/",
+	});
+	assert.equal(run.status, 3);
+	assert.equal(run.stdout, "");
+	assert.ok(run.stderr.includes("esearchresult.idlist"));
+});
+
 test("top-level error body inside HTTP 200 exits 3", { skip: skipReason }, () => {
 	const run = runPubmed(["--query", "anything", "--json"], { fixtureDir: "error-200/" });
 	assert.equal(run.status, 3);

@@ -208,9 +208,12 @@ def summarize_uids(uids: list[str], client: Eutils) -> list[dict]:
 		{"db": "pubmed", "id": ",".join(uids), "retmode": "json"},
 	)
 	result = payload.get("result")
-	if not isinstance(result, dict) or "uids" not in result:
+	# The container must be typed, not merely present: a string or dict uids
+	# iterates to zero items and would answer a malformed 200 with a confident
+	# empty success (the Codex closeout round caught exactly that).
+	if not isinstance(result, dict) or not isinstance(result.get("uids"), list):
 		raise ApiError(
-			f"pubmed.py: esummary.fcgi: HTTP 200 without result.uids: "
+			f"pubmed.py: esummary.fcgi: HTTP 200 without a result.uids list: "
 			f"{json.dumps(payload)[:200]}",
 			3,
 		)
@@ -242,10 +245,12 @@ def run_search(args: argparse.Namespace, client: Eutils) -> dict:
 		params["sort"] = args.sort
 	payload = client.call("esearch.fcgi", params)
 	result = payload.get("esearchresult")
-	if not isinstance(result, dict) or "idlist" not in result:
+	# Same typed-container rule as esummary: an idlist of any other type is a
+	# malformed 200, never a zero-hit answer.
+	if not isinstance(result, dict) or not isinstance(result.get("idlist"), list):
 		raise ApiError(
-			f"pubmed.py: esearch.fcgi: HTTP 200 without esearchresult.idlist: "
-			f"{json.dumps(payload)[:200]}",
+			f"pubmed.py: esearch.fcgi: HTTP 200 without an esearchresult.idlist "
+			f"list: {json.dumps(payload)[:200]}",
 			3,
 		)
 	# esearch reports count as a string; tolerate a JSON number defensively.

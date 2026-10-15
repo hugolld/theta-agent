@@ -94,8 +94,9 @@ Parameters the script sets: `query`, `limit` (1..100), `fields`.
   "code": "429"}` (live-observed 2026-10-11, message includes the
   key-request URL). The script classifies it as throttled whatever the HTTP
   status, like the other connectors' body-driven throttle checks.
-- A 200 body carrying an `error` key, a non-JSON body, or a missing
-  `data`/object shape surfaces as exit 3 — never as a sparse success.
+- A 200 body carrying an `error` key, a non-JSON body, or a missing or
+  wrong-type `data`/object shape (a paper object without the always-present
+  `paperId` included) surfaces as exit 3 — never as a sparse success.
 - 403 = bad key → exit 5. 429 = throttle → exit 4. Other non-200 → exit 2.
 
 ## The connector script

@@ -237,6 +237,26 @@ test("error inside an HTTP 200 body: exit 3", { skip: skipReason }, () => {
 	assert.ok(run.stderr.includes("Internal server error"), "stderr carries the body's error text");
 });
 
+test("a 200 paper object without paperId exits 3, never a blank record", { skip: skipReason }, () => {
+	// The Codex closeout round: an empty 200 object once extracted into a
+	// confident all-null record with count 1.
+	const run = runS2(["--doi", "10.1038/s41587-024-02123-4", "--json"], {
+		fixtureDir: "id-empty-object/",
+	});
+	assert.equal(run.status, 3);
+	assert.equal(run.stdout, "");
+	assert.ok(run.stderr.includes("paperId"));
+});
+
+test("a search data entry without paperId exits 3, never a blank record", { skip: skipReason }, () => {
+	const run = runS2(["--query", "crispr", "--json"], {
+		fixtureDir: "search-empty-paper/",
+	});
+	assert.equal(run.status, 3);
+	assert.equal(run.stdout, "");
+	assert.ok(run.stderr.includes("paperId"));
+});
+
 test("documented 400 error body with its status: exit 2", { skip: skipReason }, () => {
 	const run = runS2(["--query", "crispr", "--json"], { fixtureDir: "status-400/" });
 	assert.equal(run.status, 2);
@@ -279,6 +299,10 @@ test("usage errors exit 1 without touching the network", { skip: skipReason }, (
 		["--doi", "10.1038/s41587-024-02123-4", "--retmax", "500"],
 		["--doi", "not-a-doi"],
 		["--doi", ""],
+		// URL delimiters pasted in from a URL: the suffix rides in the request
+		// path verbatim, so these must fail visible, not issue a different
+		// request (the Codex closeout round).
+		["--doi", "10.1038/s41587-024-02123-4?fields=title#frag"],
 		["--doi", "10.1038/s41587-024-02123-4", "--query", "both"],
 	];
 	for (const args of cases) {

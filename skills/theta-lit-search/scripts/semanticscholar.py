@@ -84,7 +84,10 @@ FIELDS = (
 	"externalIds,publicationDate"
 )
 
-DOI_RE = re.compile(r"^10\.\d{4,9}/\S+$")
+#: `?` and `#` never appear inside a DOI suffix -- they are URL delimiters.
+#: The suffix rides in the request path verbatim, so a DOI pasted from a URL
+#: must fail here as a usage error, not silently build a different request.
+DOI_RE = re.compile(r"^10\.\d{4,9}/[^?#\s]+$")
 
 ZERO_NOTE_SEARCH = (
 	"zero results is Semantic Scholar's genuine no-match answer for this "
@@ -292,10 +295,13 @@ def run_search(args: argparse.Namespace, client: SemanticScholar) -> dict:
 			3,
 		)
 	for paper in data:
-		if not isinstance(paper, dict):
+		# paperId is the one field the API documents as always returned, so it
+		# is the paper-object test: an empty or paperId-less dict is a
+		# malformed 200, never a blank record.
+		if not isinstance(paper, dict) or not collapse_ws(paper.get("paperId")):
 			raise ApiError(
 				f"semanticscholar.py: paper/search: HTTP 200 data entry is not "
-				f"an object: {json.dumps(paper)[:120]}",
+				f"a paper object (paperId missing): {json.dumps(paper)[:120]}",
 				3,
 			)
 	total = payload.get("total")
@@ -319,6 +325,14 @@ def run_search(args: argparse.Namespace, client: SemanticScholar) -> dict:
 
 def run_summary(args: argparse.Namespace, client: SemanticScholar) -> dict:
 	payload = client.get_paper(args.doi)
+	if payload is not None and not collapse_ws(payload.get("paperId")):
+		# Same paper-object test as the search path: a 200 dict without the
+		# always-present paperId is a wrong-shape body, not a blank paper.
+		raise ApiError(
+			f"semanticscholar.py: paper/DOI:{args.doi}: HTTP 200 paper object "
+			f"without the always-present paperId: {json.dumps(payload)[:200]}",
+			3,
+		)
 	records = [extract_record(payload)] if payload is not None else []
 	return attach_provenance(
 		{
@@ -414,7 +428,8 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
 		if not DOI_RE.match(args.doi):
 			fail(
 				f"semanticscholar.py: --doi must be a bare DOI like "
-				f"10.1038/s41587-024-02123-4, got {args.doi!r}",
+				f"10.1038/s41587-024-02123-4 (no '?' or '#' -- URL delimiters "
+				f"never appear in a DOI suffix), got {args.doi!r}",
 				1,
 			)
 	return args
