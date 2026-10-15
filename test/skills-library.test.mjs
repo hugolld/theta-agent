@@ -282,6 +282,10 @@ const scanSurfaces = [
 	"README.md",
 	"CLAUDE.md",
 	"skills/theta-research-loop/SKILL.md",
+	"skills/theta-lit-search/SKILL.md",
+	"skills/theta-lit-search/references/pubmed.md",
+	"skills/theta-lit-search/references/arxiv.md",
+	"skills/theta-lit-search/references/semantic-scholar.md",
 	"test/manifest.test.mjs",
 	"test/skills-library.test.mjs",
 ];
