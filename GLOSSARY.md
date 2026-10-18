@@ -31,3 +31,19 @@ _Avoid_: upgrade, sync, upstream pull
 **Tracer**:
 The first slice of a batch, taken end-to-end to prove the pattern the remaining slices then repeat mechanically; M1's tracer vendored two K-Dense skills and shipped them alongside the self-authored orchestrator.
 _Avoid_: pilot, spike
+
+**Project notebook**:
+The durable, project-scoped record of a research effort — provenance entries with their evidence — accumulating across sessions and tools in the research project's workspace. M3 ships it.
+_Avoid_: lab notebook, session receipts
+
+**Provenance entry**:
+One dated append to the project notebook; one of five types — hypothesis, method, observation, decision, confidence — carrying evidence-to-hypothesis links.
+_Avoid_: provenance record, run receipt
+
+**Evidence item**:
+A recorded source with its retrieval details and content-addressed snapshot; M3 stores the connector's structured output as the snapshot.
+_Avoid_: evidence package, citation record
+
+**Evidence grade**:
+The Ehrlich-line trust mark on an evidence item or an observation — re-executed, cross-checked, or asserted; it grades sources, never the researcher's judgment.
+_Avoid_: trust score, confidence level
