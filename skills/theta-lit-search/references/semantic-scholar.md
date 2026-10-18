@@ -34,7 +34,7 @@ Datasets `.../datasets/v1` — and are out of scope for this connector.
   header names via `capitalize()`, so the wire form is `X-api-key`; HTTP
   field names are case-insensitive by protocol (RFC 9110), so the two
   spellings are the same header — the first live dogfood run closes this
-  empirically. The provenance block records the header name with the value
+  empirically. provenance.calls records the header name with the value
   redacted.
 - **403 means the key is wrong** (s2-folks FAQ): the script exits 5, not 2,
   so a rejected credential never reads as a network failure.

@@ -13,8 +13,8 @@ the documented Graph API errors are {"error": "..."} shapes, the throttle
 body is {"message": ..., "code": "429"} (live-observed; no Retry-After, no
 x-ratelimit headers, so backoff is local, never header-driven), and 403
 means the key itself was rejected. The key travels in the case-sensitive
-x-api-key header; provenance records the header name with the value
-redacted, so the call stays repeatable with the reader's own key.
+x-api-key header; provenance.calls records the header name with the
+value redacted, so the call stays repeatable with the reader's own key.
 
 Exit codes -- the documented contract (see SKILL.md):
   0  success; zero results included (an unknown DOI is a genuine no-match,
@@ -210,7 +210,7 @@ class SemanticScholar:
 	"""One paced, keyed Graph API session: key, transport, provenance.
 
 	Mirrors Eutils/ArxivApi. The key rides in the x-api-key header (never in
-	the URL), so the provenance record keeps the header *name* with the value
+	the URL), so provenance.calls keeps the header *name* with the value
 	redacted -- the call stays repeatable with the reader's own key.
 	"""
 
