@@ -284,6 +284,16 @@ function auditSnapshot(thetaDir, addr, digest, citedFrom) {
 	};
 }
 
+// The shared reference-resolution guard: a confidence's subject and an
+// item's supports link are the same shape — a field naming a hypothesis
+// entry recorded earlier (the recorder only appends, so it can never write
+// a forward or dangling reference).
+function namesEarlierHypothesis(known, at, field, ref) {
+	if (!known.has(ref)) {
+		throw new Error(`${at} ${field}: ${JSON.stringify(ref)} names no earlier hypothesis entry`);
+	}
+}
+
 // Validates the project notebook the recorder writes (ADR 0003): every line
 // of notebook.jsonl parses into a typed, dated entry — one of the five
 // types, ids sequenced per type — whose evidence item cites a snapshot that
@@ -383,17 +393,19 @@ export function auditNotebook(thetaDirArg) {
 		}
 		// A confidence names the hypothesis it judges; the reference must
 		// resolve to an earlier hypothesis entry, like an item's supports.
+		// The field is confidence-only — a `hypothesis` field anywhere else
+		// is a shape the recorder can never write.
 		if (spec.judges) {
 			if (!nonEmptyString(entry.hypothesis)) {
 				throw new Error(
 					`${where} hypothesis: expected the judged hypothesis id, got ${JSON.stringify(entry.hypothesis)}`,
 				);
 			}
-			if (!knownHypotheses.has(entry.hypothesis)) {
-				throw new Error(
-					`${where} hypothesis: ${JSON.stringify(entry.hypothesis)} names no earlier hypothesis entry`,
-				);
-			}
+			namesEarlierHypothesis(knownHypotheses, where, "hypothesis", entry.hypothesis);
+		} else if (entry.hypothesis !== undefined) {
+			throw new Error(
+				`${where} hypothesis: only a confidence entry names a judged hypothesis`,
+			);
 		}
 		const evidencePresent = entry.evidence !== undefined;
 		if (spec.evidence === "required" && !evidencePresent) {
@@ -452,11 +464,14 @@ export function auditNotebook(thetaDirArg) {
 						`${at} supports: an evidence-to-hypothesis link rides an observation's evidence item`,
 					);
 				}
-				if (!nonEmptyString(item.supports) || !knownHypotheses.has(item.supports)) {
-					throw new Error(
-						`${at} supports: ${JSON.stringify(item.supports)} names no earlier hypothesis entry`,
-					);
-				}
+				namesEarlierHypothesis(knownHypotheses, at, "supports", item.supports);
+			}
+			// The recorder's single --grade flag stamps the observation and
+			// its item together; a divergence is not a shape it can write.
+			if (entry.type === "observation" && item.grade !== entry.grade) {
+				throw new Error(
+					`${at} grade: ${JSON.stringify(item.grade)} diverges from the observation's own grade (${JSON.stringify(entry.grade)}) — the recorder stamps both from one flag`,
+				);
 			}
 			const addr = /^evidence\/([0-9a-f]{64})\.json$/.exec(item.snapshot);
 			if (!addr) {

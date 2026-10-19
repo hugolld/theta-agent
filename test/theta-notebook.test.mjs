@@ -386,7 +386,8 @@ test("unresolved references exit 1 and append nothing", { skip: skipReason }, as
 		{
 			name: "observation supporting an unknown hypothesis",
 			args: [
-				"--observation", OBSERVATION, ...["--evidence", evidenceFixture, "--grade", "asserted"],
+				"--observation", OBSERVATION,
+				"--evidence", evidenceFixture, "--grade", "asserted",
 				"--supports", "hyp-0009",
 			],
 		},

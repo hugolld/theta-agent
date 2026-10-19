@@ -1783,6 +1783,20 @@ test("auditNotebook enforces the batch entry shapes", (t) => {
 			re: /grade/,
 		},
 		{
+			name: "observation item grade diverging from the entry's",
+			mut: (e) => {
+				e[2].evidence[0].grade = "asserted";
+			},
+			re: /diverges/,
+		},
+		{
+			name: "hypothesis field on a non-confidence entry",
+			mut: (e) => {
+				e[0].hypothesis = "hyp-0001";
+			},
+			re: /only a confidence entry/,
+		},
+		{
 			name: "grade merged onto a hypothesis entry",
 			mut: (e) => {
 				e[0].grade = "asserted";
