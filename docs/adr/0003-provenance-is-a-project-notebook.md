@@ -1,0 +1,17 @@
+# 0003 — Provenance is a project notebook written by a skill-path script
+
+- **Status**: accepted (2026-10-17)
+- **Context**: M3 records provenance (README roadmap). The 2026-09-28 pi-science handoff sketched a `provenance.ts` extension persisting tool runs and source references through pi's `appendEntry()`. Two later decisions moved the ground: the K-Dense BYOK study (T10) adopted the `kady-notebook` schema — "do not invent a parallel schema" — as a project-durable record, and ADR 0002 fixed the repo's enforcement idiom on Theta-owned skills with stdlib helper scripts. An M3 scoping round (2026-10-17) reconciled the sketches against pi's actual API: `appendEntry` persists extension state inside a session file under `~/.pi/agent/sessions/` — never model-visible, tied to one session — the wrong home for a record that must accumulate across sessions, tools, and later milestones (M4 job records, M7 rendering).
+- **Decision**: Provenance is a **project notebook** (GLOSSARY): a `.theta/` directory in the research project's workspace holding `notebook.jsonl` — dated **provenance entries** in five types (hypothesis, method, observation, decision, confidence) with evidence-to-hypothesis links — and `evidence/`, content-addressed snapshots of each **evidence item** (the connector's structured output, not raw HTTP bodies). Each provenance entry is appended by a skill-path Python script in a new Theta-owned skill, `theta-notebook`, obeying the connector-script invariants (`docs/agents/connector-scripts.md`); skill doctrine, not an extension, tells the model when to record. Each evidence item carries an **evidence grade** — re-executed, cross-checked, or asserted, ported from the Ehrlich line — which grades the source; the confidence entry type records the researcher's judgment on a hypothesis, and the two never merge. The format is Theta-owned: kady-notebook concepts are adopted, byte-compatibility is not promised. M2 connector scripts stay untouched — the recorder hangs entries off their existing `provenance.calls` output.
+
+## Considered options
+
+- **`appendEntry` extension (the vault sketch)** — persists extension state in the session's entry tree for state reconstruction on reload; it is not a durable project store, and nothing outside that session can render it. Rejected on scope: the notebook belongs to the research project, not to any one session.
+- **pi tool registration (`registerTool`)** — ADR 0002's two-arm contest found no visible, repeatable registered-tool advantage at the connector layer, and its revisit trigger is the M4 gateway, not provenance. Nothing here reopens that verdict.
+- **`tool_execution_end` hook auto-capture** — appends an entry whenever a connector script runs, with zero model effort, but can only transcribe repeat-the-call records; hypothesis, method, decision, and confidence entries need model judgment, so a second manual mechanism would still be required.
+
+## Consequences
+
+- The notebook is plain files in the project: inspectable, diff-friendly, and renderable by the M7 workbench with no pi runtime.
+- `.theta/` is gitignored in dogfood runs so the clean-tree proof holds; the dogfood auditor grows a notebook-written attestation (captured entry files, parsed and dated — never model self-report).
+- FAIR-run shapes wait for M4; approval gates wait for M5. The handoff's `provenance.ts` and `prompts/` sketches and its five-stage list are superseded — the M3 spec strike records the vault edits.
