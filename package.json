@@ -1,6 +1,6 @@
 {
 	"name": "theta-agent",
-	"version": "0.2.0",
+	"version": "0.3.0",
 	"description": "Theta — a science co-researcher agent built as a package for the pi coding agent harness",
 	"keywords": [
 		"pi",
