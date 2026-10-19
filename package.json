@@ -36,6 +36,7 @@
 	},
 	"scripts": {
 		"lint": "eslint .",
+		"lint:py": "uvx ruff check skills/theta-lit-search/scripts skills/theta-notebook/scripts",
 		"test": "node --test",
 		"typecheck": "tsc --noEmit"
 	},
