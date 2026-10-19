@@ -88,6 +88,16 @@ node scripts/audit-dogfood.mjs "$sd2" "skills/theta-lit-search/SKILL.md" "skills
 
 On success the attestation additionally carries `script-executed` with the resolved script path and `script-content`, the executed file's digest.
 
+The notebook-written attestation is a fourth optional argument on the same command — the checkout-relative path of the `.theta` project notebook directory. It extends the script-executed leg rather than standing alone: the same invocation must also pass the recorder itself as the script argument (`skills/theta-notebook/scripts/notebook.py` — anything else is refused, and a notebook argument without the script argument fails outright), so the attested fact is "the session executed the recorder, and the notebook the checkout holds parses into well-formed, dated provenance entries" — captured files, never the model's self-report. Notebook files alone, however clean, attest nothing: the not-run golden fixture is exactly that case and goes red. Passing `-` as the skill argument skips the read leg when only the execution and notebook legs are wanted.
+
+The files are judged the way the recorder writes them (ADR 0003). Every line of `notebook.jsonl` must parse into a typed provenance entry: a sequenced `hyp-` id (0001, 0002, … in file order), the `hypothesis` type, a calendar-valid `date`, non-empty text, and a non-empty evidence list whose items carry a non-empty source, a non-empty endpoints list, a query that is a string or null, a calendar-valid `retrieved`, one of the three evidence grades, and an `evidence/<sha256>.json` address. Every cited snapshot must resolve inside `.theta`, hash to its own address, parse as a connector `--json` output (source, `provenance.calls` with endpoint and url, an `accessed` date), and agree with the evidence item it backs — source, endpoints, query, retrieval date. Extra snapshot files are tolerated: the recorder's write order orphans snapshots, never entries. The routed prompt must not name `notebook.jsonl`, for the same reason it must not name the skill or the script.
+
+```sh
+node scripts/audit-dogfood.mjs "$sd2" "skills/theta-notebook/SKILL.md" "skills/theta-notebook/scripts/notebook.py" ".theta"
+```
+
+On success the attestation additionally carries `notebook-written` with the resolved directory, `notebook-entries` and `notebook-evidence` (entries and distinct snapshots found), and `notebook-digest`, the SHA-256 of `notebook.jsonl`. Golden fixture session dirs — the pass case, recorder not run, a malformed entry, an undated entry — live under `test/fixtures/notebook-audit/`; the offline suite runs the auditor CLI on each and requires green on pass, red on every failure. One residual of its own, beyond the script-executed ones it inherits: the project notebook accumulates across sessions by design, so entries may predate the audited run — the attestation is structural (the recorder executed in this session, and the checkout's notebook is recorder-shaped), not a proof that this session wrote these exact lines; the operator's capture voucher covers the gap, as elsewhere.
+
 ### Residuals
 
 The script-executed attestation's residual trust boundaries, accumulated across the #21 adversarial review loop and co-located here. The loop stopped by judgment once its findings reached the crafted-command class, per its own termination rule.

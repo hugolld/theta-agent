@@ -153,6 +153,278 @@ export function resolveCheckoutScript(rootArg, script) {
 	return target;
 }
 
+// A calendar-valid YYYY-MM-DD date string — the form the recorder and the
+// connectors stamp (`date.today().isoformat()`, `provenance.accessed`). A
+// shape check alone would accept 2026-02-30; a date is attestable only when
+// it names a real day.
+export function isIsoDate(s) {
+	if (typeof s !== "string") return false;
+	const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
+	if (!m) return false;
+	const y = Number(m[1]);
+	const mo = Number(m[2]);
+	const d = Number(m[3]);
+	if (mo < 1 || mo > 12) return false;
+	const leap = (y % 4 === 0 && y % 100 !== 0) || y % 400 === 0;
+	const days = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+	return d >= 1 && d <= days[mo - 1];
+}
+
+// Resolves the notebook argument to an absolute path and requires an
+// existing directory inside the checkout — the `.theta/` the recorder
+// writes under the session's cwd, gitignored so the clean-tree proof holds
+// with a notebook present.
+export function resolveNotebookDir(rootArg, notebook) {
+	const root = fs.realpathSync(rootArg);
+	const lexical = path.resolve(root, notebook);
+	let target = lexical;
+	try {
+		target = fs.realpathSync(lexical);
+	} catch {
+		throw new Error(`notebook argument does not resolve on disk: ${notebook}`);
+	}
+	if (!fs.statSync(target).isDirectory() || !target.startsWith(root + path.sep)) {
+		throw new Error(
+			`notebook argument must be a directory inside the checkout, got: ${notebook}`,
+		);
+	}
+	return target;
+}
+
+// The recorder's grade vocabulary (SKILL.md): a grade rates the source, and
+// anything outside the vocabulary is not a grade.
+const NOTEBOOK_GRADES = new Set(["asserted", "cross-checked", "re-executed"]);
+
+// Reads one cited snapshot and derives the evidence fields the recorder
+// derives from it (parse_evidence's logic, mirrored): the snapshot must be
+// a connector `--json` output — typed shape, not presence — and its bytes
+// must hash to the address that names it. Content addressing is what makes
+// the file self-verifying: no digest match, no attestation.
+function auditSnapshot(thetaDir, addr, digest, citedFrom) {
+	const lexical = path.join(thetaDir, addr);
+	let real;
+	try {
+		real = fs.realpathSync(lexical);
+	} catch {
+		throw new Error(`${addr} (cited on ${citedFrom}) does not exist`);
+	}
+	if (!real.startsWith(thetaDir + path.sep)) {
+		throw new Error(
+			`${addr} (cited on ${citedFrom}) resolves outside the notebook directory`,
+		);
+	}
+	if (!fs.statSync(real).isFile()) {
+		throw new Error(`${addr} (cited on ${citedFrom}) is not a regular file`);
+	}
+	const buf = fs.readFileSync(real);
+	let payload;
+	try {
+		payload = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(buf));
+	} catch (e) {
+		throw new Error(`${addr} (cited on ${citedFrom}) is not valid JSON: ${e.message}`);
+	}
+	const shapeError = (why) =>
+		new Error(`${addr} (cited on ${citedFrom}) is not a connector output: ${why}`);
+	if (typeof payload !== "object" || payload === null || Array.isArray(payload)) {
+		throw shapeError("not a JSON object");
+	}
+	if (typeof payload.source !== "string" || payload.source === "") {
+		throw shapeError("lacks a non-empty string 'source'");
+	}
+	const provenance = payload.provenance;
+	if (
+		typeof provenance !== "object" ||
+		provenance === null ||
+		Array.isArray(provenance)
+	) {
+		throw shapeError("lacks a 'provenance' object");
+	}
+	if (!Array.isArray(provenance.calls) || provenance.calls.length === 0) {
+		throw shapeError("provenance.calls must be a non-empty list");
+	}
+	const endpoints = [];
+	for (const call of provenance.calls) {
+		if (typeof call !== "object" || call === null) {
+			throw shapeError("every provenance call must be an object");
+		}
+		if (typeof call.endpoint !== "string" || call.endpoint === "") {
+			throw shapeError("every provenance call needs a non-empty string 'endpoint'");
+		}
+		if (typeof call.url !== "string" || call.url === "") {
+			throw shapeError("every provenance call needs a non-empty string 'url'");
+		}
+		if (!endpoints.includes(call.endpoint)) endpoints.push(call.endpoint);
+	}
+	if (!isIsoDate(provenance.accessed)) {
+		throw shapeError("provenance.accessed must be a YYYY-MM-DD date string");
+	}
+	if (payload.query !== null && payload.query !== undefined && typeof payload.query !== "string") {
+		throw shapeError("'query', when present, must be a string");
+	}
+	if (createHash("sha256").update(buf).digest("hex") !== digest) {
+		throw new Error(
+			`${addr} (cited on ${citedFrom}) content does not hash to its own address (sha256 mismatch)`,
+		);
+	}
+	return {
+		source: payload.source,
+		endpoints,
+		query: payload.query ?? null,
+		retrieved: provenance.accessed,
+	};
+}
+
+// Validates the project notebook the recorder writes (ADR 0003): every line
+// of notebook.jsonl parses into a typed, dated hypothesis entry whose
+// evidence item cites a snapshot that exists, hashes to its own address,
+// parses as a connector output, and agrees with the item it backs (source,
+// endpoints, query, retrieval date). Extra snapshot files are tolerated —
+// the recorder's write order orphans snapshots, never entries. Returns the
+// counts and raw bytes the attestation names; throws on any failure. The
+// shape is the tracer slice's (#37); the M3 batch entry types widen it.
+export function auditNotebook(thetaDirArg) {
+	// Canonicalize the directory itself: mount aliases (/var vs /private/var)
+	// would otherwise fail the snapshot containment check below.
+	const thetaDir = fs.realpathSync(thetaDirArg);
+	const notebookPath = path.join(thetaDir, "notebook.jsonl");
+	let st = null;
+	try {
+		st = fs.statSync(notebookPath);
+	} catch {
+		// missing is the common failure: the recorder never produced anything
+	}
+	if (st === null || !st.isFile()) {
+		throw new Error(`notebook.jsonl is missing in ${thetaDir}: the recorder never produced one`);
+	}
+	const notebookBuf = fs.readFileSync(notebookPath);
+	let text;
+	try {
+		text = new TextDecoder("utf-8", { fatal: true }).decode(notebookBuf);
+	} catch (e) {
+		throw new Error(`corrupt notebook.jsonl: ${e.message}`);
+	}
+	if (text === "") {
+		throw new Error("no entries in notebook.jsonl — the recorder never produced anything");
+	}
+	const lines = text.replace(/\n$/, "").split("\n");
+	const entries = [];
+	for (let i = 0; i < lines.length; i++) {
+		const where = `notebook.jsonl line ${i + 1}`;
+		if (lines[i].trim() === "") {
+			throw new Error(`${where} is blank — the recorder never writes blank lines`);
+		}
+		let entry;
+		try {
+			entry = JSON.parse(lines[i]);
+		} catch (e) {
+			throw new Error(`${where} is not JSON: ${e.message}`);
+		}
+		if (typeof entry !== "object" || entry === null || Array.isArray(entry)) {
+			throw new Error(`${where} is not a JSON object`);
+		}
+		entries.push(entry);
+	}
+	const snapshots = new Map(); // address -> derived fields, each file read once
+	for (let i = 0; i < entries.length; i++) {
+		const entry = entries[i];
+		const where = `notebook.jsonl line ${i + 1}`;
+		const wantId = `hyp-${String(i + 1).padStart(4, "0")}`;
+		if (entry.id !== wantId) {
+			throw new Error(
+				`${where} id: expected ${wantId} (the recorder sequences ids from 1), got ${JSON.stringify(entry.id)}`,
+			);
+		}
+		if (entry.type !== "hypothesis") {
+			throw new Error(
+				`${where} type: expected "hypothesis", got ${JSON.stringify(entry.type)}`,
+			);
+		}
+		if (!isIsoDate(entry.date)) {
+			throw new Error(
+				`${where} date: expected a YYYY-MM-DD calendar date, got ${JSON.stringify(entry.date)}`,
+			);
+		}
+		if (typeof entry.text !== "string" || entry.text.trim() === "") {
+			throw new Error(
+				`${where} text: expected non-empty text, got ${JSON.stringify(entry.text)}`,
+			);
+		}
+		if (!Array.isArray(entry.evidence) || entry.evidence.length === 0) {
+			throw new Error(
+				`${where} evidence: expected a non-empty list, got ${JSON.stringify(entry.evidence)}`,
+			);
+		}
+		for (let j = 0; j < entry.evidence.length; j++) {
+			const item = entry.evidence[j];
+			const at = `${where} evidence item ${j + 1}`;
+			if (typeof item !== "object" || item === null || Array.isArray(item)) {
+				throw new Error(`${at}: expected an object, got ${JSON.stringify(item)}`);
+			}
+			if (typeof item.source !== "string" || item.source === "") {
+				throw new Error(
+					`${at} source: expected a non-empty string, got ${JSON.stringify(item.source)}`,
+				);
+			}
+			if (
+				!Array.isArray(item.endpoints) ||
+				item.endpoints.length === 0 ||
+				item.endpoints.some((e) => typeof e !== "string" || e === "")
+			) {
+				throw new Error(
+					`${at} endpoints: expected a non-empty list of non-empty strings, got ${JSON.stringify(item.endpoints)}`,
+				);
+			}
+			if (item.query !== null && typeof item.query !== "string") {
+				throw new Error(
+					`${at} query: expected a string or null, got ${JSON.stringify(item.query)}`,
+				);
+			}
+			if (!isIsoDate(item.retrieved)) {
+				throw new Error(
+					`${at} retrieved: expected a YYYY-MM-DD calendar date, got ${JSON.stringify(item.retrieved)}`,
+				);
+			}
+			if (!NOTEBOOK_GRADES.has(item.grade)) {
+				throw new Error(
+					`${at} grade: expected one of asserted, cross-checked, re-executed, got ${JSON.stringify(item.grade)}`,
+				);
+			}
+			const addr = /^evidence\/([0-9a-f]{64})\.json$/.exec(item.snapshot);
+			if (!addr) {
+				throw new Error(
+					`${at} snapshot: expected an evidence/<sha256>.json address, got ${JSON.stringify(item.snapshot)}`,
+				);
+			}
+			let derived = snapshots.get(item.snapshot);
+			if (derived === undefined) {
+				derived = auditSnapshot(thetaDir, item.snapshot, addr[1], where);
+				snapshots.set(item.snapshot, derived);
+			}
+			if (item.source !== derived.source) {
+				throw new Error(
+					`${at} source ${JSON.stringify(item.source)} does not match its snapshot (${JSON.stringify(derived.source)})`,
+				);
+			}
+			if (JSON.stringify(item.endpoints) !== JSON.stringify(derived.endpoints)) {
+				throw new Error(
+					`${at} endpoints do not match the snapshot's calls (${derived.endpoints.join(", ")})`,
+				);
+			}
+			if (item.query !== derived.query) {
+				throw new Error(
+					`${at} query does not match its snapshot (${JSON.stringify(derived.query)})`,
+				);
+			}
+			if (item.retrieved !== derived.retrieved) {
+				throw new Error(
+					`${at} retrieved ${JSON.stringify(item.retrieved)} does not match its snapshot (${JSON.stringify(derived.retrieved)})`,
+				);
+			}
+		}
+	}
+	return { entries: entries.length, snapshots: snapshots.size, notebookBuf };
+}
+
 // ---------------------------------------------------------------------------
 // Shell command inspection
 //
@@ -1041,8 +1313,11 @@ function pairedCalls(tool, graph, userIndex) {
 // checkout-relative SKILL.md path) additionally requires a successful read
 // tool call on that exact file; `script` (a checkout-relative script path)
 // additionally requires a bash tool call that executed that exact file,
-// paired with a non-error tool result.
-export function auditSession(dir, rootArg, skill, script) {
+// paired with a non-error tool result; `notebook` (a checkout-relative
+// notebook directory) additionally requires the script leg to have attested
+// the theta-notebook recorder itself and the notebook files under that
+// directory to parse into well-formed, dated provenance entries.
+export function auditSession(dir, rootArg, skill, script, notebook) {
 	const root = fs.realpathSync(rootArg);
 	// Mount aliases (e.g. /var vs /private/var on macOS) give the same tree
 	// two spellings; lexical containment accepts either spelling of root.
@@ -1402,9 +1677,10 @@ export function auditSession(dir, rootArg, skill, script) {
 		`model ${wantModel[1]}\n` +
 		`inventory ${shaText(inventoryText)}\n` +
 		`prompt ${shaText(promptWanted)}`;
-	// The spot-check attestations — skill read, script execution — share one
-	// tool-call/result graph and one prompt-neutrality gate.
-	if (skill !== undefined || script !== undefined) {
+	// The spot-check attestations — skill read, script execution, notebook
+	// written — share one tool-call/result graph and one prompt-neutrality gate.
+	let scriptTarget = null; // the script leg's resolved target, read by the notebook leg
+	if (skill !== undefined || script !== undefined || notebook !== undefined) {
 		// Cross-script lookalikes (Cyrillic і for Latin i) survive NFKC, so
 		// the recorded prompt must be pure ASCII: the operator's task is
 		// English text, and anything else fails closed.
@@ -1518,6 +1794,48 @@ export function auditSession(dir, rootArg, skill, script) {
 				);
 			}
 			out += `\nscript-executed ${target}\nscript-content ${createHash("sha256").update(scriptBuf).digest("hex")}`;
+			scriptTarget = target;
+		}
+		if (notebook !== undefined) {
+			// The notebook-written attestation extends the script-executed leg:
+			// notebook files alone — however well-formed — attest nothing
+			// without the session's executed checkout copy of the recorder,
+			// so the script argument must be the recorder itself.
+			if (scriptTarget === null) {
+				throw new Error(
+					"the notebook-written attestation requires the script leg — pass the theta-notebook recorder as the third argument",
+				);
+			}
+			let recorder;
+			try {
+				recorder = fs.realpathSync(
+					path.join(skillRoot, "theta-notebook", "scripts", "notebook.py"),
+				);
+			} catch {
+				throw new Error(
+					"the notebook-written attestation requires the theta-notebook recorder as the script argument — the checkout has no such script",
+				);
+			}
+			if (scriptTarget !== recorder) {
+				throw new Error(
+					`the notebook-written attestation requires the theta-notebook recorder as the script argument, got: ${script}`,
+				);
+			}
+			// The routed prompt must not name the notebook file either — the
+			// artifact is part of the skill's capability, and naming it is
+			// instruction, not routing.
+			if (promptNamesAny([normalize("notebook.jsonl")])) {
+				throw new Error(
+					"spot-check prompt names the notebook file — a routed task must reach it on its own",
+				);
+			}
+			const thetaDir = resolveNotebookDir(root, notebook);
+			const report = auditNotebook(thetaDir);
+			out +=
+				`\nnotebook-written ${thetaDir}` +
+				`\nnotebook-entries ${report.entries}` +
+				`\nnotebook-evidence ${report.snapshots}` +
+				`\nnotebook-digest ${createHash("sha256").update(report.notebookBuf).digest("hex")}`;
 		}
 	}
 	// Final state recheck: the audited bytes and the cited HEAD must still
@@ -1563,10 +1881,14 @@ function manifestSkillRoot(root) {
 }
 
 function main(argv) {
-	const [dir, skill, script] = argv;
+	const [dir, skillRaw, script, notebook] = argv;
+	// `-` skips the skill argument when only the later legs are wanted — the
+	// notebook leg itself requires the script argument, so only the skill
+	// position needs a placeholder.
+	const skill = skillRaw === "-" ? undefined : skillRaw;
 	const root = fs.realpathSync(".");
 	try {
-		console.log(auditSession(dir, root, skill, script));
+		console.log(auditSession(dir, root, skill, script, notebook));
 	} catch (e) {
 		console.error(e.message);
 		return 1;

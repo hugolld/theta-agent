@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { execSync } from "node:child_process";
+import { execSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
 	ge,
@@ -13,6 +13,9 @@ import {
 	resolveCheckoutScript,
 	shellTokens,
 	commandResolvesToScript,
+	isIsoDate,
+	resolveNotebookDir,
+	auditNotebook,
 	auditSession,
 } from "../scripts/audit-dogfood.mjs";
 
@@ -1243,4 +1246,631 @@ test("auditSession accepts a sanitized real pi transcript (golden)", (t) => {
 			),
 		/checkout script never executed/,
 	);
+});
+
+// ---------------------------------------------------------------------------
+// Notebook-written attestation seam tests (#38). The evidence bytes are the
+// committed connector-output fixture — the recorder's whole contract is to
+// store exactly that shape, content-addressed, so the golden snapshot the
+// pass cases use is a real one.
+const evidenceBytes = fs.readFileSync("test/fixtures/notebook/pubmed-search.json");
+const snapshotHash = createHash("sha256").update(evidenceBytes).digest("hex");
+const snapshotAddr = `evidence/${snapshotHash}.json`;
+
+// A scratch .theta directory: notebook.jsonl text plus snapshot files (named
+// by content unless the case deliberately corrupts the addressing).
+function makeThetaDir(t, { notebookText, snapshots = [], orphans = [] } = {}) {
+	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "theta-dir-"));
+	t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+	if (notebookText !== undefined) {
+		fs.writeFileSync(path.join(dir, "notebook.jsonl"), notebookText);
+	}
+	if (snapshots.length > 0 || orphans.length > 0) {
+		fs.mkdirSync(path.join(dir, "evidence"));
+	}
+	for (const [name, content] of snapshots) {
+		fs.writeFileSync(path.join(dir, "evidence", name), content);
+	}
+	for (const name of orphans) {
+		fs.writeFileSync(path.join(dir, "evidence", name), "orphan bytes\n");
+	}
+	return dir;
+}
+
+const baseItem = {
+	source: "pubmed",
+	endpoints: ["esearch.fcgi", "esummary.fcgi"],
+	query: "CRISPR gene therapy",
+	retrieved: "2026-10-18",
+	grade: "asserted",
+	snapshot: snapshotAddr,
+};
+const baseEntry = {
+	id: "hyp-0001",
+	type: "hypothesis",
+	date: "2026-10-19",
+	text: "CRISPR-based gene editing can restore immune cell function in aged organisms",
+	evidence: [baseItem],
+};
+
+// One notebook line: the base entry with per-case mutations applied.
+function entryLine(mut = () => {}) {
+	const entry = structuredClone(baseEntry);
+	mut(entry);
+	return JSON.stringify(entry);
+}
+// A mutation that targets the entry's evidence item instead of the entry.
+function itemMut(mut = () => {}) {
+	return (entry) => {
+		const item = structuredClone(baseItem);
+		mut(item);
+		entry.evidence[0] = item;
+	};
+}
+
+test("isIsoDate accepts only real calendar dates in YYYY-MM-DD form", () => {
+	assert.equal(isIsoDate("2026-10-19"), true);
+	assert.equal(isIsoDate("2024-02-29"), true); // leap year
+	assert.equal(isIsoDate("2000-02-29"), true); // 400-rule leap year
+	for (const bad of [
+		"2026-02-29", // not a leap year
+		"2026-02-30",
+		"2026-13-01",
+		"2026-00-10",
+		"2026-10-00",
+		"2026-10-1", // unpadded
+		"26-10-01",
+		"2026/10/01",
+		"2026-10-19T00:00:00Z",
+		"",
+		"not-a-date",
+		20261019,
+		null,
+		undefined,
+	]) {
+		assert.equal(isIsoDate(bad), false, `expected reject: ${JSON.stringify(bad)}`);
+	}
+});
+
+test("auditNotebook attests a recorder-shaped notebook with its snapshots", (t) => {
+	const text = `${entryLine()}\n`;
+	const dir = makeThetaDir(t, {
+		notebookText: text,
+		snapshots: [[`${snapshotHash}.json`, evidenceBytes]],
+	});
+	const report = auditNotebook(dir);
+	assert.equal(report.entries, 1);
+	assert.equal(report.snapshots, 1);
+	// the attested digest is of the raw notebook bytes
+	assert.equal(
+		createHash("sha256").update(report.notebookBuf).digest("hex"),
+		createHash("sha256").update(text, "utf8").digest("hex"),
+	);
+
+	// two entries, one shared snapshot: the recorder's dedupe shape
+	const two = makeThetaDir(t, {
+		notebookText:
+			`${entryLine()}\n` +
+			entryLine((e) => {
+				e.id = "hyp-0002";
+				e.text = "Base editing avoids the double-strand breaks that limit HDR in HSCs";
+			}) +
+			"\n",
+		snapshots: [[`${snapshotHash}.json`, evidenceBytes]],
+	});
+	const twoReport = auditNotebook(two);
+	assert.equal(twoReport.entries, 2);
+	assert.equal(twoReport.snapshots, 1);
+
+	// an orphan snapshot is the recorder's documented crash shape, not a fault
+	const orphan = makeThetaDir(t, {
+		notebookText: `${entryLine()}\n`,
+		snapshots: [[`${snapshotHash}.json`, evidenceBytes]],
+		orphans: ["deadbeef.json"],
+	});
+	assert.equal(auditNotebook(orphan).entries, 1);
+});
+
+test("auditNotebook fails closed on missing, empty, or unparseable notebooks", (t) => {
+	const missing = makeThetaDir(t, {});
+	assert.throws(() => auditNotebook(missing), /notebook\.jsonl/);
+
+	const empty = makeThetaDir(t, { notebookText: "" });
+	assert.throws(() => auditNotebook(empty), /no entries/);
+
+	const blank = makeThetaDir(t, { notebookText: `${entryLine()}\n\n` });
+	assert.throws(() => auditNotebook(blank), /blank/);
+
+	const notJson = makeThetaDir(t, { notebookText: "this is not json\n" });
+	assert.throws(() => auditNotebook(notJson), /not JSON/);
+
+	const arrayLine = makeThetaDir(t, { notebookText: "[]\n" });
+	assert.throws(() => auditNotebook(arrayLine), /JSON object/);
+
+	// lossy bytes must not decode into passing evidence
+	const corrupt = makeThetaDir(t, { notebookText: `${entryLine()}\n` });
+	fs.writeFileSync(
+		path.join(corrupt, "notebook.jsonl"),
+		Buffer.concat([
+			Buffer.from(entryLine().slice(0, 20), "utf8"),
+			Buffer.from([0xff, 0xfe]),
+			Buffer.from("\n", "utf8"),
+		]),
+	);
+	assert.throws(() => auditNotebook(corrupt), /corrupt/);
+});
+
+test("auditNotebook enforces the typed entry shape", (t) => {
+	const cases = [
+		{
+			name: "id not sequenced",
+			mut: (e) => {
+				e.id = "hyp-0010";
+			},
+			re: /id/,
+		},
+		{
+			name: "id wrong prefix",
+			mut: (e) => {
+				e.id = "obs-0001";
+			},
+			re: /id/,
+		},
+		{
+			name: "id gap",
+			notebook:
+				`${entryLine()}\n` +
+				entryLine((e) => {
+					e.id = "hyp-0003";
+					e.text = "second";
+				}) +
+				"\n",
+			re: /id/,
+		},
+		{
+			name: "wrong type",
+			mut: (e) => {
+				e.type = "observation";
+			},
+			re: /type/,
+		},
+		{
+			name: "undated entry",
+			mut: (e) => {
+				delete e.date;
+			},
+			re: /date/,
+		},
+		{
+			name: "impossible date",
+			mut: (e) => {
+				e.date = "2026-02-30";
+			},
+			re: /date/,
+		},
+		{
+			name: "date not a string",
+			mut: (e) => {
+				e.date = 20261019;
+			},
+			re: /date/,
+		},
+		{
+			name: "no text",
+			mut: (e) => {
+				delete e.text;
+			},
+			re: /text/,
+		},
+		{
+			name: "empty text",
+			mut: (e) => {
+				e.text = "  ";
+			},
+			re: /text/,
+		},
+		{
+			name: "evidence missing",
+			mut: (e) => {
+				delete e.evidence;
+			},
+			re: /evidence/,
+		},
+		{
+			name: "evidence empty list",
+			mut: (e) => {
+				e.evidence = [];
+			},
+			re: /evidence/,
+		},
+		{
+			name: "evidence not a list",
+			mut: (e) => {
+				e.evidence = "pubmed";
+			},
+			re: /evidence/,
+		},
+		{
+			name: "item not an object",
+			mut: (e) => {
+				e.evidence = ["pubmed"];
+			},
+			re: /evidence item/,
+		},
+		{
+			name: "item missing source",
+			mut: itemMut((i) => {
+				delete i.source;
+			}),
+			re: /source/,
+		},
+		{
+			name: "item source not a string",
+			mut: itemMut((i) => {
+				i.source = 1;
+			}),
+			re: /source/,
+		},
+		{
+			name: "item endpoints empty",
+			mut: itemMut((i) => {
+				i.endpoints = [];
+			}),
+			re: /endpoints/,
+		},
+		{
+			name: "item endpoints not a list",
+			mut: itemMut((i) => {
+				i.endpoints = "esearch.fcgi";
+			}),
+			re: /endpoints/,
+		},
+		{
+			name: "item endpoint not a string",
+			mut: itemMut((i) => {
+				i.endpoints = ["esearch.fcgi", 2];
+			}),
+			re: /endpoints/,
+		},
+		{
+			name: "item query neither string nor null",
+			mut: itemMut((i) => {
+				i.query = 5;
+			}),
+			re: /query/,
+		},
+		{
+			name: "item missing retrieved",
+			mut: itemMut((i) => {
+				delete i.retrieved;
+			}),
+			re: /retrieved/,
+		},
+		{
+			name: "item retrieved not a calendar date",
+			mut: itemMut((i) => {
+				i.retrieved = "18/10/2026";
+			}),
+			re: /retrieved/,
+		},
+		{
+			name: "item grade outside the vocabulary",
+			mut: itemMut((i) => {
+				i.grade = "high";
+			}),
+			re: /grade/,
+		},
+		{
+			name: "item snapshot not content-addressed",
+			mut: itemMut((i) => {
+				i.snapshot = "evidence/search.json";
+			}),
+			re: /snapshot/,
+		},
+		{
+			name: "item snapshot outside evidence/",
+			mut: itemMut((i) => {
+				i.snapshot = `snapshots/${snapshotHash}.json`;
+			}),
+			re: /snapshot/,
+		},
+	];
+	for (const { name, mut, notebook, re } of cases) {
+		const dir = makeThetaDir(t, {
+			notebookText: notebook ?? `${entryLine(mut)}\n`,
+			snapshots: [[`${snapshotHash}.json`, evidenceBytes]],
+		});
+		assert.throws(() => auditNotebook(dir), re, `expected failure: ${name}`);
+	}
+});
+
+test("auditNotebook binds each entry item to the snapshot it cites", (t) => {
+	const cases = [
+		{
+			name: "dangling snapshot",
+			snapshots: [],
+			re: /does not exist/,
+		},
+		{
+			name: "content does not hash to the address",
+			snapshots: [[`${snapshotHash}.json`, Buffer.concat([evidenceBytes, Buffer.from(" ")])]],
+			re: /sha256/,
+		},
+		{
+			name: "snapshot not JSON",
+			snapshots: [[`${snapshotHash}.json`, "not json"]],
+			re: /not valid JSON/,
+		},
+		{
+			name: "snapshot missing provenance",
+			snapshots: [[`${snapshotHash}.json`, JSON.stringify({ source: "pubmed" })]],
+			re: /connector output/,
+		},
+		{
+			name: "item source contradicts the snapshot",
+			mut: itemMut((i) => {
+				i.source = "arxiv";
+			}),
+			snapshots: [[`${snapshotHash}.json`, evidenceBytes]],
+			re: /source/,
+		},
+		{
+			name: "item retrieved contradicts the snapshot",
+			mut: itemMut((i) => {
+				i.retrieved = "2026-10-01";
+			}),
+			snapshots: [[`${snapshotHash}.json`, evidenceBytes]],
+			re: /retrieved/,
+		},
+		{
+			name: "item query contradicts the snapshot",
+			mut: itemMut((i) => {
+				i.query = null;
+			}),
+			snapshots: [[`${snapshotHash}.json`, evidenceBytes]],
+			re: /query/,
+		},
+		{
+			name: "item endpoints drop a called endpoint",
+			mut: itemMut((i) => {
+				i.endpoints = ["esearch.fcgi"];
+			}),
+			snapshots: [[`${snapshotHash}.json`, evidenceBytes]],
+			re: /endpoints/,
+		},
+	];
+	for (const { name, mut, snapshots, re } of cases) {
+		const dir = makeThetaDir(t, {
+			notebookText: `${entryLine(mut)}\n`,
+			snapshots,
+		});
+		assert.throws(() => auditNotebook(dir), re, `expected failure: ${name}`);
+	}
+});
+
+test("auditNotebook refuses a snapshot that escapes the notebook directory", (t) => {
+	const outside = fs.mkdtempSync(path.join(os.tmpdir(), "theta-outside-"));
+	t.after(() => fs.rmSync(outside, { recursive: true, force: true }));
+	fs.writeFileSync(path.join(outside, `${snapshotHash}.json`), evidenceBytes);
+	const dir = makeThetaDir(t, { notebookText: `${entryLine()}\n` });
+	fs.symlinkSync(outside, path.join(dir, "evidence"), "dir");
+	assert.throws(() => auditNotebook(dir), /outside the notebook directory/);
+});
+
+test("resolveNotebookDir accepts only directories inside the checkout", (t) => {
+	const repo = fs.realpathSync(makeTempRepo(t));
+	fs.mkdirSync(path.join(repo, ".theta"));
+	assert.equal(resolveNotebookDir(repo, ".theta"), `${repo}/.theta`);
+	assert.throws(
+		() => resolveNotebookDir(repo, "no-such-dir"),
+		/does not resolve on disk/,
+	);
+	fs.writeFileSync(path.join(repo, "a-file"), "x");
+	assert.throws(
+		() => resolveNotebookDir(repo, "a-file"),
+		/must be a directory inside the checkout/,
+	);
+});
+
+// A recorder-bearing checkout: the theta-notebook tree (unadvertised — the
+// synthetic transcripts advertise only literature-review) plus the .gitignore
+// entry that keeps a written notebook outside the clean-tree proof.
+function addNotebookSkill(repo) {
+	fs.mkdirSync(path.join(repo, "skills", "theta-notebook", "scripts"), {
+		recursive: true,
+	});
+	fs.writeFileSync(
+		path.join(repo, "skills", "theta-notebook", "SKILL.md"),
+		"notebook skill content\n",
+	);
+	fs.writeFileSync(
+		path.join(repo, "skills", "theta-notebook", "scripts", "notebook.py"),
+		"# recorder\n",
+	);
+	fs.writeFileSync(path.join(repo, ".gitignore"), ".theta/\n");
+	execSync("git add -A", { cwd: repo });
+	execSync("git -c commit.gpgsign=false commit -qm notebook", { cwd: repo });
+	return repo;
+}
+
+// A recorder-shaped .theta in the repo: the connector fixture as the snapshot.
+function writeNotebookDir(repo) {
+	fs.mkdirSync(path.join(repo, ".theta", "evidence"), { recursive: true });
+	fs.writeFileSync(path.join(repo, ".theta", "notebook.jsonl"), `${entryLine()}\n`);
+	fs.writeFileSync(path.join(repo, ".theta", "evidence", `${snapshotHash}.json`), evidenceBytes);
+}
+
+test("auditSession attests notebook-written when the recorder ran and the notebook parses", (t) => {
+	const repo = addNotebookSkill(makeTempRepo(t));
+	const real = fs.realpathSync(repo);
+	const recorderAbs = `${real}/skills/theta-notebook/scripts/notebook.py`;
+	const recorderArg = "skills/theta-notebook/scripts/notebook.py";
+
+	// pass: executed recorder plus a well-formed, dated, content-addressed
+	// notebook — the gitignored .theta keeps the clean-tree proof green
+	writeNotebookDir(repo);
+	const ran = buildSession(t, repo, {
+		bashCommand: `python3 ${recorderAbs} --hypothesis "CRISPR restores immune function" --evidence search.json --grade asserted`,
+	});
+	const out = auditIn(repo, () => auditSession(ran, repo, undefined, recorderArg, ".theta"));
+	assert.match(out, /script-executed /);
+	assert.ok(out.includes(`notebook-written ${real}/.theta`), out);
+	assert.match(out, /notebook-entries 1\n/);
+	assert.match(out, /notebook-evidence 1\n/);
+	assert.match(out, /notebook-digest [0-9a-f]{64}/);
+	assert.ok(out.indexOf("notebook-written") > out.indexOf("script-executed"));
+
+	// the notebook argument without the script leg attests nothing
+	assert.throws(
+		() => auditIn(repo, () => auditSession(ran, repo, undefined, undefined, ".theta")),
+		/requires the script leg/,
+	);
+
+	// a script argument that is not the recorder does not carry the leg
+	const otherRan = buildSession(t, repo, {
+		bashCommand: `python3 ${real}/skills/literature-review/scripts/search.py --query x`,
+	});
+	assert.throws(
+		() =>
+			auditIn(repo, () =>
+				auditSession(
+					otherRan,
+					repo,
+					undefined,
+					"skills/literature-review/scripts/search.py",
+					".theta",
+				),
+			),
+		/requires the theta-notebook recorder/,
+	);
+
+	// the recorder executed but no notebook was produced
+	const noBook = buildSession(t, repo, { bashCommand: `python3 ${recorderAbs}` });
+	fs.rmSync(path.join(repo, ".theta"), { recursive: true, force: true });
+	assert.throws(
+		() => auditIn(repo, () => auditSession(noBook, repo, undefined, recorderArg, ".theta")),
+		/does not resolve on disk/,
+	);
+
+	// a notebook that does not parse fails the leg after the execution passed
+	const corrupt = buildSession(t, repo, { bashCommand: `python3 ${recorderAbs}` });
+	fs.mkdirSync(path.join(repo, ".theta"), { recursive: true });
+	fs.writeFileSync(path.join(repo, ".theta", "notebook.jsonl"), "not json\n");
+	assert.throws(
+		() => auditIn(repo, () => auditSession(corrupt, repo, undefined, recorderArg, ".theta")),
+		/not JSON/,
+	);
+
+	// a prompt naming the notebook file steers instead of routing
+	const steered = buildSession(t, repo, {
+		bashCommand: `python3 ${recorderAbs}`,
+		transcriptPrompt: "append your finding to .theta/notebook.jsonl yourself",
+	});
+	fs.writeFileSync(
+		path.join(steered, "prompt.txt"),
+		"append your finding to .theta/notebook.jsonl yourself",
+	);
+	assert.throws(
+		() => auditIn(repo, () => auditSession(steered, repo, undefined, recorderArg, ".theta")),
+		/names the notebook file/,
+	);
+});
+
+// Golden fixture session dirs (#38): committed scenarios under
+// test/fixtures/notebook-audit/ — pass, recorder not run, malformed entry,
+// undated entry — run against the real auditor CLI. The not-run fixture
+// carries a perfectly well-formed notebook: notebook files alone, however
+// clean, attest nothing without the session's executed recorder.
+test("golden fixtures: the auditor CLI is green on pass and red on every failure", (t) => {
+	const repo = fs.mkdtempSync(path.join(os.tmpdir(), "notebook-golden-"));
+	t.after(() => fs.rmSync(repo, { recursive: true, force: true }));
+	fs.cpSync(path.resolve("skills/literature-review"), path.join(repo, "skills", "literature-review"), {
+		recursive: true,
+	});
+	fs.cpSync(path.resolve("skills/theta-notebook"), path.join(repo, "skills", "theta-notebook"), {
+		recursive: true,
+	});
+	fs.mkdirSync(path.join(repo, "test"));
+	fs.writeFileSync(
+		path.join(repo, "test", "expected-skills.json"),
+		JSON.stringify({
+			vendored: [{ name: "literature-review", "tree-sha256": "x" }],
+			"self-authored": ["theta-notebook"],
+		}),
+	);
+	fs.writeFileSync(
+		path.join(repo, "package.json"),
+		JSON.stringify({ pi: { skills: ["./skills"] } }),
+	);
+	fs.writeFileSync(path.join(repo, ".gitignore"), ".theta/\n");
+	const run = (cmd) => execSync(cmd, { cwd: repo }).toString();
+	run("git init -q");
+	run("git config user.email test@example.com");
+	run("git config user.name test");
+	run("git config commit.gpgsign false");
+	run("git config core.hooksPath /dev/null");
+	run("git add -A");
+	run("git -c commit.gpgsign=false commit -qm init");
+
+	const fixRoot = path.resolve("test/fixtures/notebook-audit");
+	const cases = [
+		{ name: "pass", ok: true },
+		{ name: "not-run", ok: false, re: /checkout script never executed/ },
+		{ name: "malformed", ok: false, re: /line 2/ },
+		{ name: "undated", ok: false, re: /date/ },
+	];
+	for (const { name, ok, re } of cases) {
+		// the notebook tree moves into the repo as .theta (gitignored); the
+		// session dir materializes with the repo-bound evidence written in
+		fs.rmSync(path.join(repo, ".theta"), { recursive: true, force: true });
+		fs.cpSync(path.join(fixRoot, name, "notebook"), path.join(repo, ".theta"), {
+			recursive: true,
+		});
+		const dir = fs.mkdtempSync(path.join(os.tmpdir(), "notebook-session-"));
+		t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+		const rawFixture = fs.readFileSync(path.join(fixRoot, name, "session.jsonl"));
+		if (/\/Users\/|\/opt\/homebrew/.test(rawFixture.toString("utf8"))) {
+			throw new Error("golden fixture contains machine-specific absolute paths");
+		}
+		fs.writeFileSync(
+			path.join(dir, "session.jsonl"),
+			rawFixture.toString("utf8").replaceAll("__REPO__", fs.realpathSync(repo)),
+		);
+		for (const f of [
+			"prompt.txt",
+			"expected-model",
+			"exit-status",
+			"stderr.txt",
+			"pi-version",
+			"node-version",
+		]) {
+			fs.copyFileSync(path.join(fixRoot, name, f), path.join(dir, f));
+		}
+		fs.writeFileSync(path.join(dir, "pre-head"), repoHead(repo));
+		fs.writeFileSync(path.join(dir, "manifest-sha256"), repoManifestSha(repo));
+
+		// the demo itself: one auditor CLI invocation per fixture
+		const audit = spawnSync(
+			process.execPath,
+			[
+				path.resolve("scripts/audit-dogfood.mjs"),
+				dir,
+				"-",
+				"skills/theta-notebook/scripts/notebook.py",
+				".theta",
+			],
+			{ cwd: repo, encoding: "utf8", timeout: 60_000 },
+		);
+		if (ok) {
+			assert.equal(audit.status, 0, `${name}: stderr: ${audit.stderr}`);
+			assert.match(audit.stdout, /script-executed /);
+			assert.match(audit.stdout, /notebook-written .*\/\.theta\n/);
+			assert.match(audit.stdout, /notebook-entries 2\n/);
+			assert.match(audit.stdout, /notebook-evidence 1\n/);
+			assert.match(audit.stdout, /notebook-digest [0-9a-f]{64}/);
+		} else {
+			assert.equal(audit.status, 1, `${name}: expected red, stdout: ${audit.stdout}`);
+			assert.match(audit.stderr, re, `${name}: unexpected refusal`);
+		}
+	}
 });
