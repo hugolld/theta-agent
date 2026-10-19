@@ -1404,16 +1404,191 @@ export function formatCleanLine(sha) {
 
 export const CLEAN_LINE_PATTERN = /\bclean\s+([0-9a-f]{40})\b/g;
 
+// ---------------------------------------------------------------------------
+// Attestation legs
+//
+// One leg per spot-check. Each leg is one function over the shared spine
+// (ctx) and its own CLI argument: resolve → prompt gate → paired-call scan
+// → attestation lines. A leg throws on failure and returns its lines plus
+// named results later legs may read (the notebook leg requires the script
+// leg's result). The registry below is the only place a leg registers; it
+// fixes CLI order, and auditSession itself names no leg.
+
+function skillReadLeg(ctx, skill) {
+	const target = resolveAdvertisedSkill(ctx.root, skill, ctx.expected);
+	// The skill bytes are read exactly once: the paired read result must
+	// equal these validated bytes, and the attested digest hashes the same
+	// buffer — no second read can separate validated from attested bytes.
+	const skillBuf = fs.readFileSync(target);
+	const skillText = skillBuf.toString("utf8");
+	// A routed prompt must not name the selected skill or its file:
+	// steering the model there is instruction, not routing. The name is
+	// derived from the target's parent directory, not from the argument
+	// string.
+	const skillName = path.basename(path.dirname(target));
+	if (
+		ctx.promptNamesAny([
+			ctx.normalize(skillName),
+			ctx.normalize(path.basename(target)),
+			ctx.normalize(target),
+		])
+	) {
+		throw new Error(
+			"spot-check prompt names the selected skill or its file — a routed task must reach it on its own",
+		);
+	}
+	// pi may advertise and read lexical paths through symlinked resources;
+	// canonicalize the read path first, so a lexical path through a
+	// symlinked checkout still matches, then compare canonically — an
+	// unresolvable or external path cannot vouch for the target. Read
+	// arguments (offset/limit) are not judged: the recorded result text
+	// must equal the current file contents, so only a read of the whole
+	// file can satisfy the check no matter what arguments were passed.
+	// The read must also occur after the recorded prompt: a read spliced
+	// before the user record was not caused by it.
+	const hit = pairedCalls("read", ctx.graph, ctx.userIndex).some(({ call: t, result: r }) => {
+		if (!(r.isError === false && t.arguments?.path)) {
+			return false;
+		}
+		try {
+			if (fs.realpathSync(t.arguments.path) !== target) return false;
+		} catch {
+			return false;
+		}
+		const resultText = Array.isArray(r.content)
+			? r.content
+					.filter((c) => c?.type === "text")
+					.map((c) => c.text)
+					.join("")
+			: (typeof r.content === "string" ? r.content : "");
+		return resultText === skillText;
+	});
+	if (!hit) {
+		throw new Error("selected file never opened");
+	}
+	return {
+		lines:
+			`selected-file-opened ${target}\n` +
+			`skill-content ${createHash("sha256").update(skillBuf).digest("hex")}`,
+		target,
+	};
+}
+
+function scriptExecLeg(ctx, script) {
+	// The script argument resolves like the skill argument, but scripts
+	// are not advertised: an existing regular file inside the checkout
+	// is the criterion. The bytes are read exactly once — the attested
+	// digest hashes the validated buffer.
+	const target = resolveCheckoutScript(ctx.root, script);
+	const scriptBuf = fs.readFileSync(target);
+	// A routed prompt must not name the selected script or its path:
+	// the script is part of the skill's capability, and naming it is
+	// instruction, not routing.
+	if (ctx.promptNamesAny([ctx.normalize(path.basename(target)), ctx.normalize(target)])) {
+		throw new Error(
+			"spot-check prompt names the selected script or its path — a routed task must reach it on its own",
+		);
+	}
+	// Execution, not mention: a bash call qualifies when its command
+	// names the checkout's copy in program position, the call follows
+	// the recorded prompt, and the paired result reports no error. A
+	// copy of the script elsewhere on disk — or the path as an
+	// argument, comment, heredoc body, or redirection target — does
+	// not attest.
+	let hit = false;
+	let sawErroredRun = false;
+	for (const { call: t, result: r } of pairedCalls("bash", ctx.graph, ctx.userIndex)) {
+		if (typeof t.arguments?.command !== "string") continue;
+		if (!commandResolvesToScript(t.arguments.command, target, ctx.root)) {
+			continue;
+		}
+		if (r.isError === false) {
+			hit = true;
+			break;
+		}
+		sawErroredRun = true;
+	}
+	if (!hit) {
+		throw new Error(
+			sawErroredRun
+				? "checkout script execution failed: the bash tool result is an error"
+				: `checkout script never executed: ${target}`,
+		);
+	}
+	return {
+		lines:
+			`script-executed ${target}\n` +
+			`script-content ${createHash("sha256").update(scriptBuf).digest("hex")}`,
+		target,
+		arg: script,
+	};
+}
+
+function notebookLeg(ctx, notebook) {
+	// The notebook-written attestation extends the script-executed leg:
+	// notebook files alone — however well-formed — attest nothing
+	// without the session's executed checkout copy of the recorder,
+	// so the script argument must be the recorder itself.
+	const script = ctx.results.get("script");
+	if (script === undefined) {
+		throw new Error(
+			"the notebook-written attestation requires the script leg — pass the theta-notebook recorder as the third argument",
+		);
+	}
+	let recorder;
+	try {
+		recorder = fs.realpathSync(
+			path.join(ctx.skillRoot, "theta-notebook", "scripts", "notebook.py"),
+		);
+	} catch {
+		throw new Error(
+			"the notebook-written attestation requires the theta-notebook recorder as the script argument — the checkout has no such script",
+		);
+	}
+	if (script.target !== recorder) {
+		throw new Error(
+			`the notebook-written attestation requires the theta-notebook recorder as the script argument, got: ${script.arg}`,
+		);
+	}
+	// The routed prompt must not name the notebook file either — the
+	// artifact is part of the skill's capability, and naming it is
+	// instruction, not routing.
+	if (ctx.promptNamesAny([ctx.normalize("notebook.jsonl")])) {
+		throw new Error(
+			"spot-check prompt names the notebook file — a routed task must reach it on its own",
+		);
+	}
+	const thetaDir = resolveNotebookDir(ctx.root, notebook);
+	const report = auditNotebook(thetaDir);
+	return {
+		lines:
+			`notebook-written ${thetaDir}\n` +
+			`notebook-entries ${report.entries}\n` +
+			`notebook-evidence ${report.snapshots}\n` +
+			`notebook-digest ${createHash("sha256").update(report.notebookBuf).digest("hex")}`,
+		thetaDir,
+	};
+}
+
+// The attestation-leg registry: CLI order, and the one place a new leg
+// registers. `main` maps positional arguments onto this order; `-` skips a
+// leg's slot.
+export const ATTESTATION_LEGS = [
+	{ name: "skill", run: skillReadLeg },
+	{ name: "script", run: scriptExecLeg },
+	{ name: "notebook", run: notebookLeg },
+];
+
 // Audits one dogfood session directory against the checkout at the current
-// HEAD and returns the attestation. Throws on any failure; `skill` (a
-// checkout-relative SKILL.md path) additionally requires a successful read
-// tool call on that exact file; `script` (a checkout-relative script path)
-// additionally requires a bash tool call that executed that exact file,
-// paired with a non-error tool result; `notebook` (a checkout-relative
-// notebook directory) additionally requires the script leg to have attested
-// the theta-notebook recorder itself and the notebook files under that
-// directory to parse into well-formed, dated provenance entries.
-export function auditSession(dir, rootArg, skill, script, notebook) {
+// HEAD and returns the attestation. Throws on any failure. `legs` is an
+// ordered array of { leg, arg } pairs — leg entries from ATTESTATION_LEGS,
+// one spot-check each: every leg runs against the shared spine, appends its
+// own attestation lines in the order given, and may expose named results
+// later legs read (the notebook leg requires the script leg's result).
+export function auditSession(dir, rootArg, legs = []) {
+	if (!Array.isArray(legs)) {
+		throw new Error("legs must be an array of { leg, arg } pairs");
+	}
 	const root = fs.realpathSync(rootArg);
 	// Mount aliases (e.g. /var vs /private/var on macOS) give the same tree
 	// two spellings; lexical containment accepts either spelling of root.
@@ -1774,9 +1949,11 @@ export function auditSession(dir, rootArg, skill, script, notebook) {
 		`inventory ${shaText(inventoryText)}\n` +
 		`prompt ${shaText(promptWanted)}`;
 	// The spot-check attestations — skill read, script execution, notebook
-	// written — share one tool-call/result graph and one prompt-neutrality gate.
-	let scriptTarget = null; // the script leg's resolved target, read by the notebook leg
-	if (skill !== undefined || script !== undefined || notebook !== undefined) {
+	// written — share one tool-call/result graph and one prompt-neutrality
+	// gate, and every leg runs through one interface (see Attestation legs
+	// above): legs append their lines in the order given, and each may read
+	// earlier legs' named results from ctx.
+	if (legs.length > 0) {
 		// Cross-script lookalikes (Cyrillic і for Latin i) survive NFKC, so
 		// the recorded prompt must be pure ASCII: the operator's task is
 		// English text, and anything else fails closed.
@@ -1791,147 +1968,20 @@ export function auditSession(dir, rootArg, skill, script, notebook) {
 		const normalize = (s) =>
 			s.toLowerCase().normalize("NFKC").replace(/[^a-z0-9]/g, "");
 		const promptNorm = normalize(promptWanted);
-		const promptNamesAny = (variants) =>
-			variants.some((v) => v && promptNorm.includes(v));
-		const graph = collectToolGraph(recs);
-		if (skill !== undefined) {
-			const target = resolveAdvertisedSkill(root, skill, expected);
-			// The skill bytes are read exactly once: the paired read result must
-			// equal these validated bytes, and the attested digest hashes the same
-			// buffer — no second read can separate validated from attested bytes.
-			const skillBuf = fs.readFileSync(target);
-			const skillText = skillBuf.toString("utf8");
-			// A routed prompt must not name the selected skill or its file:
-			// steering the model there is instruction, not routing. The name is
-			// derived from the target's parent directory, not from the argument
-			// string.
-			const skillName = path.basename(path.dirname(target));
-			if (
-				promptNamesAny([
-					normalize(skillName),
-					normalize(path.basename(target)),
-					normalize(target),
-				])
-			) {
-				throw new Error(
-					"spot-check prompt names the selected skill or its file — a routed task must reach it on its own",
-				);
-			}
-			// pi may advertise and read lexical paths through symlinked resources;
-			// canonicalize the read path first, so a lexical path through a
-			// symlinked checkout still matches, then compare canonically — an
-			// unresolvable or external path cannot vouch for the target. Read
-			// arguments (offset/limit) are not judged: the recorded result text
-			// must equal the current file contents, so only a read of the whole
-			// file can satisfy the check no matter what arguments were passed.
-			// The read must also occur after the recorded prompt: a read spliced
-			// before the user record was not caused by it.
-			const hit = pairedCalls("read", graph, userIndex).some(({ call: t, result: r }) => {
-				if (!(r.isError === false && t.arguments?.path)) {
-					return false;
-				}
-				try {
-					if (fs.realpathSync(t.arguments.path) !== target) return false;
-				} catch {
-					return false;
-				}
-				const resultText = Array.isArray(r.content)
-					? r.content
-							.filter((c) => c?.type === "text")
-							.map((c) => c.text)
-							.join("")
-					: (typeof r.content === "string" ? r.content : "");
-				return resultText === skillText;
-			});
-			if (!hit) {
-				throw new Error("selected file never opened");
-			}
-			out += `\nselected-file-opened ${target}\nskill-content ${createHash("sha256").update(skillBuf).digest("hex")}`;
-		}
-		if (script !== undefined) {
-			// The script argument resolves like the skill argument, but scripts
-			// are not advertised: an existing regular file inside the checkout
-			// is the criterion. The bytes are read exactly once — the attested
-			// digest hashes the validated buffer.
-			const target = resolveCheckoutScript(root, script);
-			const scriptBuf = fs.readFileSync(target);
-			// A routed prompt must not name the selected script or its path:
-			// the script is part of the skill's capability, and naming it is
-			// instruction, not routing.
-			if (promptNamesAny([normalize(path.basename(target)), normalize(target)])) {
-				throw new Error(
-					"spot-check prompt names the selected script or its path — a routed task must reach it on its own",
-				);
-			}
-			// Execution, not mention: a bash call qualifies when its command
-			// names the checkout's copy in program position, the call follows
-			// the recorded prompt, and the paired result reports no error. A
-			// copy of the script elsewhere on disk — or the path as an
-			// argument, comment, heredoc body, or redirection target — does
-			// not attest.
-			let hit = false;
-			let sawErroredRun = false;
-			for (const { call: t, result: r } of pairedCalls("bash", graph, userIndex)) {
-				if (typeof t.arguments?.command !== "string") continue;
-				if (!commandResolvesToScript(t.arguments.command, target, root)) {
-					continue;
-				}
-				if (r.isError === false) {
-					hit = true;
-					break;
-				}
-				sawErroredRun = true;
-			}
-			if (!hit) {
-				throw new Error(
-					sawErroredRun
-						? "checkout script execution failed: the bash tool result is an error"
-						: `checkout script never executed: ${target}`,
-				);
-			}
-			out += `\nscript-executed ${target}\nscript-content ${createHash("sha256").update(scriptBuf).digest("hex")}`;
-			scriptTarget = target;
-		}
-		if (notebook !== undefined) {
-			// The notebook-written attestation extends the script-executed leg:
-			// notebook files alone — however well-formed — attest nothing
-			// without the session's executed checkout copy of the recorder,
-			// so the script argument must be the recorder itself.
-			if (scriptTarget === null) {
-				throw new Error(
-					"the notebook-written attestation requires the script leg — pass the theta-notebook recorder as the third argument",
-				);
-			}
-			let recorder;
-			try {
-				recorder = fs.realpathSync(
-					path.join(skillRoot, "theta-notebook", "scripts", "notebook.py"),
-				);
-			} catch {
-				throw new Error(
-					"the notebook-written attestation requires the theta-notebook recorder as the script argument — the checkout has no such script",
-				);
-			}
-			if (scriptTarget !== recorder) {
-				throw new Error(
-					`the notebook-written attestation requires the theta-notebook recorder as the script argument, got: ${script}`,
-				);
-			}
-			// The routed prompt must not name the notebook file either — the
-			// artifact is part of the skill's capability, and naming it is
-			// instruction, not routing.
-			if (promptNamesAny([normalize("notebook.jsonl")])) {
-				throw new Error(
-					"spot-check prompt names the notebook file — a routed task must reach it on its own",
-				);
-			}
-			const thetaDir = resolveNotebookDir(root, notebook);
-			const report = auditNotebook(thetaDir);
-			out +=
-				`\nnotebook-written ${thetaDir}` +
-				`\nnotebook-entries ${report.entries}` +
-				`\nnotebook-evidence ${report.snapshots}` +
-				`\nnotebook-digest ${createHash("sha256").update(report.notebookBuf).digest("hex")}`;
+		const ctx = {
+			root,
+			userIndex,
+			expected,
+			skillRoot,
+			normalize,
+			promptNamesAny: (variants) => variants.some((v) => v && promptNorm.includes(v)),
+			graph: collectToolGraph(recs),
+			results: new Map(),
+		};
+		for (const { leg, arg } of legs) {
+			const result = leg.run(ctx, arg);
+			out += `\n${result.lines}`;
+			ctx.results.set(leg.name, result);
 		}
 	}
 	// Final state recheck: the audited bytes and the cited HEAD must still
@@ -1977,14 +2027,26 @@ function manifestSkillRoot(root) {
 }
 
 function main(argv) {
-	const [dir, skillRaw, script, notebook] = argv;
-	// `-` skips the skill argument when only the later legs are wanted — the
-	// notebook leg itself requires the script argument, so only the skill
-	// position needs a placeholder.
-	const skill = skillRaw === "-" ? undefined : skillRaw;
+	const [dir, ...legArgs] = argv;
+	// Positional leg arguments map onto ATTESTATION_LEGS order; `-` skips a
+	// leg's slot when only the later legs are wanted — the notebook leg
+	// itself requires the script argument, so a `-` there fails with that
+	// leg's own error.
+	if (legArgs.length > ATTESTATION_LEGS.length) {
+		console.error(
+			`usage: audit-dogfood.mjs <session-dir> [${ATTESTATION_LEGS.map((l) => `<${l.name}>`).join(" ")}]`,
+		);
+		return 1;
+	}
+	const legs = [];
+	for (let i = 0; i < legArgs.length; i++) {
+		if (legArgs[i] !== "-") {
+			legs.push({ leg: ATTESTATION_LEGS[i], arg: legArgs[i] });
+		}
+	}
 	const root = fs.realpathSync(".");
 	try {
-		console.log(auditSession(dir, root, skill, script, notebook));
+		console.log(auditSession(dir, root, legs));
 	} catch (e) {
 		console.error(e.message);
 		return 1;

@@ -19,6 +19,7 @@ import {
 	formatCleanLine,
 	CLEAN_LINE_PATTERN,
 	auditSession,
+	ATTESTATION_LEGS,
 } from "../scripts/audit-dogfood.mjs";
 
 test("ge enforces the pi and node version floors", () => {
@@ -441,6 +442,15 @@ function auditIn(cwd, fn) {
 	}
 }
 
+// Builds the legs array for auditSession from named slots — registry order
+// decides attestation order, matching the CLI's positional mapping.
+function withLegs(spec) {
+	return ATTESTATION_LEGS.filter((l) => spec[l.name] !== undefined).map((l) => ({
+		leg: l,
+		arg: spec[l.name],
+	}));
+}
+
 test("auditSession attests a well-formed boot session", (t) => {
 	const repo = makeTempRepo(t);
 	const dir = buildSession(t, repo);
@@ -460,12 +470,12 @@ test("auditSession attests skill use when paired and errors otherwise", (t) => {
 	const repo = makeTempRepo(t);
 	const good = buildSession(t, repo, { toolResultIsError: false });
 	const out = auditIn(repo, () =>
-		auditSession(good, repo, "skills/literature-review/SKILL.md"),
+		auditSession(good, repo, withLegs({ skill: "skills/literature-review/SKILL.md" })),
 	);
 	assert.match(out, /selected-file-opened .*\/skills\/literature-review\/SKILL\.md/);
 	const bad = buildSession(t, repo, { toolResultIsError: true });
 	assert.throws(
-		() => auditIn(repo, () => auditSession(bad, repo, "skills/literature-review/SKILL.md")),
+		() => auditIn(repo, () => auditSession(bad, repo, withLegs({ skill: "skills/literature-review/SKILL.md" }))),
 		/selected file never opened/,
 	);
 	const partial = buildSession(t, repo, {
@@ -474,7 +484,7 @@ test("auditSession attests skill use when paired and errors otherwise", (t) => {
 		resultText: "partial\n",
 	});
 	assert.throws(
-		() => auditIn(repo, () => auditSession(partial, repo, "skills/literature-review/SKILL.md")),
+		() => auditIn(repo, () => auditSession(partial, repo, withLegs({ skill: "skills/literature-review/SKILL.md" }))),
 		/selected file never opened/,
 	);
 	const fabricated = buildSession(t, repo, {
@@ -482,7 +492,7 @@ test("auditSession attests skill use when paired and errors otherwise", (t) => {
 		resultText: "fabricated content\n",
 	});
 	assert.throws(
-		() => auditIn(repo, () => auditSession(fabricated, repo, "skills/literature-review/SKILL.md")),
+		() => auditIn(repo, () => auditSession(fabricated, repo, withLegs({ skill: "skills/literature-review/SKILL.md" }))),
 		/selected file never opened/,
 	);
 	const wrongTool = buildSession(t, repo, {
@@ -490,7 +500,7 @@ test("auditSession attests skill use when paired and errors otherwise", (t) => {
 		toolName: "other",
 	});
 	assert.throws(
-		() => auditIn(repo, () => auditSession(wrongTool, repo, "skills/literature-review/SKILL.md")),
+		() => auditIn(repo, () => auditSession(wrongTool, repo, withLegs({ skill: "skills/literature-review/SKILL.md" }))),
 		/selected file never opened/,
 	);
 	const confusable = buildSession(t, repo, {
@@ -502,7 +512,7 @@ test("auditSession attests skill use when paired and errors otherwise", (t) => {
 		"Use lіterature-review and open its instructions",
 	);
 	assert.throws(
-		() => auditIn(repo, () => auditSession(confusable, repo, "skills/literature-review/SKILL.md")),
+		() => auditIn(repo, () => auditSession(confusable, repo, withLegs({ skill: "skills/literature-review/SKILL.md" }))),
 		/non-ASCII characters/,
 	);
 	const camelSteer = buildSession(t, repo, {
@@ -514,7 +524,7 @@ test("auditSession attests skill use when paired and errors otherwise", (t) => {
 		"Use LiteratureReview and open its instructions",
 	);
 	assert.throws(
-		() => auditIn(repo, () => auditSession(camelSteer, repo, "skills/literature-review/SKILL.md")),
+		() => auditIn(repo, () => auditSession(camelSteer, repo, withLegs({ skill: "skills/literature-review/SKILL.md" }))),
 		/names the selected skill/,
 	);
 });
@@ -903,7 +913,7 @@ test("auditSession attests script execution when the checkout's script ran", (t)
 		bashCommand: `python3 ${abs} --query "p53 AND therapy" --json`,
 	});
 	const out = auditIn(repo, () =>
-		auditSession(ran, repo, "skills/literature-review/SKILL.md", arg),
+		auditSession(ran, repo, withLegs({ skill: "skills/literature-review/SKILL.md", script: arg })),
 	);
 	assert.ok(out.includes(`script-executed ${abs}`), out);
 	assert.match(out, /script-content [0-9a-f]{64}/);
@@ -913,13 +923,13 @@ test("auditSession attests script execution when the checkout's script ran", (t)
 	const doctrine = buildSession(t, repo, {
 		bashCommand: "cd skills/literature-review && python3 scripts/search.py --query p53",
 	});
-	const doctrineOut = auditIn(repo, () => auditSession(doctrine, repo, undefined, arg));
+	const doctrineOut = auditIn(repo, () => auditSession(doctrine, repo, withLegs({ script: arg })));
 	assert.ok(doctrineOut.includes(`script-executed ${abs}`));
 
 	// script not run: nothing in the session executed it
 	const notRun = buildSession(t, repo, { toolResultIsError: false });
 	assert.throws(
-		() => auditIn(repo, () => auditSession(notRun, repo, undefined, arg)),
+		() => auditIn(repo, () => auditSession(notRun, repo, withLegs({ script: arg }))),
 		/checkout script never executed/,
 	);
 
@@ -929,7 +939,7 @@ test("auditSession attests script execution when the checkout's script ran", (t)
 		bashIsError: true,
 	});
 	assert.throws(
-		() => auditIn(repo, () => auditSession(errored, repo, undefined, arg)),
+		() => auditIn(repo, () => auditSession(errored, repo, withLegs({ script: arg }))),
 		/checkout script execution failed/,
 	);
 
@@ -941,7 +951,7 @@ test("auditSession attests script execution when the checkout's script ran", (t)
 		bashCommand: `python3 ${copyDir}/search.py --query x`,
 	});
 	assert.throws(
-		() => auditIn(repo, () => auditSession(copied, repo, undefined, arg)),
+		() => auditIn(repo, () => auditSession(copied, repo, withLegs({ script: arg }))),
 		/checkout script never executed/,
 	);
 
@@ -951,7 +961,7 @@ test("auditSession attests script execution when the checkout's script ran", (t)
 		bashBeforePrompt: true,
 	});
 	assert.throws(
-		() => auditIn(repo, () => auditSession(spliced, repo, undefined, arg)),
+		() => auditIn(repo, () => auditSession(spliced, repo, withLegs({ script: arg }))),
 		/checkout script never executed/,
 	);
 
@@ -965,18 +975,18 @@ test("auditSession attests script execution when the checkout's script ran", (t)
 		"run scripts/search.py and show me the output",
 	);
 	assert.throws(
-		() => auditIn(repo, () => auditSession(steered, repo, undefined, arg)),
+		() => auditIn(repo, () => auditSession(steered, repo, withLegs({ script: arg }))),
 		/names the selected script/,
 	);
 
 	// the script argument itself must be a checkout file
 	const plain = buildSession(t, repo, {});
 	assert.throws(
-		() => auditIn(repo, () => auditSession(plain, repo, undefined, "/etc/hosts")),
+		() => auditIn(repo, () => auditSession(plain, repo, withLegs({ script: "/etc/hosts" }))),
 		/must be a file inside the checkout/,
 	);
 	assert.throws(
-		() => auditIn(repo, () => auditSession(plain, repo, undefined, "nope/missing.py")),
+		() => auditIn(repo, () => auditSession(plain, repo, withLegs({ script: "nope/missing.py" }))),
 		/does not resolve on disk/,
 	);
 });
@@ -1280,8 +1290,7 @@ test("auditSession accepts a sanitized real pi transcript (golden)", (t) => {
 				auditSession(
 					dir,
 					repo,
-					undefined,
-					"skills/literature-review/references/core_workflow.md",
+					withLegs({ script: "skills/literature-review/references/core_workflow.md" }),
 				),
 			),
 		/checkout script never executed/,
@@ -1961,7 +1970,7 @@ test("auditSession attests notebook-written when the recorder ran and the notebo
 	const ran = buildSession(t, repo, {
 		bashCommand: `python3 ${recorderAbs} --hypothesis "CRISPR restores immune function" --evidence search.json --grade asserted`,
 	});
-	const out = auditIn(repo, () => auditSession(ran, repo, undefined, recorderArg, ".theta"));
+	const out = auditIn(repo, () => auditSession(ran, repo, withLegs({ script: recorderArg, notebook: ".theta" })));
 	assert.match(out, /script-executed /);
 	assert.ok(out.includes(`notebook-written ${real}/.theta`), out);
 	assert.match(out, /notebook-entries 1\n/);
@@ -1971,7 +1980,7 @@ test("auditSession attests notebook-written when the recorder ran and the notebo
 
 	// the notebook argument without the script leg attests nothing
 	assert.throws(
-		() => auditIn(repo, () => auditSession(ran, repo, undefined, undefined, ".theta")),
+		() => auditIn(repo, () => auditSession(ran, repo, withLegs({ notebook: ".theta" }))),
 		/requires the script leg/,
 	);
 
@@ -1985,9 +1994,10 @@ test("auditSession attests notebook-written when the recorder ran and the notebo
 				auditSession(
 					otherRan,
 					repo,
-					undefined,
-					"skills/literature-review/scripts/search.py",
-					".theta",
+					withLegs({
+						script: "skills/literature-review/scripts/search.py",
+						notebook: ".theta",
+					}),
 				),
 			),
 		/requires the theta-notebook recorder/,
@@ -1997,7 +2007,7 @@ test("auditSession attests notebook-written when the recorder ran and the notebo
 	const noBook = buildSession(t, repo, { bashCommand: `python3 ${recorderAbs}` });
 	fs.rmSync(path.join(repo, ".theta"), { recursive: true, force: true });
 	assert.throws(
-		() => auditIn(repo, () => auditSession(noBook, repo, undefined, recorderArg, ".theta")),
+		() => auditIn(repo, () => auditSession(noBook, repo, withLegs({ script: recorderArg, notebook: ".theta" }))),
 		/does not resolve on disk/,
 	);
 
@@ -2006,7 +2016,7 @@ test("auditSession attests notebook-written when the recorder ran and the notebo
 	fs.mkdirSync(path.join(repo, ".theta"), { recursive: true });
 	fs.writeFileSync(path.join(repo, ".theta", "notebook.jsonl"), "not json\n");
 	assert.throws(
-		() => auditIn(repo, () => auditSession(corrupt, repo, undefined, recorderArg, ".theta")),
+		() => auditIn(repo, () => auditSession(corrupt, repo, withLegs({ script: recorderArg, notebook: ".theta" }))),
 		/not JSON/,
 	);
 
@@ -2020,7 +2030,7 @@ test("auditSession attests notebook-written when the recorder ran and the notebo
 		"append your finding to .theta/notebook.jsonl yourself",
 	);
 	assert.throws(
-		() => auditIn(repo, () => auditSession(steered, repo, undefined, recorderArg, ".theta")),
+		() => auditIn(repo, () => auditSession(steered, repo, withLegs({ script: recorderArg, notebook: ".theta" }))),
 		/names the notebook file/,
 	);
 });
@@ -2032,6 +2042,33 @@ test("auditSession attests notebook-written when the recorder ran and the notebo
 // not-run fixture carries a perfectly well-formed notebook: notebook files
 // alone, however clean, attest nothing without the session's executed
 // recorder.
+test("the leg registry: an empty leg list attests boot only", (t) => {
+	const repo = makeTempRepo(t);
+	const dir = buildSession(t, repo);
+	const out = auditIn(repo, () => auditSession(dir, repo, []));
+	assert.match(out, /^clean /);
+	for (const line of ["selected-file-opened", "script-executed", "notebook-written"]) {
+		assert.ok(!out.includes(line), `empty legs must not attest: ${line}`);
+	}
+});
+
+test("the auditor CLI refuses more leg arguments than the registry holds", () => {
+	const audit = spawnSync(
+		process.execPath,
+		[
+			path.resolve("scripts/audit-dogfood.mjs"),
+			"session-dir",
+			"a",
+			"b",
+			"c",
+			"d",
+		],
+		{ encoding: "utf8", timeout: 60_000 },
+	);
+	assert.equal(audit.status, 1, `stderr: ${audit.stderr}`);
+	assert.match(audit.stderr, /usage: audit-dogfood\.mjs/);
+});
+
 test("golden fixtures: the auditor CLI is green on pass and red on every failure", (t) => {
 	const repo = goldenRepo(t, {
 		skills: ["literature-review", "theta-notebook"],
