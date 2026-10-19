@@ -250,6 +250,39 @@ test("the connector exit-code contract agrees across its three prose sites", asy
 	}
 });
 
+// The notebook recorder is not a connector — it makes no requests — so it
+// shares only the codes that carry over (success, usage) and owns its failure
+// domain: the notebook it cannot read or write. Same two prose sites as the
+// connectors (SKILL.md table, script docstring), same drift guard.
+const NOTEBOOK_EXIT_CODE_CONTRACT = [
+	[0, "success"],
+	[1, "usage"],
+	[2, "notebook"],
+];
+
+test("the notebook recorder exit-code contract agrees across its two prose sites", async () => {
+	const { markdown } = await loadSkill("theta-notebook");
+	const table = [...markdown.matchAll(/^\| (\d) \| ([A-Za-z-]+)/gm)].map(
+		(match) => [Number(match[1]), match[2].toLowerCase()],
+	);
+	assert.deepEqual(
+		table,
+		NOTEBOOK_EXIT_CODE_CONTRACT,
+		"theta-notebook: SKILL.md exit-code table drifted from the contract oracle",
+	);
+
+	const source = await readFile(
+		new URL("theta-notebook/scripts/notebook.py", skillsRoot),
+		"utf8",
+	);
+	const open = source.indexOf('"""');
+	const docstring = source.slice(open, source.indexOf('"""', open + 3));
+	const codes = [...docstring.matchAll(/^ {2}(\d) {2}([A-Za-z-]+)/gm)].map(
+		(match) => [Number(match[1]), match[2].toLowerCase()],
+	);
+	assert.deepEqual(codes, NOTEBOOK_EXIT_CODE_CONTRACT, "notebook.py: docstring exit codes drifted");
+});
+
 // Tier-2 infra per ADR 0001 / spec #5: K-Dense's compute stack is excluded —
 // theta-compute replaces it in M4. If one of these names ever ships, the
 // tiers have been crossed by accident.
@@ -286,6 +319,7 @@ const scanSurfaces = [
 	"skills/theta-lit-search/references/pubmed.md",
 	"skills/theta-lit-search/references/arxiv.md",
 	"skills/theta-lit-search/references/semantic-scholar.md",
+	"skills/theta-notebook/SKILL.md",
 	// ADR 0003 introduces the M3 provenance vocabulary; it is the surface that
 	// carries the new headwords until the theta-notebook skill ships. Earlier
 	// ADRs stay off the list — ADR 0002 predates the Connector skill headword
