@@ -1,6 +1,6 @@
 {
 	"name": "theta-agent",
-	"version": "0.2.0",
+	"version": "0.3.0",
 	"description": "Theta — a science co-researcher agent built as a package for the pi coding agent harness",
 	"keywords": [
 		"pi",
@@ -36,6 +36,7 @@
 	},
 	"scripts": {
 		"lint": "eslint .",
+		"lint:py": "uvx ruff@0.15.7 check skills/theta-lit-search/scripts skills/theta-notebook/scripts",
 		"test": "node --test",
 		"typecheck": "tsc --noEmit"
 	},

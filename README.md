@@ -8,14 +8,18 @@
 
 ## Status
 
-**Very early development (0.2.0).** The architecture, skill-selection plan, and
-milestones are being designed in the open. M1 and M2 are built: the `theta`
+**Very early development (0.3.0).** The architecture, skill-selection plan, and
+milestones are being designed in the open. M1 through M3 are built: the `theta`
 launcher plus the Tier-1 research-loop skill library — K-Dense skills vendored
 verbatim plus the self-authored `theta-research-loop` orchestrator (see
-[Vendored skills](#vendored-skills)) — and the first connector skill,
+[Vendored skills](#vendored-skills)) — the first connector skill,
 `theta-lit-search` (PubMed, arXiv, Semantic Scholar; connectors are skills per
-[ADR 0002](docs/adr/0002-connectors-are-skills-not-registered-tools.md)). The
-milestones below continue from there.
+[ADR 0002](docs/adr/0002-connectors-are-skills-not-registered-tools.md)), and
+the project notebook, `theta-notebook` (dated provenance entries carrying
+content-addressed, graded evidence snapshots, recorded inside the research
+loop and after standalone searches per
+[ADR 0003](docs/adr/0003-provenance-is-a-project-notebook.md)). The milestones
+below continue from there.
 
 ## What Theta will be
 
@@ -40,7 +44,7 @@ engine — macOS and Linux first, Windows later.
 
 - [x] M1 — package skeleton, `theta` launcher (bin), Tier-1 research-loop skills
 - [x] M2 — literature connectors (PubMed, arXiv, Semantic Scholar)
-- [ ] M3 — research prompt + provenance entries
+- [x] M3 — project notebook: provenance entries with graded evidence
 - [ ] M4 — compute: Slurm MCP gateway + typed AlphaFold3 tool
 - [ ] M5 — safety gates + containerized execution
 - [ ] M6 — eval suite (MCP client is built into pi)
@@ -50,11 +54,11 @@ engine — macOS and Linux first, Windows later.
 ## Install
 
 ```sh
-pi install npm:theta-agent@0.2.0
+pi install npm:theta-agent@0.3.0
 ```
 
-Requires theta-agent ≥ 0.2.0 on the registry — 0.1.0 and earlier predate the
-connector skill, and a version-pinned install fails loudly until 0.2.0 is
+Requires theta-agent ≥ 0.3.0 on the registry — 0.2.0 and earlier predate the
+project notebook, and a version-pinned install fails loudly until 0.3.0 is
 visible. If the registry is not there yet, run Theta from a checkout
 instead — see [Try it](#try-it).
 
@@ -76,12 +80,12 @@ from a checkout you can also name another directory with
 this way). Theta targets pi ≥ 0.99; if the launcher reports
 `pi not found`, install pi with the command above and retry.
 
-Once theta-agent ≥ 0.2.0 is on the registry (0.1.0 and earlier predate
-the connector skill — until 0.2.0 is visible, stay on the checkout path
+Once theta-agent ≥ 0.3.0 is on the registry (0.2.0 and earlier predate
+the project notebook — until 0.3.0 is visible, stay on the checkout path
 above), the installed form is:
 
 ```sh
-npm i -g theta-agent@0.2.0
+npm i -g theta-agent@0.3.0
 theta
 ```
 

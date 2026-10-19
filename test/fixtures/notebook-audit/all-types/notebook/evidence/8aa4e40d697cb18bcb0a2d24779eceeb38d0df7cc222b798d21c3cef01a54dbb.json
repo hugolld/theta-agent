@@ -1,0 +1,61 @@
+{
+  "source": "pubmed",
+  "operation": "search",
+  "query": "CRISPR gene therapy",
+  "sort": "relevance",
+  "retmax": 2,
+  "count": 2,
+  "total_matches": 4532,
+  "records": [
+    {
+      "title": "CRISPR-based gene editing approaches to restore immune cell function in aged organisms.",
+      "authors": [
+        "Frasca D",
+        "Blomberg BB"
+      ],
+      "year": "2023",
+      "journal": "Nature",
+      "pmid": "39114817",
+      "doi": "10.1038/s41586-023-06321-w",
+      "pubdate": "2023 Aug 10"
+    },
+    {
+      "title": "Base editing of hematopoietic stem cells: a CRISPR gene therapy route without double-strand breaks.",
+      "authors": [
+        "Chen Z",
+        "Rao L",
+        "Wang Y",
+        "Kim S"
+      ],
+      "year": "2023",
+      "journal": "Molecular Therapy",
+      "pmid": "37850042",
+      "doi": "10.1016/j.ymthe.2023.09.014",
+      "pubdate": "2023 Oct 15"
+    }
+  ],
+  "provenance": {
+    "calls": [
+      {
+        "endpoint": "esearch.fcgi",
+        "params": {
+          "db": "pubmed",
+          "term": "CRISPR gene therapy",
+          "retmode": "json",
+          "retmax": "2"
+        },
+        "url": "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=pubmed&term=CRISPR+gene+therapy&retmode=json&retmax=2"
+      },
+      {
+        "endpoint": "esummary.fcgi",
+        "params": {
+          "db": "pubmed",
+          "id": "39114817,37850042",
+          "retmode": "json"
+        },
+        "url": "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi?db=pubmed&id=39114817%2C37850042&retmode=json"
+      }
+    ],
+    "accessed": "2026-10-18"
+  }
+}
