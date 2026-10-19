@@ -47,3 +47,7 @@ _Avoid_: evidence package, citation record
 **Evidence grade**:
 The Ehrlich-line trust mark on an evidence item or an observation — re-executed, cross-checked, or asserted; it grades sources, never the researcher's judgment.
 _Avoid_: trust score, confidence level
+
+**Attestation leg**:
+One spot-check module of the dogfood auditor — skill read, script executed, notebook written — registered in one ordered array and run through one shared interface against the session's transcript.
+_Avoid_: spot-check block, inline check
