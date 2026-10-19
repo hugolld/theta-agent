@@ -448,6 +448,7 @@ test("usage errors exit 1 and write nothing into the project", { skip: skipReaso
 		{ name: "call without endpoint", args: ["--hypothesis", "x", "--grade", "asserted", await badEvidence("no-endpoint.json", JSON.stringify({ source: "pubmed", provenance: { calls: [{ url: "https://x" }], accessed: "2026-10-18" } }))] },
 		{ name: "call without url", args: ["--hypothesis", "x", "--grade", "asserted", await badEvidence("no-url.json", JSON.stringify({ source: "pubmed", provenance: { calls: [{ endpoint: "esearch.fcgi" }], accessed: "2026-10-18" } }))] },
 		{ name: "accessed not a date", args: ["--hypothesis", "x", "--grade", "asserted", await badEvidence("bad-date.json", JSON.stringify({ source: "pubmed", provenance: { calls: [{ endpoint: "e", url: "https://x" }], accessed: "18/10/2026" } }))] },
+		{ name: "accessed not a calendar date", args: ["--hypothesis", "x", "--grade", "asserted", await badEvidence("cal-date.json", JSON.stringify({ source: "pubmed", provenance: { calls: [{ endpoint: "e", url: "https://x" }], accessed: "2026-02-30" } }))] },
 		{ name: "accessed not a string", args: ["--hypothesis", "x", "--grade", "asserted", await badEvidence("num-date.json", JSON.stringify({ source: "pubmed", provenance: { calls: [{ endpoint: "e", url: "https://x" }], accessed: 20261018 } }))] },
 	];
 	for (const { name, args, stdin } of cases) {

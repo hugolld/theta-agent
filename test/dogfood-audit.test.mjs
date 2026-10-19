@@ -144,10 +144,32 @@ test("resolveAdvertisedSkill rejects traversal and non-skill paths", () => {
 // Integration fixtures: a synthetic git repo and session directory, fully
 // isolated from the developer's checkout state — npm test stays reliable
 // before committing.
+function initFixtureRepo(repo, expectedSkills) {
+	fs.mkdirSync(path.join(repo, "test"), { recursive: true });
+	fs.writeFileSync(
+		path.join(repo, "test", "expected-skills.json"),
+		JSON.stringify(expectedSkills),
+	);
+	fs.writeFileSync(
+		path.join(repo, "package.json"),
+		JSON.stringify({ pi: { skills: ["./skills"] } }),
+	);
+	const run = (cmd) => execSync(cmd, { cwd: repo }).toString();
+	run("git init -q");
+	run("git config user.email test@example.com");
+	run("git config user.name test");
+	run("git config commit.gpgsign false");
+	run("git config core.hooksPath /dev/null");
+	run("git add -A");
+	run("git -c commit.gpgsign=false commit -qm init");
+	// Canonical from birth: mount aliases (/var vs /private/var on macOS)
+	// must not leak lexical paths into containment comparisons.
+	return fs.realpathSync(repo);
+}
+
 function makeTempRepo(t) {
 	const repo = fs.mkdtempSync(path.join(os.tmpdir(), "dogfood-repo-"));
 	t.after(() => fs.rmSync(repo, { recursive: true, force: true }));
-	const run = (cmd) => execSync(cmd, { cwd: repo }).toString();
 	fs.mkdirSync(path.join(repo, "skills", "literature-review"), {
 		recursive: true,
 	});
@@ -167,28 +189,10 @@ function makeTempRepo(t) {
 		path.join(repo, "skills", "literature-review", "scripts", "search.py"),
 		0o755,
 	);
-	fs.mkdirSync(path.join(repo, "test"), { recursive: true });
-	fs.writeFileSync(
-		path.join(repo, "test", "expected-skills.json"),
-		JSON.stringify({
-			vendored: [{ name: "literature-review", "tree-sha256": "x" }],
-			"self-authored": [],
-		}),
-	);
-	fs.writeFileSync(
-		path.join(repo, "package.json"),
-		JSON.stringify({ pi: { skills: ["./skills"] } }),
-	);
-	run("git init -q");
-	run("git config user.email test@example.com");
-	run("git config user.name test");
-	run("git config commit.gpgsign false");
-	run("git config core.hooksPath /dev/null");
-	run("git add -A");
-	run("git -c commit.gpgsign=false commit -qm init");
-	// Canonical from birth: mount aliases (/var vs /private/var on macOS)
-	// must not leak lexical paths into containment comparisons.
-	return fs.realpathSync(repo);
+	return initFixtureRepo(repo, {
+		vendored: [{ name: "literature-review", "tree-sha256": "x" }],
+		"self-authored": [],
+	});
 }
 
 const repoHead = (repo) =>
@@ -201,7 +205,7 @@ const repoManifestSha = (repo) =>
 // Golden-fixture repo construction (#39 retro from #38): the golden tests —
 // the sanitized real-pi transcript and the notebook-audit fixture scenarios
 // — build the same repo shape (skill trees + inventory + manifest, one
-// initial commit, canonical path), so they share these helpers instead of
+// initial commit, canonical path), so they share initFixtureRepo instead of
 // each hand-rolling ~25 lines.
 function goldenRepo(t, { skills, expectedSkills, gitignore = false } = {}) {
 	const repo = fs.mkdtempSync(path.join(os.tmpdir(), "dogfood-golden-"));
@@ -211,25 +215,8 @@ function goldenRepo(t, { skills, expectedSkills, gitignore = false } = {}) {
 			recursive: true,
 		});
 	}
-	fs.mkdirSync(path.join(repo, "test"));
-	fs.writeFileSync(
-		path.join(repo, "test", "expected-skills.json"),
-		JSON.stringify(expectedSkills),
-	);
-	fs.writeFileSync(
-		path.join(repo, "package.json"),
-		JSON.stringify({ pi: { skills: ["./skills"] } }),
-	);
 	if (gitignore) fs.writeFileSync(path.join(repo, ".gitignore"), ".theta/\n");
-	const run = (cmd) => execSync(cmd, { cwd: repo }).toString();
-	run("git init -q");
-	run("git config user.email test@example.com");
-	run("git config user.name test");
-	run("git config commit.gpgsign false");
-	run("git config core.hooksPath /dev/null");
-	run("git add -A");
-	run("git -c commit.gpgsign=false commit -qm init");
-	return fs.realpathSync(repo);
+	return initFixtureRepo(repo, expectedSkills);
 }
 
 // A golden session dir for `repo`: the transcript text (machine-path-guarded

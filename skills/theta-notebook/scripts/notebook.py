@@ -70,7 +70,8 @@ TYPE_PREFIX = {
 REF_RE = re.compile(r"^hyp-\d+$")
 
 #: The connector stamps `provenance.accessed`; the recorder carries it
-#: through as the evidence item's retrieval date.
+#: through as the evidence item's retrieval date. `calendar_date` adds the
+#: calendar check on top of this shape check.
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 _CONTROL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
@@ -114,6 +115,22 @@ def collapse_ws(text: str | None) -> str:
 	if not text:
 		return ""
 	return _WHITESPACE.sub(" ", _CONTROL.sub("", text)).strip()
+
+
+def calendar_date(text: str) -> bool:
+	"""True when a YYYY-MM-DD string names a real calendar date.
+
+	Shape alone is not enough: the dogfood auditor judges retrieval dates
+	calendar-valid, and the recorder must refuse what the audit would --
+	a written entry cannot be un-written from an append-only file.
+	"""
+	if not DATE_RE.match(text):
+		return False
+	try:
+		date.fromisoformat(text)
+	except ValueError:
+		return False
+	return True
 
 
 def emit(payload: object) -> None:
@@ -268,10 +285,10 @@ def parse_evidence(text: str) -> dict:
 		if endpoint not in endpoints:
 			endpoints.append(endpoint)
 	accessed = provenance.get("accessed")
-	if not isinstance(accessed, str) or not DATE_RE.match(accessed):
+	if not isinstance(accessed, str) or not calendar_date(accessed):
 		raise RecorderError(
-			"notebook.py: --evidence provenance.accessed must be a YYYY-MM-DD "
-			"date string",
+			"notebook.py: --evidence provenance.accessed must be a real "
+			"YYYY-MM-DD calendar date",
 			1,
 		)
 	query = payload.get("query")
