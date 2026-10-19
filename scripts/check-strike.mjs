@@ -9,10 +9,15 @@
 // and M2 marked stale evidence ready twice — the ready gate is where that
 // bites. No attestation in the body (chore strikes) passes with a note.
 //
+// CI green (#41 retro): every check `gh pr checks` lists for the branch
+// must pass. M3's verify sat red four hours past the ready mark — caught
+// at merge time by habit, not by a gate. Pending counts as not green: the
+// gate runs at ready/merge time, where pending means wait.
+//
 // Usage: node scripts/check-strike.mjs <spec-issue-number>
 // Exit 0 = complete (or only expected exceptions remain); 1 = a child is
-// open with no branch commit, or attested evidence is stale; 2 = usage or
-// tracker error.
+// open with no branch commit, attested evidence is stale, or a PR check is
+// non-pass; 2 = usage or tracker error.
 import { execSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -34,6 +39,24 @@ export function evidenceFreshness(prBody, head) {
 		: { verdict: "stale", attested: unique };
 }
 
+// The pure half of the CI gate: parse `gh pr checks` output (tab-separated
+// name/status/elapsed/url rows; statuses pass, fail, pending, skipping).
+// Any non-pass row is red; zero parseable rows is a none (no PR yet, or gh
+// failed) — the gate protects check runs that exist, same as attestations.
+export function ciChecks(output) {
+	const rows = `${output ?? ""}`
+		.split("\n")
+		.map((line) => line.split("\t"))
+		.filter((cols) => ["pass", "fail", "pending", "skipping"].includes(cols[1]));
+	const offenders = rows
+		.filter((cols) => cols[1] !== "pass")
+		.map((cols) => `${cols[0]} (${cols[1]})`);
+	return {
+		verdict: rows.length === 0 ? "none" : offenders.length === 0 ? "green" : "red",
+		offenders,
+	};
+}
+
 function main(argv) {
 	const spec = argv[0];
 	if (!spec || !/^\d+$/.test(spec)) {
@@ -45,8 +68,10 @@ function main(argv) {
 			// stderr is piped, not inherited: a failed gh call (no PR yet, no
 			// network) must read as an empty string, not dump usage help.
 			return execSync(cmd, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
-		} catch {
-			return "";
+		} catch (error) {
+			// A non-zero exit can still carry the wanted stdout: gh pr checks
+			// exits 1 on a failing check and 8 on pending, table intact.
+			return (error.stdout ?? "").toString();
 		}
 	};
 
@@ -112,6 +137,23 @@ function main(argv) {
 		console.log(
 			"\nno PR body available (no PR, empty body, or detached HEAD) — freshness check skipped.",
 		);
+	}
+
+	// CI green: every check the PR reports must pass at this HEAD. gh's exit
+	// code mixes fail and pending, so the table is parsed instead — pending
+	// blocks the same way fail does at ready/merge time.
+	const ci = ciChecks(run(`gh pr checks --repo ${repo} ${branch}`));
+	if (ci.verdict === "red") {
+		console.error(
+			`\nCI not green: ${ci.offenders.join(", ")} — fix the failure or ` +
+				"let the run finish before ready/merge.",
+		);
+		return 1;
+	}
+	if (ci.verdict === "green") {
+		console.log("\nCI green: every PR check passes.");
+	} else {
+		console.log("\nno PR checks available (no PR yet, or gh failed) — CI check skipped.");
 	}
 	console.log("\nstrike complete: every child is landed or closed.");
 	return 0;

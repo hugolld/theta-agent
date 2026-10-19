@@ -47,3 +47,40 @@ test("pi manifest targets exist on disk", async () => {
 		assert.ok(dirStat.isDirectory(), `${dir} is not a directory`);
 	}
 });
+
+// A pin names a concrete version: the @ suffix must start with a digit, so
+// `ruff@latest` — resolved at run time, exactly the drift this test exists
+// to stop — reads as unpinned.
+const PINNED = /@\d[\w.+-]*$/;
+
+test("npm scripts pin one-off tool runs", () => {
+	// uvx/npx resolve a bare tool name at run time, so an unpinned script
+	// lints differently on every machine: M3's verify went red on CI's
+	// fresh ruff resolve while every local cache still passed (#41 retro).
+	// Local bins are lockfile-pinned; these runners are not — the version
+	// rides in the script (uvx ruff@0.15.7).
+	for (const [name, script] of Object.entries(manifest.scripts)) {
+		const tokens = script.split(/\s+/);
+		for (let i = 0; i < tokens.length; i += 1) {
+			if (tokens[i] !== "uvx" && tokens[i] !== "npx") continue;
+			let j = i + 1;
+			// flag prefixes belong to the runner, not the tool name
+			while (j < tokens.length && tokens[j].startsWith("-")) j += 1;
+			const tool = tokens[j] ?? "";
+			assert.match(
+				tool,
+				PINNED,
+				`scripts.${name}: '${tokens[i]}' must name the tool version ` +
+					`(uvx ruff@0.15.7) — got '${tool || "nothing"}'`,
+			);
+		}
+	}
+});
+
+test("the pin pattern rejects run-time resolves", () => {
+	assert.ok(PINNED.test("ruff@0.15.7"));
+	assert.ok(PINNED.test("@scope/tool@1.2.3-rc.1"));
+	assert.ok(!PINNED.test("ruff"));
+	assert.ok(!PINNED.test("ruff@latest"));
+	assert.ok(!PINNED.test("@scope/tool"));
+});
