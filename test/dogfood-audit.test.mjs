@@ -198,6 +198,79 @@ const repoManifestSha = (repo) =>
 		.update(fs.readFileSync(path.join(repo, "package.json")))
 		.digest("hex");
 
+// Golden-fixture repo construction (#39 retro from #38): the golden tests —
+// the sanitized real-pi transcript and the notebook-audit fixture scenarios
+// — build the same repo shape (skill trees + inventory + manifest, one
+// initial commit, canonical path), so they share these helpers instead of
+// each hand-rolling ~25 lines.
+function goldenRepo(t, { skills, expectedSkills, gitignore = false } = {}) {
+	const repo = fs.mkdtempSync(path.join(os.tmpdir(), "dogfood-golden-"));
+	t.after(() => fs.rmSync(repo, { recursive: true, force: true }));
+	for (const skill of skills) {
+		fs.cpSync(path.resolve("skills", skill), path.join(repo, "skills", skill), {
+			recursive: true,
+		});
+	}
+	fs.mkdirSync(path.join(repo, "test"));
+	fs.writeFileSync(
+		path.join(repo, "test", "expected-skills.json"),
+		JSON.stringify(expectedSkills),
+	);
+	fs.writeFileSync(
+		path.join(repo, "package.json"),
+		JSON.stringify({ pi: { skills: ["./skills"] } }),
+	);
+	if (gitignore) fs.writeFileSync(path.join(repo, ".gitignore"), ".theta/\n");
+	const run = (cmd) => execSync(cmd, { cwd: repo }).toString();
+	run("git init -q");
+	run("git config user.email test@example.com");
+	run("git config user.name test");
+	run("git config commit.gpgsign false");
+	run("git config core.hooksPath /dev/null");
+	run("git add -A");
+	run("git -c commit.gpgsign=false commit -qm init");
+	return fs.realpathSync(repo);
+}
+
+// A golden session dir for `repo`: the transcript text (machine-path-guarded
+// before any substitution, __REPO__ bound to the repo) plus the metadata
+// files every audit pins. `fixtureDir`, when given, supplies the six
+// operator-recorded files a committed scenario carries; otherwise the
+// standard boot literals both golden tests were written against.
+function goldenSession(t, repo, { text, fixtureDir } = {}) {
+	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "dogfood-session-"));
+	t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+	if (/\/Users\/|\/opt\/homebrew/.test(text)) {
+		throw new Error("golden fixture contains machine-specific absolute paths");
+	}
+	fs.writeFileSync(
+		path.join(dir, "session.jsonl"),
+		text.replaceAll("__REPO__", fs.realpathSync(repo)),
+	);
+	if (fixtureDir !== undefined) {
+		for (const f of [
+			"prompt.txt",
+			"expected-model",
+			"exit-status",
+			"stderr.txt",
+			"pi-version",
+			"node-version",
+		]) {
+			fs.copyFileSync(path.join(fixtureDir, f), path.join(dir, f));
+		}
+	} else {
+		fs.writeFileSync(path.join(dir, "prompt.txt"), "test prompt");
+		fs.writeFileSync(path.join(dir, "expected-model"), "zai-coding-cn glm-5.3-flash\n");
+		fs.writeFileSync(path.join(dir, "exit-status"), "0");
+		fs.writeFileSync(path.join(dir, "stderr.txt"), "");
+		fs.writeFileSync(path.join(dir, "pi-version"), "1.1.0\n");
+		fs.writeFileSync(path.join(dir, "node-version"), "v26.11.0\n");
+	}
+	fs.writeFileSync(path.join(dir, "pre-head"), repoHead(repo));
+	fs.writeFileSync(path.join(dir, "manifest-sha256"), repoManifestSha(repo));
+	return dir;
+}
+
 function buildSession(t, repo, overrides = {}) {
 	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "dogfood-session-"));
 	t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
@@ -1155,33 +1228,22 @@ function invNamesToLocs(names, hostDir) {
 // Golden fixture: a sanitized REAL pi transcript (run at the pinned pi
 // version, paths rewritten to the fixture repo) must pass the boot audit —
 // this pins the parser against real-pi schema drift, not just hand-authored
-// records. The <available_skills> inventory is maintained to match
-// test/expected-skills.json: the auditor requires every shipped skill to be
-// advertised, so each new skill extends the fixture's skills section (the
-// event structure stays the real 2026-10-10 capture).
+// records. The repo carries the whole shipped library, its inventory
+// derived from the same test/expected-skills.json so the two cannot drift:
+// the auditor requires every shipped skill to be advertised, so each new
+// skill extends the fixture's skills section (the event structure stays the
+// real 2026-10-10 capture).
 test("auditSession accepts a sanitized real pi transcript (golden)", (t) => {
-	const repo = fs.mkdtempSync(path.join(os.tmpdir(), "dogfood-golden-"));
-	t.after(() => fs.rmSync(repo, { recursive: true, force: true }));
-	fs.cpSync(path.resolve("skills"), path.join(repo, "skills"), {
-		recursive: true,
+	const realExpected = JSON.parse(
+		fs.readFileSync(path.resolve("test", "expected-skills.json")),
+	);
+	const repo = goldenRepo(t, {
+		skills: [
+			...realExpected.vendored.map((s) => s.name),
+			...realExpected["self-authored"],
+		],
+		expectedSkills: realExpected,
 	});
-	fs.mkdirSync(path.join(repo, "test"), { recursive: true });
-	fs.copyFileSync(
-		path.resolve("test", "expected-skills.json"),
-		path.join(repo, "test", "expected-skills.json"),
-	);
-	fs.writeFileSync(
-		path.join(repo, "package.json"),
-		JSON.stringify({ pi: { skills: ["./skills"] } }),
-	);
-	const run = (cmd) => execSync(cmd, { cwd: repo }).toString();
-	run("git init -q");
-	run("git config user.email test@example.com");
-	run("git config user.name test");
-	run("git config commit.gpgsign false");
-	run("git config core.hooksPath /dev/null");
-	run("git add -A");
-	run("git -c commit.gpgsign=false commit -qm init");
 
 	const rawFixture = fs.readFileSync(
 		"test/fixtures/real-pi-transcript.jsonl",
@@ -1216,20 +1278,7 @@ test("auditSession accepts a sanitized real pi transcript (golden)", (t) => {
 	golden = golden
 		.replaceAll("__HOST_SKILLS__", path.join(hostRoot, "skills"))
 		.replaceAll("__HOST_PI_LIB__", path.join(hostPiLib, "@earendil-works/pi-coding-agent"));
-	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "dogfood-session-"));
-	t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
-	fs.writeFileSync(path.join(dir, "session.jsonl"), golden);
-	fs.writeFileSync(path.join(dir, "prompt.txt"), "test prompt");
-	fs.writeFileSync(
-		path.join(dir, "expected-model"),
-		"zai-coding-cn glm-5.3-flash\n",
-	);
-	fs.writeFileSync(path.join(dir, "exit-status"), "0");
-	fs.writeFileSync(path.join(dir, "stderr.txt"), "");
-	fs.writeFileSync(path.join(dir, "pi-version"), "1.1.0\n");
-	fs.writeFileSync(path.join(dir, "node-version"), "v26.11.0\n");
-	fs.writeFileSync(path.join(dir, "pre-head"), repoHead(repo));
-	fs.writeFileSync(path.join(dir, "manifest-sha256"), repoManifestSha(repo));
+	const dir = goldenSession(t, repo, { text: golden });
 	const out = auditIn(repo, () => auditSession(dir, repo));
 	assert.match(out, /^clean /);
 	assert.match(out, /provider zai-coding-cn/);
@@ -1431,9 +1480,16 @@ test("auditNotebook enforces the typed entry shape", (t) => {
 			re: /id/,
 		},
 		{
-			name: "wrong type",
+			name: "type carrying another type's id prefix",
 			mut: (e) => {
 				e.type = "observation";
+			},
+			re: /id/,
+		},
+		{
+			name: "unknown type",
+			mut: (e) => {
+				e.type = "note";
 			},
 			re: /type/,
 		},
@@ -1651,6 +1707,193 @@ test("auditNotebook binds each entry item to the snapshot it cites", (t) => {
 	}
 });
 
+// The batch entry set (#39): per-type base entries over the same shared
+// snapshot, assembled into a five-type notebook — the shape the demo run
+// produces. Every type that carries evidence uses the same item; the
+// observation's item additionally links it to the hypothesis it supports.
+const baseMethod = {
+	id: "mth-0001",
+	type: "method",
+	date: "2026-10-19",
+	text: "Adenine base editing via ABE, chosen to avoid double-strand breaks in HSCs",
+	evidence: [structuredClone(baseItem)],
+};
+const baseObservation = {
+	id: "obs-0001",
+	type: "observation",
+	date: "2026-10-19",
+	text: "Two independent retrievals agree that HDR-mediated repair is rare in HSCs",
+	grade: "cross-checked",
+	// One recorder call stamps the item and the entry with the same grade
+	// (the single --grade flag fills both) — this is the producible shape.
+	evidence: [{ ...structuredClone(baseItem), grade: "cross-checked", supports: "hyp-0001" }],
+};
+const baseDecision = {
+	id: "dec-0001",
+	type: "decision",
+	date: "2026-10-19",
+	text: "Drop the HDR-mediated knock-in arm; pursue base editing only",
+};
+const baseConfidence = {
+	id: "cnf-0001",
+	type: "confidence",
+	date: "2026-10-19",
+	hypothesis: "hyp-0001",
+	text: "Moderate; the support is literature-only so far",
+};
+
+// The five-type notebook, one line per entry, with per-entry mutations.
+function batchLines(mut = () => {}) {
+	const entries = [
+		structuredClone(baseEntry),
+		structuredClone(baseMethod),
+		structuredClone(baseObservation),
+		structuredClone(baseDecision),
+		structuredClone(baseConfidence),
+	];
+	mut(entries);
+	return entries.map((entry) => JSON.stringify(entry)).join("\n") + "\n";
+}
+
+test("auditNotebook attests all five entry types with per-type ids and resolving links", (t) => {
+	const dir = makeThetaDir(t, {
+		notebookText: batchLines(),
+		snapshots: [[`${snapshotHash}.json`, evidenceBytes]],
+	});
+	const report = auditNotebook(dir);
+	assert.equal(report.entries, 5);
+	// One snapshot file backs every evidence-bearing entry.
+	assert.equal(report.snapshots, 1);
+});
+
+test("auditNotebook enforces the batch entry shapes", (t) => {
+	const cases = [
+		{
+			name: "observation without its grade",
+			mut: (e) => {
+				delete e[2].grade;
+			},
+			re: /grade/,
+		},
+		{
+			name: "observation grade outside the vocabulary",
+			mut: (e) => {
+				e[2].grade = "high";
+			},
+			re: /grade/,
+		},
+		{
+			name: "grade merged onto a hypothesis entry",
+			mut: (e) => {
+				e[0].grade = "asserted";
+			},
+			re: /grade/,
+		},
+		{
+			name: "grade merged onto a confidence entry",
+			mut: (e) => {
+				e[4].grade = "asserted";
+			},
+			re: /grade/,
+		},
+		{
+			name: "confidence without a judged hypothesis",
+			mut: (e) => {
+				delete e[4].hypothesis;
+			},
+			re: /hypothesis/,
+		},
+		{
+			name: "confidence judging an unknown hypothesis",
+			mut: (e) => {
+				e[4].hypothesis = "hyp-0009";
+			},
+			re: /names no earlier hypothesis/,
+		},
+		{
+			name: "confidence carrying evidence",
+			mut: (e) => {
+				e[4].evidence = [structuredClone(baseItem)];
+			},
+			re: /evidence/,
+		},
+		{
+			name: "observation supporting an unknown hypothesis",
+			mut: (e) => {
+				e[2].evidence[0].supports = "hyp-0009";
+			},
+			re: /supports/,
+		},
+		{
+			name: "link riding a hypothesis entry's item",
+			mut: (e) => {
+				e[0].evidence[0].supports = "hyp-0001";
+			},
+			re: /supports/,
+		},
+		{
+			name: "hypothesis without evidence",
+			mut: (e) => {
+				delete e[0].evidence;
+			},
+			re: /evidence/,
+		},
+		{
+			name: "method with an empty evidence list",
+			mut: (e) => {
+				e[1].evidence = [];
+			},
+			re: /evidence/,
+		},
+		{
+			name: "method item missing its source",
+			mut: (e) => {
+				delete e[1].evidence[0].source;
+			},
+			re: /source/,
+		},
+		{
+			name: "method id under another type's prefix",
+			mut: (e) => {
+				e[1].id = "hyp-0002";
+			},
+			re: /id/,
+		},
+		{
+			name: "per-type id gap",
+			notebook:
+				batchLines() +
+				JSON.stringify({ ...structuredClone(baseObservation), id: "obs-0003" }) +
+				"\n",
+			re: /id/,
+		},
+	];
+	for (const { name, mut, notebook, re } of cases) {
+		const dir = makeThetaDir(t, {
+			notebookText: notebook ?? batchLines(mut),
+			snapshots: [[`${snapshotHash}.json`, evidenceBytes]],
+		});
+		assert.throws(() => auditNotebook(dir), re, `expected failure: ${name}`);
+	}
+
+	// A link may only name a hypothesis recorded BEFORE the linking entry —
+	// the recorder assigns ids at append time, so a forward reference cannot
+	// be recorder output.
+	const forward = makeThetaDir(t, {
+		notebookText:
+			batchLines((e) => {
+				e[2].evidence[0].supports = "hyp-0002";
+			}) +
+			entryLine((h) => {
+				h.id = "hyp-0002";
+				h.text = "A later, second hypothesis";
+			}) +
+			"\n",
+		snapshots: [[`${snapshotHash}.json`, evidenceBytes]],
+	});
+	assert.throws(() => auditNotebook(forward), /names no earlier hypothesis/);
+});
+
 test("auditNotebook refuses a snapshot that escapes the notebook directory", (t) => {
 	const outside = fs.mkdtempSync(path.join(os.tmpdir(), "theta-outside-"));
 	t.after(() => fs.rmSync(outside, { recursive: true, force: true }));
@@ -1779,78 +2022,42 @@ test("auditSession attests notebook-written when the recorder ran and the notebo
 	);
 });
 
-// Golden fixture session dirs (#38): committed scenarios under
-// test/fixtures/notebook-audit/ — pass, recorder not run, malformed entry,
-// undated entry — run against the real auditor CLI. The not-run fixture
-// carries a perfectly well-formed notebook: notebook files alone, however
-// clean, attest nothing without the session's executed recorder.
+// Golden fixture session dirs (#38, widened by the #39 batch): committed
+// scenarios under test/fixtures/notebook-audit/ — pass, the all-types
+// notebook (one entry of each type, one resolving link), recorder not run,
+// malformed entry, undated entry — run against the real auditor CLI. The
+// not-run fixture carries a perfectly well-formed notebook: notebook files
+// alone, however clean, attest nothing without the session's executed
+// recorder.
 test("golden fixtures: the auditor CLI is green on pass and red on every failure", (t) => {
-	const repo = fs.mkdtempSync(path.join(os.tmpdir(), "notebook-golden-"));
-	t.after(() => fs.rmSync(repo, { recursive: true, force: true }));
-	fs.cpSync(path.resolve("skills/literature-review"), path.join(repo, "skills", "literature-review"), {
-		recursive: true,
-	});
-	fs.cpSync(path.resolve("skills/theta-notebook"), path.join(repo, "skills", "theta-notebook"), {
-		recursive: true,
-	});
-	fs.mkdirSync(path.join(repo, "test"));
-	fs.writeFileSync(
-		path.join(repo, "test", "expected-skills.json"),
-		JSON.stringify({
+	const repo = goldenRepo(t, {
+		skills: ["literature-review", "theta-notebook"],
+		expectedSkills: {
 			vendored: [{ name: "literature-review", "tree-sha256": "x" }],
 			"self-authored": ["theta-notebook"],
-		}),
-	);
-	fs.writeFileSync(
-		path.join(repo, "package.json"),
-		JSON.stringify({ pi: { skills: ["./skills"] } }),
-	);
-	fs.writeFileSync(path.join(repo, ".gitignore"), ".theta/\n");
-	const run = (cmd) => execSync(cmd, { cwd: repo }).toString();
-	run("git init -q");
-	run("git config user.email test@example.com");
-	run("git config user.name test");
-	run("git config commit.gpgsign false");
-	run("git config core.hooksPath /dev/null");
-	run("git add -A");
-	run("git -c commit.gpgsign=false commit -qm init");
+		},
+		gitignore: true,
+	});
 
 	const fixRoot = path.resolve("test/fixtures/notebook-audit");
 	const cases = [
-		{ name: "pass", ok: true },
+		{ name: "pass", ok: true, entries: 2, evidence: 1 },
+		{ name: "all-types", ok: true, entries: 5, evidence: 1 },
 		{ name: "not-run", ok: false, re: /checkout script never executed/ },
 		{ name: "malformed", ok: false, re: /line 2/ },
 		{ name: "undated", ok: false, re: /date/ },
 	];
-	for (const { name, ok, re } of cases) {
+	for (const { name, ok, re, entries, evidence } of cases) {
 		// the notebook tree moves into the repo as .theta (gitignored); the
 		// session dir materializes with the repo-bound evidence written in
 		fs.rmSync(path.join(repo, ".theta"), { recursive: true, force: true });
 		fs.cpSync(path.join(fixRoot, name, "notebook"), path.join(repo, ".theta"), {
 			recursive: true,
 		});
-		const dir = fs.mkdtempSync(path.join(os.tmpdir(), "notebook-session-"));
-		t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
-		const rawFixture = fs.readFileSync(path.join(fixRoot, name, "session.jsonl"));
-		if (/\/Users\/|\/opt\/homebrew/.test(rawFixture.toString("utf8"))) {
-			throw new Error("golden fixture contains machine-specific absolute paths");
-		}
-		fs.writeFileSync(
-			path.join(dir, "session.jsonl"),
-			rawFixture.toString("utf8").replaceAll("__REPO__", fs.realpathSync(repo)),
-		);
-		for (const f of [
-			"prompt.txt",
-			"expected-model",
-			"exit-status",
-			"stderr.txt",
-			"pi-version",
-			"node-version",
-		]) {
-			fs.copyFileSync(path.join(fixRoot, name, f), path.join(dir, f));
-		}
-		fs.writeFileSync(path.join(dir, "pre-head"), repoHead(repo));
-		fs.writeFileSync(path.join(dir, "manifest-sha256"), repoManifestSha(repo));
+		const dir = goldenSession(t, repo, {
+			text: fs.readFileSync(path.join(fixRoot, name, "session.jsonl"), "utf8"),
+			fixtureDir: path.join(fixRoot, name),
+		});
 
 		// the demo itself: one auditor CLI invocation per fixture
 		const audit = spawnSync(
@@ -1868,8 +2075,8 @@ test("golden fixtures: the auditor CLI is green on pass and red on every failure
 			assert.equal(audit.status, 0, `${name}: stderr: ${audit.stderr}`);
 			assert.match(audit.stdout, /script-executed /);
 			assert.match(audit.stdout, /notebook-written .*\/\.theta\n/);
-			assert.match(audit.stdout, /notebook-entries 2\n/);
-			assert.match(audit.stdout, /notebook-evidence 1\n/);
+			assert.match(audit.stdout, new RegExp(`notebook-entries ${entries}\\n`));
+			assert.match(audit.stdout, new RegExp(`notebook-evidence ${evidence}\\n`));
 			assert.match(audit.stdout, /notebook-digest [0-9a-f]{64}/);
 		} else {
 			assert.equal(audit.status, 1, `${name}: expected red, stdout: ${audit.stdout}`);

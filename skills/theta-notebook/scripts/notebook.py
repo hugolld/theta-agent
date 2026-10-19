@@ -3,22 +3,36 @@
 
 The notebook lives in the research project's workspace -- a `.theta/`
 directory holding `notebook.jsonl` (one JSON entry per line, append-only)
-and `evidence/` (sha256-addressed snapshots). This tracer slice records the
-hypothesis entry type: it validates a theta-lit-search `--json` output (the
-connector's final structured output -- already redacted, already dated; raw
-HTTP bodies are never kept), stores it verbatim as the content-addressed
-snapshot, and appends the entry carrying the evidence item with its grade.
-The M3 batch adds the remaining entry types (method, observation, decision,
-confidence) and evidence-to-hypothesis links.
+and `evidence/` (sha256-addressed snapshots). Each call records one of the
+five entry types -- hypothesis, method, observation, decision, confidence --
+with ids sequenced per type so later entries can link to them. An entry that
+carries evidence stores the theta-lit-search `--json` output (the connector's
+final structured output -- already redacted, already dated; raw HTTP bodies
+are never kept) verbatim as its content-addressed snapshot. A grade is
+required exactly when evidence is recorded, and the observation entry
+carries it as its own field: a grade rates the source, never the
+researcher's judgment -- that judgment is the confidence entry type, and the
+two never merge.
 
 Exit codes -- the documented contract (see SKILL.md):
   0  success; the entry is appended and named on stdout
-  1  usage error (bad arguments, malformed or shape-invalid evidence input)
+  1  usage error (bad arguments, malformed or shape-invalid evidence input,
+     or a link that names no hypothesis in the notebook)
   2  notebook failure (the notebook cannot be read or written)
 
 Usage:
   python3 notebook.py --hypothesis "TEXT" --evidence <connector-output.json|->
       --grade {asserted,cross-checked,re-executed} [--json]
+  python3 notebook.py --method "TEXT" [--evidence <...> --grade <...>] [--json]
+  python3 notebook.py --observation "TEXT" --evidence <...> --grade <...>
+      [--supports hyp-NNNN] [--json]
+  python3 notebook.py --decision "TEXT" [--evidence <...> --grade <...>] [--json]
+  python3 notebook.py --confidence "TEXT" --on hyp-NNNN [--json]
+
+`--evidence` is required for hypothesis and observation entries, optional
+for method and decision, and rejected for confidence (a judgment is not a
+source claim). `--on` and `--supports` must name a hypothesis entry already
+in the notebook.
 
 Contract basis: docs/adr/0003-provenance-is-a-project-notebook.md and the
 connector-script invariants (docs/agents/connector-scripts.md).
@@ -43,8 +57,17 @@ EVIDENCE_DIR = THETA_DIR / "evidence"
 
 GRADES = ("asserted", "cross-checked", "re-executed")
 
-#: Hypothesis ids sequence per type so later entries can link to them.
-ID_RE = re.compile(r"^hyp-(\d+)$")
+#: The five entry types (ADR 0003) and the id prefix each sequences under.
+TYPE_PREFIX = {
+	"hypothesis": "hyp",
+	"method": "mth",
+	"observation": "obs",
+	"decision": "dec",
+	"confidence": "cnf",
+}
+
+#: A link target or confidence subject: an existing hypothesis entry's id.
+REF_RE = re.compile(r"^hyp-\d+$")
 
 #: The connector stamps `provenance.accessed`; the recorder carries it
 #: through as the evidence item's retrieval date.
@@ -85,7 +108,7 @@ def require_python() -> None:
 def collapse_ws(text: str | None) -> str:
 	"""Collapse whitespace runs and drop control characters.
 
-	Same treatment the connectors give API text, applied to the hypothesis so
+	Same treatment the connectors give API text, applied to the entry text so
 	an entry stays one clean line whatever the shell handed in.
 	"""
 	if not text:
@@ -117,23 +140,54 @@ class Parser(argparse.ArgumentParser):
 def build_parser() -> Parser:
 	parser = Parser(
 		prog="notebook.py",
-		description="Append a dated hypothesis provenance entry, with the connector's "
-		"structured output stored as a content-addressed evidence item, to the "
-		"project notebook in .theta/.",
+		description="Append one dated provenance entry to the project notebook in "
+		".theta/, storing the connector's structured output as a content-addressed "
+		"evidence item when the entry carries evidence.",
+	)
+	types = parser.add_mutually_exclusive_group(required=True)
+	types.add_argument(
+		"--hypothesis", help="the hypothesis text to record (evidence required)",
+	)
+	types.add_argument(
+		"--method", help="the chosen method to record (evidence optional)",
+	)
+	types.add_argument(
+		"--observation",
+		help="the observation text to record (evidence required; the entry "
+		"itself carries the grade)",
+	)
+	types.add_argument(
+		"--decision", help="the decision text to record (evidence optional)",
+	)
+	types.add_argument(
+		"--confidence",
+		help="the judgment text on a hypothesis (no evidence: judgment is not "
+		"a source claim)",
 	)
 	parser.add_argument(
-		"--hypothesis", required=True, help="the hypothesis text to record"
+		"--on",
+		metavar="hyp-NNNN",
+		help="the hypothesis entry a confidence entry judges; required with "
+		"--confidence, rejected without it",
 	)
 	parser.add_argument(
 		"--evidence",
-		required=True,
-		help="path to a theta-lit-search --json output, or - to read it from stdin",
+		help="path to a theta-lit-search --json output, or - to read it from "
+		"stdin; required for hypothesis and observation, optional for method "
+		"and decision, rejected for confidence",
 	)
 	parser.add_argument(
 		"--grade",
-		required=True,
 		choices=GRADES,
-		help="evidence grade carried by the evidence item",
+		help="the evidence grade carried by the recorded evidence item -- and "
+		"by the observation entry itself; required exactly when --evidence is "
+		"given (a trust mark on a source is a decision, never an accident)",
+	)
+	parser.add_argument(
+		"--supports",
+		metavar="hyp-NNNN",
+		help="mark the recorded evidence as supporting this existing "
+		"hypothesis; observation entries only",
 	)
 	parser.add_argument(
 		"--json", action="store_true", help="print the appended entry as JSON"
@@ -267,39 +321,66 @@ def load_notebook() -> list[dict]:
 	return entries
 
 
-def next_hypothesis_id(entries: list[dict]) -> str:
-	"""Sequence past the highest existing hyp-NNNN id."""
+def next_id(entry_type: str, entries: list[dict]) -> str:
+	"""Sequence past the highest existing id of this entry's type."""
+	prefix = TYPE_PREFIX[entry_type]
+	id_re = re.compile(rf"^{prefix}-(\d+)$")
 	highest = 0
 	for entry in entries:
-		match = ID_RE.match(str(entry.get("id", "")))
+		match = id_re.match(str(entry.get("id", "")))
 		if match:
 			highest = max(highest, int(match.group(1)))
-	return f"hyp-{highest + 1:04d}"
+	return f"{prefix}-{highest + 1:04d}"
 
 
-def write_entry(entry: dict, snapshot_name: str, evidence_text: str) -> None:
+def resolve_ref(entries: list[dict], ref: str | None, flag: str) -> None:
+	"""A --on/--supports reference must name an existing hypothesis entry.
+
+	The id shape is checked at argument-parse time; here the reference must
+	resolve against the notebook's hypothesis entries -- a link that points
+	nowhere is a usage error, never a recorded entry.
+	"""
+	if ref is None:
+		return
+	known = [
+		str(entry.get("id"))
+		for entry in entries
+		if entry.get("type") == "hypothesis"
+	]
+	if ref not in known:
+		raise RecorderError(
+			f"notebook.py: {flag} names no hypothesis in the notebook: {ref} "
+			f"(hypotheses recorded: {', '.join(known) or 'none'})",
+			1,
+		)
+
+
+def write_entry(entry: dict, snapshot: tuple[str, str] | None) -> None:
 	"""Store the snapshot, then append the entry; everything after the scan.
 
-	Order matters: an entry is never appended unless its snapshot is already
-	stored, so a crash between the two leaves an orphan snapshot, never an
-	entry pointing at nothing.
+	`snapshot` is the evidence's (file name, text) pair, or None for an entry
+	that carries no evidence. Order matters: an entry is never appended
+	unless its snapshot is already stored, so a crash between the two leaves
+	an orphan snapshot, never an entry pointing at nothing.
 	"""
 	try:
-		EVIDENCE_DIR.mkdir(parents=True, exist_ok=True)
-		snapshot = EVIDENCE_DIR / snapshot_name
-		if snapshot.exists():
-			try:
-				existing = snapshot.read_text(encoding="utf-8")
-			except UnicodeDecodeError:
-				existing = None  # undecodable bytes differ from any text
-			if existing != evidence_text:
-				raise RecorderError(
-					f"notebook.py: snapshot collision: {snapshot_name} already "
-					"exists with different content",
-					2,
-				)
-		else:
-			snapshot.write_text(evidence_text, encoding="utf-8")
+		if snapshot is not None:
+			snapshot_name, evidence_text = snapshot
+			EVIDENCE_DIR.mkdir(parents=True, exist_ok=True)
+			snapshot_path = EVIDENCE_DIR / snapshot_name
+			if snapshot_path.exists():
+				try:
+					existing = snapshot_path.read_text(encoding="utf-8")
+				except UnicodeDecodeError:
+					existing = None  # undecodable bytes differ from any text
+				if existing != evidence_text:
+					raise RecorderError(
+						f"notebook.py: snapshot collision: {snapshot_name} already "
+						"exists with different content",
+						2,
+					)
+			else:
+				snapshot_path.write_text(evidence_text, encoding="utf-8")
 		with NOTEBOOK_PATH.open("a", encoding="utf-8") as handle:
 			handle.write(json.dumps(entry, ensure_ascii=False) + "\n")
 	except OSError as error:
@@ -310,9 +391,50 @@ def write_entry(entry: dict, snapshot_name: str, evidence_text: str) -> None:
 
 def parse_args(argv: list[str] | None) -> argparse.Namespace:
 	args = build_parser().parse_args(argv)
-	args.hypothesis = collapse_ws(args.hypothesis)
-	if not args.hypothesis:
-		fail("notebook.py: --hypothesis must be non-empty text", 1)
+	args.type = next(t for t in TYPE_PREFIX if getattr(args, t) is not None)
+	args.text = collapse_ws(getattr(args, args.type))
+	if not args.text:
+		fail(f"notebook.py: --{args.type} must be non-empty text", 1)
+	# Confidence is judgment, not a source claim: no evidence, a named subject.
+	if args.type == "confidence":
+		if args.evidence is not None:
+			fail(
+				"notebook.py: --evidence is not accepted with --confidence; "
+				"a judgment is not a source claim",
+				1,
+			)
+		if args.on is None:
+			fail(
+				"notebook.py: --confidence requires --on naming the hypothesis "
+				"it judges",
+				1,
+			)
+	elif args.on is not None:
+		fail("notebook.py: --on is only accepted with --confidence", 1)
+	if args.type in ("hypothesis", "observation") and args.evidence is None:
+		fail(
+			f"notebook.py: --{args.type} requires --evidence -- a hypothesis or "
+			"an observation is a claim about what a source showed",
+			1,
+		)
+	if (args.evidence is None) != (args.grade is None):
+		fail(
+			"notebook.py: --grade is required exactly when --evidence is given",
+			1,
+		)
+	if args.supports is not None and args.type != "observation":
+		fail(
+			"notebook.py: --supports is only accepted with --observation -- an "
+			"evidence-to-hypothesis link rides an observation's evidence",
+			1,
+		)
+	for flag, value in (("--on", args.on), ("--supports", args.supports)):
+		if value is not None and not REF_RE.match(value):
+			fail(
+				f"notebook.py: {flag} must name a hypothesis id (hyp-NNNN), "
+				f"got: {value}",
+				1,
+			)
 	return args
 
 
@@ -322,20 +444,33 @@ def main(argv: list[str] | None = None) -> int:
 	if THETA_DIR.exists() and not THETA_DIR.is_dir():
 		fail("notebook.py: .theta exists but is not a directory", 2)
 	try:
-		evidence_text = read_evidence(args.evidence)
-		item = parse_evidence(evidence_text)
-		item["grade"] = args.grade
+		item = None
+		snapshot = None
+		if args.evidence is not None:
+			evidence_text = read_evidence(args.evidence)
+			item = parse_evidence(evidence_text)
+			item["grade"] = args.grade
+			digest = hashlib.sha256(evidence_text.encode("utf-8")).hexdigest()
+			item["snapshot"] = f"evidence/{digest}.json"
+			if args.supports is not None:
+				item["supports"] = args.supports
+			snapshot = (f"{digest}.json", evidence_text)
 		entries = load_notebook()
-		digest = hashlib.sha256(evidence_text.encode("utf-8")).hexdigest()
-		item["snapshot"] = f"evidence/{digest}.json"
+		resolve_ref(entries, args.on, "--on")
+		resolve_ref(entries, args.supports, "--supports")
 		entry = {
-			"id": next_hypothesis_id(entries),
-			"type": "hypothesis",
+			"id": next_id(args.type, entries),
+			"type": args.type,
 			"date": date.today().isoformat(),
-			"text": args.hypothesis,
-			"evidence": [item],
 		}
-		write_entry(entry, f"{digest}.json", evidence_text)
+		if args.type == "confidence":
+			entry["hypothesis"] = args.on
+		entry["text"] = args.text
+		if args.type == "observation":
+			entry["grade"] = args.grade
+		if item is not None:
+			entry["evidence"] = [item]
+		write_entry(entry, snapshot)
 	except RecorderError as error:
 		fail(str(error), error.exit_code)
 	if args.json:
@@ -346,13 +481,21 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def print_text(entry: dict) -> None:
-	item = entry["evidence"][0]
 	print(f"recorded {entry['id']} ({entry['type']}) in {NOTEBOOK_PATH}")
-	print(
-		f"# evidence: {item['source']} via {', '.join(item['endpoints'])}; "
-		f"retrieved {item['retrieved']}; grade {item['grade']}"
-	)
-	print(f"# snapshot: {item['snapshot']}")
+	if entry["type"] == "confidence":
+		print(f"# judgment on {entry['hypothesis']}")
+	if entry["type"] == "observation":
+		print(f"# grade: {entry['grade']}")
+		supports = entry["evidence"][0].get("supports")
+		if supports is not None:
+			print(f"# supports: {supports}")
+	if "evidence" in entry:
+		item = entry["evidence"][0]
+		print(
+			f"# evidence: {item['source']} via {', '.join(item['endpoints'])}; "
+			f"retrieved {item['retrieved']}; grade {item['grade']}"
+		)
+		print(f"# snapshot: {item['snapshot']}")
 
 
 if __name__ == "__main__":

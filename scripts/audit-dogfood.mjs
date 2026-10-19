@@ -191,6 +191,19 @@ export function resolveNotebookDir(rootArg, notebook) {
 // anything outside the vocabulary is not a grade.
 const NOTEBOOK_GRADES = new Set(["asserted", "cross-checked", "re-executed"]);
 
+// The five entry types the recorder writes (ADR 0003): each sequences its
+// own id prefix (hyp-0001, mth-0001, …) and carries evidence as noted.
+// observation alone takes an entry-level grade — a grade rates a source,
+// judgment is the confidence entry type, and the two never merge. confidence
+// names the hypothesis it judges; hypothesis entries are the link targets.
+const NOTEBOOK_TYPES = {
+	hypothesis: { prefix: "hyp", evidence: "required" },
+	method: { prefix: "mth", evidence: "optional" },
+	observation: { prefix: "obs", evidence: "required", graded: true },
+	decision: { prefix: "dec", evidence: "optional" },
+	confidence: { prefix: "cnf", evidence: "forbidden", judges: true },
+};
+
 // The typed-shape guards the notebook checks share: a plain JSON object
 // (arrays and null are not records), and a non-empty string field.
 const isPlainObject = (x) => typeof x === "object" && x !== null && !Array.isArray(x);
@@ -272,13 +285,16 @@ function auditSnapshot(thetaDir, addr, digest, citedFrom) {
 }
 
 // Validates the project notebook the recorder writes (ADR 0003): every line
-// of notebook.jsonl parses into a typed, dated hypothesis entry whose
-// evidence item cites a snapshot that exists, hashes to its own address,
-// parses as a connector output, and agrees with the item it backs (source,
-// endpoints, query, retrieval date). Extra snapshot files are tolerated —
-// the recorder's write order orphans snapshots, never entries. Returns the
-// counts and raw bytes the attestation names; throws on any failure. The
-// shape is the tracer slice's (#37); the M3 batch entry types widen it.
+// of notebook.jsonl parses into a typed, dated entry — one of the five
+// types, ids sequenced per type — whose evidence item cites a snapshot that
+// exists, hashes to its own address, parses as a connector output, and
+// agrees with the item it backs (source, endpoints, query, retrieval date).
+// An observation carries an entry-level grade and may link its evidence to
+// an earlier hypothesis entry (`supports`); a confidence names the earlier
+// hypothesis it judges — references that point nowhere fail. Extra snapshot
+// files are tolerated — the recorder's write order orphans snapshots, never
+// entries. Returns the counts and raw bytes the attestation names; throws
+// on any failure.
 export function auditNotebook(thetaDirArg) {
 	// Canonicalize the directory itself: mount aliases (/var vs /private/var)
 	// would otherwise fail the snapshot containment check below.
@@ -322,18 +338,23 @@ export function auditNotebook(thetaDirArg) {
 		entries.push(entry);
 	}
 	const snapshots = new Map(); // address -> derived fields, each file read once
+	const seen = new Map(); // type -> count so far, for per-type id sequencing
+	const knownHypotheses = new Set(); // ids of earlier hypothesis entries
 	for (let i = 0; i < entries.length; i++) {
 		const entry = entries[i];
 		const where = `notebook.jsonl line ${i + 1}`;
-		const wantId = `hyp-${String(i + 1).padStart(4, "0")}`;
-		if (entry.id !== wantId) {
+		const spec = NOTEBOOK_TYPES[entry.type];
+		if (spec === undefined) {
 			throw new Error(
-				`${where} id: expected ${wantId} (the recorder sequences ids from 1), got ${JSON.stringify(entry.id)}`,
+				`${where} type: expected one of ${Object.keys(NOTEBOOK_TYPES).join(", ")}, got ${JSON.stringify(entry.type)}`,
 			);
 		}
-		if (entry.type !== "hypothesis") {
+		const count = (seen.get(entry.type) ?? 0) + 1;
+		seen.set(entry.type, count);
+		const wantId = `${spec.prefix}-${String(count).padStart(4, "0")}`;
+		if (entry.id !== wantId) {
 			throw new Error(
-				`${where} type: expected "hypothesis", got ${JSON.stringify(entry.type)}`,
+				`${where} id: expected ${wantId} (the recorder sequences ids per type from 1), got ${JSON.stringify(entry.id)}`,
 			);
 		}
 		if (!isIsoDate(entry.date)) {
@@ -346,12 +367,51 @@ export function auditNotebook(thetaDirArg) {
 				`${where} text: expected non-empty text, got ${JSON.stringify(entry.text)}`,
 			);
 		}
-		if (!Array.isArray(entry.evidence) || entry.evidence.length === 0) {
+		// A grade rates a source. Only an observation carries one at entry
+		// level; on any other type the field is the grade/confidence merge
+		// the vocabulary forbids.
+		if (spec.graded) {
+			if (!NOTEBOOK_GRADES.has(entry.grade)) {
+				throw new Error(
+					`${where} grade: expected one of asserted, cross-checked, re-executed, got ${JSON.stringify(entry.grade)}`,
+				);
+			}
+		} else if (entry.grade !== undefined) {
+			throw new Error(
+				`${where} grade: only an observation carries an entry-level grade — judgment is the confidence entry type, and the two never merge`,
+			);
+		}
+		// A confidence names the hypothesis it judges; the reference must
+		// resolve to an earlier hypothesis entry, like an item's supports.
+		if (spec.judges) {
+			if (!nonEmptyString(entry.hypothesis)) {
+				throw new Error(
+					`${where} hypothesis: expected the judged hypothesis id, got ${JSON.stringify(entry.hypothesis)}`,
+				);
+			}
+			if (!knownHypotheses.has(entry.hypothesis)) {
+				throw new Error(
+					`${where} hypothesis: ${JSON.stringify(entry.hypothesis)} names no earlier hypothesis entry`,
+				);
+			}
+		}
+		const evidencePresent = entry.evidence !== undefined;
+		if (spec.evidence === "required" && !evidencePresent) {
 			throw new Error(
 				`${where} evidence: expected a non-empty list, got ${JSON.stringify(entry.evidence)}`,
 			);
 		}
-		for (let j = 0; j < entry.evidence.length; j++) {
+		if (spec.evidence === "forbidden" && evidencePresent) {
+			throw new Error(
+				`${where} evidence: a confidence entry carries none — judgment is not a source claim`,
+			);
+		}
+		if (evidencePresent && (!Array.isArray(entry.evidence) || entry.evidence.length === 0)) {
+			throw new Error(
+				`${where} evidence: expected a non-empty list, got ${JSON.stringify(entry.evidence)}`,
+			);
+		}
+		for (let j = 0; evidencePresent && j < entry.evidence.length; j++) {
 			const item = entry.evidence[j];
 			const at = `${where} evidence item ${j + 1}`;
 			if (!isPlainObject(item)) {
@@ -386,6 +446,18 @@ export function auditNotebook(thetaDirArg) {
 					`${at} grade: expected one of asserted, cross-checked, re-executed, got ${JSON.stringify(item.grade)}`,
 				);
 			}
+			if (item.supports !== undefined) {
+				if (entry.type !== "observation") {
+					throw new Error(
+						`${at} supports: an evidence-to-hypothesis link rides an observation's evidence item`,
+					);
+				}
+				if (!nonEmptyString(item.supports) || !knownHypotheses.has(item.supports)) {
+					throw new Error(
+						`${at} supports: ${JSON.stringify(item.supports)} names no earlier hypothesis entry`,
+					);
+				}
+			}
 			const addr = /^evidence\/([0-9a-f]{64})\.json$/.exec(item.snapshot);
 			if (!addr) {
 				throw new Error(
@@ -418,6 +490,7 @@ export function auditNotebook(thetaDirArg) {
 				);
 			}
 		}
+		if (entry.type === "hypothesis") knownHypotheses.add(entry.id);
 	}
 	return { entries: entries.length, snapshots: snapshots.size, notebookBuf };
 }
