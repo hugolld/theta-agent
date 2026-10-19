@@ -47,3 +47,27 @@ test("pi manifest targets exist on disk", async () => {
 		assert.ok(dirStat.isDirectory(), `${dir} is not a directory`);
 	}
 });
+
+test("npm scripts pin one-off tool runs", () => {
+	// uvx/npx resolve a bare tool name at run time, so an unpinned script
+	// lints differently on every machine: M3's verify went red on CI's
+	// fresh ruff resolve while every local cache still passed (#41 retro).
+	// Local bins are lockfile-pinned; these runners are not — the version
+	// rides in the script (uvx ruff@0.15.7).
+	for (const [name, script] of Object.entries(manifest.scripts)) {
+		const tokens = script.split(/\s+/);
+		for (let i = 0; i < tokens.length; i += 1) {
+			if (tokens[i] !== "uvx" && tokens[i] !== "npx") continue;
+			let j = i + 1;
+			// flag prefixes belong to the runner, not the tool name
+			while (j < tokens.length && tokens[j].startsWith("-")) j += 1;
+			const tool = tokens[j] ?? "";
+			assert.match(
+				tool,
+				/@[^/@]+$/,
+				`scripts.${name}: '${tokens[i]}' must name the tool version ` +
+					`(uvx ruff@0.15.7) — got '${tool || "nothing"}'`,
+			);
+		}
+	}
+});
