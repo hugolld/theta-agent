@@ -48,6 +48,11 @@ test("pi manifest targets exist on disk", async () => {
 	}
 });
 
+// A pin names a concrete version: the @ suffix must start with a digit, so
+// `ruff@latest` — resolved at run time, exactly the drift this test exists
+// to stop — reads as unpinned.
+const PINNED = /@\d[\w.+-]*$/;
+
 test("npm scripts pin one-off tool runs", () => {
 	// uvx/npx resolve a bare tool name at run time, so an unpinned script
 	// lints differently on every machine: M3's verify went red on CI's
@@ -64,10 +69,18 @@ test("npm scripts pin one-off tool runs", () => {
 			const tool = tokens[j] ?? "";
 			assert.match(
 				tool,
-				/@[^/@]+$/,
+				PINNED,
 				`scripts.${name}: '${tokens[i]}' must name the tool version ` +
 					`(uvx ruff@0.15.7) — got '${tool || "nothing"}'`,
 			);
 		}
 	}
+});
+
+test("the pin pattern rejects run-time resolves", () => {
+	assert.ok(PINNED.test("ruff@0.15.7"));
+	assert.ok(PINNED.test("@scope/tool@1.2.3-rc.1"));
+	assert.ok(!PINNED.test("ruff"));
+	assert.ok(!PINNED.test("ruff@latest"));
+	assert.ok(!PINNED.test("@scope/tool"));
 });
