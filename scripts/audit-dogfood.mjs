@@ -133,24 +133,33 @@ export function resolveAdvertisedSkill(root, skill, expected) {
 	return target;
 }
 
-// Resolves the script argument to an absolute path and requires an existing
-// regular file inside the checkout — traversal and outside paths (including
-// symlinks that escape the checkout) are rejected. Unlike the skill
-// argument there is no advertisement set to check membership against, so
-// containment is the criterion.
-export function resolveCheckoutScript(rootArg, script) {
+// Resolves a checkout-relative argument (named by `label` in the errors) to
+// an absolute path and requires an existing `file` or `directory` inside
+// the checkout — traversal and outside paths, including symlinks that
+// escape the checkout, are rejected. Containment is the criterion: neither
+// scripts nor the notebook directory has an advertisement set to check
+// membership against.
+function resolveInsideCheckout(rootArg, label, arg, kind) {
 	const root = fs.realpathSync(rootArg);
-	const lexical = path.resolve(root, script);
+	const lexical = path.resolve(root, arg);
 	let target = lexical;
 	try {
 		target = fs.realpathSync(lexical);
 	} catch {
-		throw new Error(`script argument does not resolve on disk: ${script}`);
+		throw new Error(`${label} argument does not resolve on disk: ${arg}`);
 	}
-	if (!fs.statSync(target).isFile() || !target.startsWith(root + path.sep)) {
-		throw new Error(`script argument must be a file inside the checkout, got: ${script}`);
+	const rightKind =
+		kind === "file" ? fs.statSync(target).isFile() : fs.statSync(target).isDirectory();
+	if (!rightKind || !target.startsWith(root + path.sep)) {
+		throw new Error(`${label} argument must be a ${kind} inside the checkout, got: ${arg}`);
 	}
 	return target;
+}
+
+// Resolves the script argument to an absolute path and requires an existing
+// regular file inside the checkout.
+export function resolveCheckoutScript(rootArg, script) {
+	return resolveInsideCheckout(rootArg, "script", script, "file");
 }
 
 // A calendar-valid YYYY-MM-DD date string — the form the recorder and the
@@ -175,25 +184,17 @@ export function isIsoDate(s) {
 // writes under the session's cwd, gitignored so the clean-tree proof holds
 // with a notebook present.
 export function resolveNotebookDir(rootArg, notebook) {
-	const root = fs.realpathSync(rootArg);
-	const lexical = path.resolve(root, notebook);
-	let target = lexical;
-	try {
-		target = fs.realpathSync(lexical);
-	} catch {
-		throw new Error(`notebook argument does not resolve on disk: ${notebook}`);
-	}
-	if (!fs.statSync(target).isDirectory() || !target.startsWith(root + path.sep)) {
-		throw new Error(
-			`notebook argument must be a directory inside the checkout, got: ${notebook}`,
-		);
-	}
-	return target;
+	return resolveInsideCheckout(rootArg, "notebook", notebook, "directory");
 }
 
 // The recorder's grade vocabulary (SKILL.md): a grade rates the source, and
 // anything outside the vocabulary is not a grade.
 const NOTEBOOK_GRADES = new Set(["asserted", "cross-checked", "re-executed"]);
+
+// The typed-shape guards the notebook checks share: a plain JSON object
+// (arrays and null are not records), and a non-empty string field.
+const isPlainObject = (x) => typeof x === "object" && x !== null && !Array.isArray(x);
+const nonEmptyString = (x) => typeof x === "string" && x !== "";
 
 // Reads one cited snapshot and derives the evidence fields the recorder
 // derives from it (parse_evidence's logic, mirrored): the snapshot must be
@@ -225,18 +226,14 @@ function auditSnapshot(thetaDir, addr, digest, citedFrom) {
 	}
 	const shapeError = (why) =>
 		new Error(`${addr} (cited on ${citedFrom}) is not a connector output: ${why}`);
-	if (typeof payload !== "object" || payload === null || Array.isArray(payload)) {
+	if (!isPlainObject(payload)) {
 		throw shapeError("not a JSON object");
 	}
-	if (typeof payload.source !== "string" || payload.source === "") {
+	if (!nonEmptyString(payload.source)) {
 		throw shapeError("lacks a non-empty string 'source'");
 	}
 	const provenance = payload.provenance;
-	if (
-		typeof provenance !== "object" ||
-		provenance === null ||
-		Array.isArray(provenance)
-	) {
+	if (!isPlainObject(provenance)) {
 		throw shapeError("lacks a 'provenance' object");
 	}
 	if (!Array.isArray(provenance.calls) || provenance.calls.length === 0) {
@@ -244,13 +241,13 @@ function auditSnapshot(thetaDir, addr, digest, citedFrom) {
 	}
 	const endpoints = [];
 	for (const call of provenance.calls) {
-		if (typeof call !== "object" || call === null) {
+		if (!isPlainObject(call)) {
 			throw shapeError("every provenance call must be an object");
 		}
-		if (typeof call.endpoint !== "string" || call.endpoint === "") {
+		if (!nonEmptyString(call.endpoint)) {
 			throw shapeError("every provenance call needs a non-empty string 'endpoint'");
 		}
-		if (typeof call.url !== "string" || call.url === "") {
+		if (!nonEmptyString(call.url)) {
 			throw shapeError("every provenance call needs a non-empty string 'url'");
 		}
 		if (!endpoints.includes(call.endpoint)) endpoints.push(call.endpoint);
@@ -319,7 +316,7 @@ export function auditNotebook(thetaDirArg) {
 		} catch (e) {
 			throw new Error(`${where} is not JSON: ${e.message}`);
 		}
-		if (typeof entry !== "object" || entry === null || Array.isArray(entry)) {
+		if (!isPlainObject(entry)) {
 			throw new Error(`${where} is not a JSON object`);
 		}
 		entries.push(entry);
@@ -357,10 +354,10 @@ export function auditNotebook(thetaDirArg) {
 		for (let j = 0; j < entry.evidence.length; j++) {
 			const item = entry.evidence[j];
 			const at = `${where} evidence item ${j + 1}`;
-			if (typeof item !== "object" || item === null || Array.isArray(item)) {
+			if (!isPlainObject(item)) {
 				throw new Error(`${at}: expected an object, got ${JSON.stringify(item)}`);
 			}
-			if (typeof item.source !== "string" || item.source === "") {
+			if (!nonEmptyString(item.source)) {
 				throw new Error(
 					`${at} source: expected a non-empty string, got ${JSON.stringify(item.source)}`,
 				);
@@ -368,7 +365,7 @@ export function auditNotebook(thetaDirArg) {
 			if (
 				!Array.isArray(item.endpoints) ||
 				item.endpoints.length === 0 ||
-				item.endpoints.some((e) => typeof e !== "string" || e === "")
+				item.endpoints.some((e) => !nonEmptyString(e))
 			) {
 				throw new Error(
 					`${at} endpoints: expected a non-empty list of non-empty strings, got ${JSON.stringify(item.endpoints)}`,
