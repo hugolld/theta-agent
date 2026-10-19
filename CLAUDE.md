@@ -18,6 +18,7 @@ Current state: 0.2.0 — M2 is shipped. The M1 base ships the `theta` launcher (
 ## Conventions
 
 - Conventional commits (`feat:`, `chore:`, `docs:`). Tabs and existing field order in `package.json`.
+- Extract a shared helper as soon as the same logic shape appears twice within one module (tests included); copying code verbatim is for separately shipped trees only — skill-to-skill, never within a file.
 - When a change supersedes text in a steering doc (`CLAUDE.md`, `GLOSSARY.md`, `docs/adr/`), the same strike edits that text.
 - `.npmrc` pins the official registry (the machine default is npmmirror).
 - No build step; tests use Node's built-in node:test runner (pi loads extension TS via jiti). Verify changes with `npm test`, `npm run lint`, and `npm run typecheck`; check shipped files with `npm pack --dry-run`.

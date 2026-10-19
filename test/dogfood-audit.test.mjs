@@ -186,7 +186,9 @@ function makeTempRepo(t) {
 	run("git config core.hooksPath /dev/null");
 	run("git add -A");
 	run("git -c commit.gpgsign=false commit -qm init");
-	return repo;
+	// Canonical from birth: mount aliases (/var vs /private/var on macOS)
+	// must not leak lexical paths into containment comparisons.
+	return fs.realpathSync(repo);
 }
 
 const repoHead = (repo) =>
@@ -1084,7 +1086,7 @@ test("auditSession rejects host aliases under inventory names", (t) => {
 	);
 	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "dogfood-session-"));
 	t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
-	const locs = invNamesToLocs(repo, ["literature-review"], hostDir);
+	const locs = invNamesToLocs(["literature-review"], hostDir);
 	const records = [
 		({ type: "session", cwd: fs.realpathSync(repo) }),
 		({
@@ -1140,7 +1142,7 @@ test("auditSession rejects host aliases under inventory names", (t) => {
 	);
 });
 
-function invNamesToLocs(repo, names, hostDir) {
+function invNamesToLocs(names, hostDir) {
 	// every inventory name is advertised through the host alias file
 	return names
 		.map(
@@ -1274,7 +1276,8 @@ function makeThetaDir(t, { notebookText, snapshots = [], orphans = [] } = {}) {
 	for (const name of orphans) {
 		fs.writeFileSync(path.join(dir, "evidence", name), "orphan bytes\n");
 	}
-	return dir;
+	// canonical, like makeTempRepo — see its comment
+	return fs.realpathSync(dir);
 }
 
 const baseItem = {
