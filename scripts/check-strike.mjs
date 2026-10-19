@@ -4,8 +4,9 @@
 // steps that run after the merge — is the expected open exception.
 //
 // Evidence freshness (#27, M2 retro): when the PR body carries a dogfood
-// attestation (`clean <sha>` from audit-dogfood.mjs), that SHA must equal
-// HEAD. Evidence goes stale on the next commit (dogfood.md's batch rule),
+// attestation (`clean <sha>` — matched with the pattern exported from
+// audit-dogfood.mjs, so emitter and gate share one definition), that SHA
+// must equal HEAD. Evidence goes stale on the next commit (dogfood.md's batch rule),
 // and M2 marked stale evidence ready twice — the ready gate is where that
 // bites. No attestation in the body (chore strikes) passes with a note.
 //
@@ -21,6 +22,7 @@
 import { execSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { CLEAN_LINE_PATTERN } from "./audit-dogfood.mjs";
 
 const repo = "hugolld/theta-agent";
 
@@ -30,7 +32,7 @@ const repo = "hugolld/theta-agent";
 // is a pass (chore strikes carry no dogfood pair), not a failure.
 export function evidenceFreshness(prBody, head) {
 	const attested = [
-		...`${prBody ?? ""}`.matchAll(/\bclean\s+([0-9a-f]{40})\b/g),
+		...`${prBody ?? ""}`.matchAll(CLEAN_LINE_PATTERN),
 	].map((match) => match[1]);
 	if (attested.length === 0) return { verdict: "none", attested };
 	const unique = [...new Set(attested)];

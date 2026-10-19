@@ -16,6 +16,8 @@ import {
 	isIsoDate,
 	resolveNotebookDir,
 	auditNotebook,
+	formatCleanLine,
+	CLEAN_LINE_PATTERN,
 	auditSession,
 } from "../scripts/audit-dogfood.mjs";
 
@@ -2083,5 +2085,36 @@ test("golden fixtures: the auditor CLI is green on pass and red on every failure
 			assert.equal(audit.status, 1, `${name}: expected red, stdout: ${audit.stdout}`);
 			assert.match(audit.stderr, re, `${name}: unexpected refusal`);
 		}
+	}
+});
+
+test("clean-line format owner: emitter and gate share one definition", () => {
+	const sha = "0f1e2d3c4b5a69788796a5b4c3d2e1f00f1e2d3c";
+	const line = formatCleanLine(sha);
+	const matches = [...line.matchAll(CLEAN_LINE_PATTERN)];
+	assert.equal(matches.length, 1);
+	assert.equal(matches[0][1], sha);
+	// Wrong length or non-hex after "clean" is not an attestation token.
+	const rejects = (s) =>
+		assert.equal([...s.matchAll(CLEAN_LINE_PATTERN)].length, 0, `unexpectedly matched: ${s}`);
+	rejects(`clean ${"z".repeat(40)}`);
+	rejects(`clean ${"a".repeat(64)}`);
+	rejects(`clean ${"a".repeat(39)}`);
+});
+
+test("clean-line format owner: dogfood.md examples match the exported pattern", () => {
+	const doc = fs.readFileSync(
+		new URL("../docs/agents/dogfood.md", import.meta.url),
+		"utf8",
+	);
+	// Every inline span that shows the line's shape (`clean …`) must parse
+	// with the exported pattern; the bare keyword `clean` is not a shape.
+	const examples = [...doc.matchAll(/`clean\s[^`]*`/g)].map((m) => m[0]);
+	assert.ok(examples.length > 0, "dogfood.md carries at least one shaped clean-line example");
+	for (const example of examples) {
+		assert.ok(
+			[...example.matchAll(CLEAN_LINE_PATTERN)].length > 0,
+			`dogfood.md example drifted from the exported pattern: ${example}`,
+		);
 	}
 });

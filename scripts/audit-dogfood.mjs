@@ -1393,6 +1393,17 @@ function pairedCalls(tool, graph, userIndex) {
 	return out;
 }
 
+// The attestation's first line — `clean <sha>` — is the token the strike
+// gate (scripts/check-strike.mjs) matches in PR bodies. One owner: this
+// module formats the line and exports the pattern, the gate imports it,
+// and the dogfood suite holds the pair (and dogfood.md's prose) to the
+// same definition — the format cannot drift into a silent gate no-op.
+export function formatCleanLine(sha) {
+	return `clean ${sha}`;
+}
+
+export const CLEAN_LINE_PATTERN = /\bclean\s+([0-9a-f]{40})\b/g;
+
 // Audits one dogfood session directory against the checkout at the current
 // HEAD and returns the attestation. Throws on any failure; `skill` (a
 // checkout-relative SKILL.md path) additionally requires a successful read
@@ -1752,7 +1763,7 @@ export function auditSession(dir, rootArg, skill, script, notebook) {
 	}
 	const shaText = (s) => createHash("sha256").update(s).digest("hex");
 	let out =
-		`clean ${head}\n` +
+		`${formatCleanLine(head)}\n` +
 		`transcript ${createHash("sha256").update(transcriptBuf).digest("hex")}\n` +
 		`exit-status ${shaText(bootExitRaw)}\n` +
 		`stderr ${shaText(bootErrBuf)}\n` +
