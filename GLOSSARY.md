@@ -17,7 +17,7 @@ The metadata block in a vendored `SKILL.md` recording upstream repo, release tag
 _Avoid_: attribution header, source note
 
 **Orchestrator**:
-The self-authored `theta-research-loop` skill; it walks frame, search, hypothesize, design, execute, report and routes work into the skill library.
+The self-authored `theta-research-loop` skill; it walks frame, search, hypothesize, design, execute, report, routes work into the skill library, and records each stage's output into the project notebook.
 _Avoid_: umbrella skill, router, meta-skill
 
 **Connector skill**:

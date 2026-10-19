@@ -13,9 +13,11 @@ This skill is Theta's own voice (the **orchestrator**, per ADR 0001): it turns a
 scientist's request into a disciplined loop and routes each stage into the
 skill library. It carries no domain methods of its own — the
 library holds the methods; this skill holds the order and the provenance
-discipline. Recording is part of that order: each stage appends its record to
-the **project notebook** (ADR 0003) through `theta-notebook`, so the loop's
-trace accumulates across sessions instead of dying with the transcript.
+discipline. Recording is part of that order: what a stage records — the loop
+table's Records column, plus the cross-cutting decision and confidence
+entries — lands in the **project notebook** (ADR 0003) through
+`theta-notebook`, so the loop's trace accumulates across sessions instead of
+dying with the transcript.
 
 ## The loop
 
@@ -28,11 +30,11 @@ trace accumulates across sessions instead of dying with the transcript.
 | 5. Execute | What do the data say? | — (inline for now) | observations |
 | 6. Report | What follows, with what uncertainty? | — (inline for now) | — (reports read what earlier stages recorded) |
 
-Routing rule: at each stage, invoke the routed skill by name before
-improvising, and record the stage's output through `theta-notebook` before
-moving on — the Records column names what each stage appends to the project
-notebook. Decision and confidence entries are cross-cutting: no stage owns
-them, and any stage that sets a direction or moves a judgment records one.
+Routing and recording rule: at each stage, invoke the routed skill by name
+before improvising, and record the stage's output through `theta-notebook`
+before moving on. The Records column names what each stage records; decision
+and confidence entries are cross-cutting — no stage owns them, and any stage
+that sets a direction or moves a judgment records one.
 Where no skill is routed yet, run the stage inline and keep its
 artifacts (search strings, hypothesis records, analysis plans) so a later skill
 can pick them up without rework.
@@ -72,10 +74,10 @@ can pick them up without rework.
 ## Provenance discipline
 
 Every stage output names its inputs: which skill ran, which sources and files
-entered, which scripts produced which artifact. Every stage also appends its
-record to the project notebook through `theta-notebook` — dated provenance
-entries written by the recorder script, never hand-edited; a failed append is
-a failure, never silently skipped. Recording is not loop-bound: a standalone
+entered, which scripts produced which artifact. What the loop records is
+dated provenance entries, written by `theta-notebook`'s recorder script and
+never hand-edited; a failed append is a failure, never silently skipped.
+Recording is not loop-bound: a standalone
 literature search outside this loop leaves the same trace, because any session
 that finds evidence records it. The loop's value to a scientist is an
 auditable record that outlives the session, not only an answer.
