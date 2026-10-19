@@ -209,30 +209,29 @@ test("usage errors exit 1 and write nothing into the project", { skip: skipReaso
 		return file;
 	};
 	const cases = [
-		["no arguments", []],
-		["missing evidence and grade", ["--hypothesis", "x"]],
-		["missing grade", ["--hypothesis", "x", "--evidence", evidenceFixture]],
-		["missing evidence", ["--hypothesis", "x", "--grade", "asserted"]],
-		["unknown grade", ["--hypothesis", "x", "--evidence", evidenceFixture, "--grade", "high"]],
-		["blank hypothesis", ["--hypothesis", "   ", "--evidence", evidenceFixture, "--grade", "asserted"]],
-		["evidence file missing", ["--hypothesis", "x", "--evidence", "/nonexistent/evidence.json", "--grade", "asserted"]],
-		["evidence is a directory", ["--hypothesis", "x", "--evidence", path.dirname(evidenceFixture), "--grade", "asserted"]],
-		["empty stdin", ["--hypothesis", "x", "--evidence", "-", "--grade", "asserted", null]],
-		["not JSON", ["--hypothesis", "x", "--grade", "asserted", await badEvidence("not-json.json", "{oops")]],
-		["not a JSON object", ["--hypothesis", "x", "--grade", "asserted", await badEvidence("array.json", "[]")]],
-		["missing source", ["--hypothesis", "x", "--grade", "asserted", await badEvidence("no-source.json", JSON.stringify({ provenance: { calls: [{ endpoint: "e", url: "https://x" }], accessed: "2026-10-18" } }))]],
-		["missing provenance", ["--hypothesis", "x", "--grade", "asserted", await badEvidence("no-prov.json", JSON.stringify({ source: "pubmed" }))]],
-		["empty calls list", ["--hypothesis", "x", "--grade", "asserted", await badEvidence("no-calls.json", JSON.stringify({ source: "pubmed", provenance: { calls: [], accessed: "2026-10-18" } }))]],
-		["calls not a list", ["--hypothesis", "x", "--grade", "asserted", await badEvidence("calls-str.json", JSON.stringify({ source: "pubmed", provenance: { calls: "esearch.fcgi", accessed: "2026-10-18" } }))]],
-		["call without endpoint", ["--hypothesis", "x", "--grade", "asserted", await badEvidence("no-endpoint.json", JSON.stringify({ source: "pubmed", provenance: { calls: [{ url: "https://x" }], accessed: "2026-10-18" } }))]],
-		["call without url", ["--hypothesis", "x", "--grade", "asserted", await badEvidence("no-url.json", JSON.stringify({ source: "pubmed", provenance: { calls: [{ endpoint: "esearch.fcgi" }], accessed: "2026-10-18" } }))]],
-		["accessed not a date", ["--hypothesis", "x", "--grade", "asserted", await badEvidence("bad-date.json", JSON.stringify({ source: "pubmed", provenance: { calls: [{ endpoint: "e", url: "https://x" }], accessed: "18/10/2026" } }))]],
-		["accessed not a string", ["--hypothesis", "x", "--grade", "asserted", await badEvidence("num-date.json", JSON.stringify({ source: "pubmed", provenance: { calls: [{ endpoint: "e", url: "https://x" }], accessed: 20261018 } }))]],
+		{ name: "no arguments", args: [] },
+		{ name: "missing evidence and grade", args: ["--hypothesis", "x"] },
+		{ name: "missing grade", args: ["--hypothesis", "x", "--evidence", evidenceFixture] },
+		{ name: "missing evidence", args: ["--hypothesis", "x", "--grade", "asserted"] },
+		{ name: "unknown grade", args: ["--hypothesis", "x", "--evidence", evidenceFixture, "--grade", "high"] },
+		{ name: "blank hypothesis", args: ["--hypothesis", "   ", "--evidence", evidenceFixture, "--grade", "asserted"] },
+		{ name: "evidence file missing", args: ["--hypothesis", "x", "--evidence", "/nonexistent/evidence.json", "--grade", "asserted"] },
+		{ name: "evidence is a directory", args: ["--hypothesis", "x", "--evidence", path.dirname(evidenceFixture), "--grade", "asserted"] },
+		{ name: "empty stdin", args: ["--hypothesis", "x", "--evidence", "-", "--grade", "asserted"], stdin: "" },
+		{ name: "not JSON", args: ["--hypothesis", "x", "--grade", "asserted", await badEvidence("not-json.json", "{oops")] },
+		{ name: "not a JSON object", args: ["--hypothesis", "x", "--grade", "asserted", await badEvidence("array.json", "[]")] },
+		{ name: "missing source", args: ["--hypothesis", "x", "--grade", "asserted", await badEvidence("no-source.json", JSON.stringify({ provenance: { calls: [{ endpoint: "e", url: "https://x" }], accessed: "2026-10-18" } }))] },
+		{ name: "missing provenance", args: ["--hypothesis", "x", "--grade", "asserted", await badEvidence("no-prov.json", JSON.stringify({ source: "pubmed" }))] },
+		{ name: "empty calls list", args: ["--hypothesis", "x", "--grade", "asserted", await badEvidence("no-calls.json", JSON.stringify({ source: "pubmed", provenance: { calls: [], accessed: "2026-10-18" } }))] },
+		{ name: "calls not a list", args: ["--hypothesis", "x", "--grade", "asserted", await badEvidence("calls-str.json", JSON.stringify({ source: "pubmed", provenance: { calls: "esearch.fcgi", accessed: "2026-10-18" } }))] },
+		{ name: "call without endpoint", args: ["--hypothesis", "x", "--grade", "asserted", await badEvidence("no-endpoint.json", JSON.stringify({ source: "pubmed", provenance: { calls: [{ url: "https://x" }], accessed: "2026-10-18" } }))] },
+		{ name: "call without url", args: ["--hypothesis", "x", "--grade", "asserted", await badEvidence("no-url.json", JSON.stringify({ source: "pubmed", provenance: { calls: [{ endpoint: "esearch.fcgi" }], accessed: "2026-10-18" } }))] },
+		{ name: "accessed not a date", args: ["--hypothesis", "x", "--grade", "asserted", await badEvidence("bad-date.json", JSON.stringify({ source: "pubmed", provenance: { calls: [{ endpoint: "e", url: "https://x" }], accessed: "18/10/2026" } }))] },
+		{ name: "accessed not a string", args: ["--hypothesis", "x", "--grade", "asserted", await badEvidence("num-date.json", JSON.stringify({ source: "pubmed", provenance: { calls: [{ endpoint: "e", url: "https://x" }], accessed: 20261018 } }))] },
 	];
-	for (const [name, args] of cases) {
+	for (const { name, args, stdin } of cases) {
 		const project = await scratchProject(t);
-		const stdin = args.includes(null) ? "" : undefined;
-		const run = runRecorder(args.filter((arg) => arg !== null), { cwd: project, stdin });
+		const run = runRecorder(args, { cwd: project, stdin });
 		assert.equal(run.status, 1, `${name}: should exit 1`);
 		assert.notEqual(run.stderr.trim(), "", `${name}: stderr must say what is wrong`);
 		assert.equal(run.stdout, "", `${name}: no stdout on failure`);

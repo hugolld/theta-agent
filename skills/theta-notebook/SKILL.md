@@ -54,7 +54,9 @@ recorder call appends one entry shaped like:
   connector made its call (the connector's `provenance.accessed`, carried
   through). Two different claims, both kept.
 - The evidence item carries the source, the endpoints called, the query, the
-  retrieval date, the grade, and the snapshot address.
+  retrieval date, the grade, and the snapshot address. `query` is the search
+  term, or null for an identifier lookup (whose identifiers ride in the
+  snapshot itself).
 - The snapshot is the connector's `--json` output byte-for-byte — already
   credential-redacted and already dated by the connector's own code. Raw
   HTTP bodies are never kept.
@@ -71,15 +73,27 @@ recorder call appends one entry shaped like:
 
 ## Operations
 
+The recorder writes `.theta/` under the **current directory**, so run it with
+the research project's workspace as the cwd — never from inside the skill
+tree, which would land the notebook in the package checkout. Resolve the
+script path against the skill directory (pi's rule for skill-relative paths)
+and pass it absolute:
+
 ```bash
-# From the research project's workspace (the recorder writes .theta/ under
-# the current directory):
-python3 scripts/notebook.py --hypothesis "TEXT" --evidence search.json --grade asserted
+cd /path/to/research-project
+
+# Record from a saved connector output:
+python3 <theta-notebook-skill-dir>/scripts/notebook.py \
+  --hypothesis "TEXT" --evidence search.json --grade asserted
 
 # The real flow — pipe the connector's structured output straight in:
-python3 ../theta-lit-search/scripts/pubmed.py --query "CRISPR gene therapy" --json | \
-  python3 scripts/notebook.py --hypothesis "TEXT" --evidence - --grade asserted
+python3 <theta-lit-search-skill-dir>/scripts/pubmed.py --query "CRISPR gene therapy" --json | \
+  python3 <theta-notebook-skill-dir>/scripts/notebook.py \
+  --hypothesis "TEXT" --evidence - --grade asserted
 ```
+
+`--evidence` takes the path of a saved `--json` output, or `-` to read it
+from stdin.
 
 Requires Python 3.11+ (standard library only). If `python3` is older, run
 `python3.13`, `python3.12`, or `python3.11` — the script names them when the

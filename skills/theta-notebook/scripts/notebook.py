@@ -67,6 +67,10 @@ class RecorderError(Exception):
 		self.exit_code = exit_code
 
 
+# The small helpers from here through fail() are deliberate copies from
+# theta-lit-search/scripts/_common.py, not an import: each skill ships as an
+# independent tree, so a cross-skill import would couple separately shipped
+# code. Keep the copies small.
 def require_python() -> None:
 	"""Refuse to run below 3.11, naming the versioned fallbacks."""
 	if sys.version_info < (3, 11):

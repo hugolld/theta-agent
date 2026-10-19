@@ -53,7 +53,7 @@ Single-context: root `GLOSSARY.md` + `docs/adr/`. See `docs/agents/domain.md`. G
 
 ### Connector scripts
 
-Connector helper scripts (`theta-lit-search` today) share enforced invariants — exit-code contract, classification shape, repeat-the-call records. See `docs/agents/connector-scripts.md`.
+Connector helper scripts (`theta-lit-search`, plus the `theta-notebook` recorder) share enforced invariants — exit-code contract, classification shape, repeat-the-call records. See `docs/agents/connector-scripts.md`.
 
 ### SKILL.md frontmatter
 

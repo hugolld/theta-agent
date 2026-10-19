@@ -1150,7 +1150,10 @@ function invNamesToLocs(repo, names, hostDir) {
 // Golden fixture: a sanitized REAL pi transcript (run at the pinned pi
 // version, paths rewritten to the fixture repo) must pass the boot audit —
 // this pins the parser against real-pi schema drift, not just hand-authored
-// records.
+// records. The <available_skills> inventory is maintained to match
+// test/expected-skills.json: the auditor requires every shipped skill to be
+// advertised, so each new skill extends the fixture's skills section (the
+// event structure stays the real 2026-10-10 capture).
 test("auditSession accepts a sanitized real pi transcript (golden)", (t) => {
 	const repo = fs.mkdtempSync(path.join(os.tmpdir(), "dogfood-golden-"));
 	t.after(() => fs.rmSync(repo, { recursive: true, force: true }));
