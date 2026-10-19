@@ -1404,6 +1404,9 @@ export function formatCleanLine(sha) {
 
 export const CLEAN_LINE_PATTERN = /\bclean\s+([0-9a-f]{40})\b/g;
 
+// The attestation's digest idiom — one helper for the legs and the session.
+const shaText = (s) => createHash("sha256").update(s).digest("hex");
+
 // ---------------------------------------------------------------------------
 // Attestation legs
 //
@@ -1413,6 +1416,14 @@ export const CLEAN_LINE_PATTERN = /\bclean\s+([0-9a-f]{40})\b/g;
 // named results later legs may read (the notebook leg requires the script
 // leg's result). The registry below is the only place a leg registers; it
 // fixes CLI order, and auditSession itself names no leg.
+
+// One prompt-neutrality gate, shared by every leg: a routed prompt that
+// names what the leg attests is instruction, not routing.
+function rejectIfPromptNames(ctx, variants, message) {
+	if (ctx.promptNamesAny(variants)) {
+		throw new Error(message);
+	}
+}
 
 function skillReadLeg(ctx, skill) {
 	const target = resolveAdvertisedSkill(ctx.root, skill, ctx.expected);
@@ -1426,17 +1437,15 @@ function skillReadLeg(ctx, skill) {
 	// derived from the target's parent directory, not from the argument
 	// string.
 	const skillName = path.basename(path.dirname(target));
-	if (
-		ctx.promptNamesAny([
+	rejectIfPromptNames(
+		ctx,
+		[
 			ctx.normalize(skillName),
 			ctx.normalize(path.basename(target)),
 			ctx.normalize(target),
-		])
-	) {
-		throw new Error(
-			"spot-check prompt names the selected skill or its file — a routed task must reach it on its own",
-		);
-	}
+		],
+		"spot-check prompt names the selected skill or its file — a routed task must reach it on its own",
+	);
 	// pi may advertise and read lexical paths through symlinked resources;
 	// canonicalize the read path first, so a lexical path through a
 	// symlinked checkout still matches, then compare canonically — an
@@ -1469,7 +1478,7 @@ function skillReadLeg(ctx, skill) {
 	return {
 		lines:
 			`selected-file-opened ${target}\n` +
-			`skill-content ${createHash("sha256").update(skillBuf).digest("hex")}`,
+			`skill-content ${shaText(skillBuf)}`,
 		target,
 	};
 }
@@ -1484,11 +1493,11 @@ function scriptExecLeg(ctx, script) {
 	// A routed prompt must not name the selected script or its path:
 	// the script is part of the skill's capability, and naming it is
 	// instruction, not routing.
-	if (ctx.promptNamesAny([ctx.normalize(path.basename(target)), ctx.normalize(target)])) {
-		throw new Error(
-			"spot-check prompt names the selected script or its path — a routed task must reach it on its own",
-		);
-	}
+	rejectIfPromptNames(
+		ctx,
+		[ctx.normalize(path.basename(target)), ctx.normalize(target)],
+		"spot-check prompt names the selected script or its path — a routed task must reach it on its own",
+	);
 	// Execution, not mention: a bash call qualifies when its command
 	// names the checkout's copy in program position, the call follows
 	// the recorded prompt, and the paired result reports no error. A
@@ -1518,7 +1527,7 @@ function scriptExecLeg(ctx, script) {
 	return {
 		lines:
 			`script-executed ${target}\n` +
-			`script-content ${createHash("sha256").update(scriptBuf).digest("hex")}`,
+			`script-content ${shaText(scriptBuf)}`,
 		target,
 		arg: script,
 	};
@@ -1529,7 +1538,7 @@ function notebookLeg(ctx, notebook) {
 	// notebook files alone — however well-formed — attest nothing
 	// without the session's executed checkout copy of the recorder,
 	// so the script argument must be the recorder itself.
-	const script = ctx.results.get("script");
+	const script = ctx.results.get(SCRIPT_LEG);
 	if (script === undefined) {
 		throw new Error(
 			"the notebook-written attestation requires the script leg — pass the theta-notebook recorder as the third argument",
@@ -1553,11 +1562,11 @@ function notebookLeg(ctx, notebook) {
 	// The routed prompt must not name the notebook file either — the
 	// artifact is part of the skill's capability, and naming it is
 	// instruction, not routing.
-	if (ctx.promptNamesAny([ctx.normalize("notebook.jsonl")])) {
-		throw new Error(
-			"spot-check prompt names the notebook file — a routed task must reach it on its own",
-		);
-	}
+	rejectIfPromptNames(
+		ctx,
+		[ctx.normalize("notebook.jsonl")],
+		"spot-check prompt names the notebook file — a routed task must reach it on its own",
+	);
 	const thetaDir = resolveNotebookDir(ctx.root, notebook);
 	const report = auditNotebook(thetaDir);
 	return {
@@ -1565,17 +1574,21 @@ function notebookLeg(ctx, notebook) {
 			`notebook-written ${thetaDir}\n` +
 			`notebook-entries ${report.entries}\n` +
 			`notebook-evidence ${report.snapshots}\n` +
-			`notebook-digest ${createHash("sha256").update(report.notebookBuf).digest("hex")}`,
+			`notebook-digest ${shaText(report.notebookBuf)}`,
 		thetaDir,
 	};
 }
+
+// The script leg's registry name — the notebook leg reads its result by
+// this key, so the binding is a constant, not a magic string.
+const SCRIPT_LEG = "script";
 
 // The attestation-leg registry: CLI order, and the one place a new leg
 // registers. `main` maps positional arguments onto this order; `-` skips a
 // leg's slot.
 export const ATTESTATION_LEGS = [
 	{ name: "skill", run: skillReadLeg },
-	{ name: "script", run: scriptExecLeg },
+	{ name: SCRIPT_LEG, run: scriptExecLeg },
 	{ name: "notebook", run: notebookLeg },
 ];
 
@@ -1936,7 +1949,6 @@ export function auditSession(dir, rootArg, legs = []) {
 	if (curManifest !== manifestSha) {
 		throw new Error("package.json changed since the run");
 	}
-	const shaText = (s) => createHash("sha256").update(s).digest("hex");
 	let out =
 		`${formatCleanLine(head)}\n` +
 		`transcript ${createHash("sha256").update(transcriptBuf).digest("hex")}\n` +

@@ -1963,6 +1963,7 @@ test("auditSession attests notebook-written when the recorder ran and the notebo
 	const real = fs.realpathSync(repo);
 	const recorderAbs = `${real}/skills/theta-notebook/scripts/notebook.py`;
 	const recorderArg = "skills/theta-notebook/scripts/notebook.py";
+	const scriptNotebookLegs = withLegs({ script: recorderArg, notebook: ".theta" });
 
 	// pass: executed recorder plus a well-formed, dated, content-addressed
 	// notebook — the gitignored .theta keeps the clean-tree proof green
@@ -1970,7 +1971,7 @@ test("auditSession attests notebook-written when the recorder ran and the notebo
 	const ran = buildSession(t, repo, {
 		bashCommand: `python3 ${recorderAbs} --hypothesis "CRISPR restores immune function" --evidence search.json --grade asserted`,
 	});
-	const out = auditIn(repo, () => auditSession(ran, repo, withLegs({ script: recorderArg, notebook: ".theta" })));
+	const out = auditIn(repo, () => auditSession(ran, repo, scriptNotebookLegs));
 	assert.match(out, /script-executed /);
 	assert.ok(out.includes(`notebook-written ${real}/.theta`), out);
 	assert.match(out, /notebook-entries 1\n/);
@@ -2007,7 +2008,7 @@ test("auditSession attests notebook-written when the recorder ran and the notebo
 	const noBook = buildSession(t, repo, { bashCommand: `python3 ${recorderAbs}` });
 	fs.rmSync(path.join(repo, ".theta"), { recursive: true, force: true });
 	assert.throws(
-		() => auditIn(repo, () => auditSession(noBook, repo, withLegs({ script: recorderArg, notebook: ".theta" }))),
+		() => auditIn(repo, () => auditSession(noBook, repo, scriptNotebookLegs)),
 		/does not resolve on disk/,
 	);
 
@@ -2016,7 +2017,7 @@ test("auditSession attests notebook-written when the recorder ran and the notebo
 	fs.mkdirSync(path.join(repo, ".theta"), { recursive: true });
 	fs.writeFileSync(path.join(repo, ".theta", "notebook.jsonl"), "not json\n");
 	assert.throws(
-		() => auditIn(repo, () => auditSession(corrupt, repo, withLegs({ script: recorderArg, notebook: ".theta" }))),
+		() => auditIn(repo, () => auditSession(corrupt, repo, scriptNotebookLegs)),
 		/not JSON/,
 	);
 
@@ -2030,7 +2031,7 @@ test("auditSession attests notebook-written when the recorder ran and the notebo
 		"append your finding to .theta/notebook.jsonl yourself",
 	);
 	assert.throws(
-		() => auditIn(repo, () => auditSession(steered, repo, withLegs({ script: recorderArg, notebook: ".theta" }))),
+		() => auditIn(repo, () => auditSession(steered, repo, scriptNotebookLegs)),
 		/names the notebook file/,
 	);
 });
