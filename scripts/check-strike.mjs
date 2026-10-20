@@ -88,13 +88,18 @@ function main(argv) {
 		console.error(`cannot list issues on ${repo} — is gh authenticated?`);
 		return 2;
 	}
+	const listed = JSON.parse(issues);
+	// The childless pass below must not mistake a truncated listing for an
+	// empty one: children past the limit would read as a maintenance strike.
+	if (listed.length >= 200) {
+		console.error("issue list hit the --limit 200 window — raise the limit in check-strike.mjs");
+		return 2;
+	}
 	const parent = new RegExp(`#${spec}\\b`);
-	const children = JSON.parse(issues).filter((i) => parent.test(i.body ?? ""));
+	const children = listed.filter((i) => parent.test(i.body ?? ""));
 	if (children.length === 0) {
-		// A childless issue is a maintenance strike, not a spec: the child
-		// loop below no-ops and the evidence and CI gates below still run —
-		// exit 2 here read as a tracker error and stalled the ready
-		// checklist on every such strike (#46 retro).
+		// A childless issue is a maintenance strike (#46 retro): the child
+		// loop below no-ops; the evidence and CI gates still run.
 		console.log(
 			`no issues name #${spec} as parent — maintenance strike; evidence and CI gates still run.`,
 		);
