@@ -325,6 +325,9 @@ const scanSurfaces = [
 	// ADRs stay off the list — ADR 0002 predates the Connector skill headword
 	// and discusses its _Avoid_ terms by name.
 	"docs/adr/0003-provenance-is-a-project-notebook.md",
+	// dogfood.md carries the Attestation leg headword — the auditor's legs
+	// and their registry are its working vocabulary.
+	"docs/agents/dogfood.md",
 	"test/manifest.test.mjs",
 	"test/skills-library.test.mjs",
 ];
