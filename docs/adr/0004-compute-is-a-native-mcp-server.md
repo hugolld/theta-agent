@@ -1,0 +1,17 @@
+# 0004 — Compute is a native MCP server, consumed without wrapper scripts
+
+- **Status**: accepted (2026-10-20)
+- **Context**: M4 puts the execute stage on the HEBMU-MSDC cluster (spec #49): Slurm jobs, a typed AlphaFold3 tool, and an institutional rule that cluster access keep a per-tool-call audit trail (访问操作留痕) — which ad-hoc SSH sessions cannot provide. ADR 0002 settled the connector layer as skills with helper scripts and left a dated revisit trigger on exactly this milestone: compute-side integration is stateful and long-running where literature connectors are stateless request/response. Since then, pi's MCP support (native since 0.99) was verified in the platform docs: streamable HTTP servers, per-server exposure control, and MCP calls flowing through the tool-call pipeline, where permission gates and tool annotations apply.
+- **Decision**: Compute ships as a **compute gateway** (GLOSSARY): theta-compute, a native MCP server (FastMCP over streamable HTTP with a bearer token) on the cluster's login node, wrapping the Slurm CLI with argv arrays only. Theta consumes it through pi's built-in MCP client with direct exposure — the model calls the gateway's tools itself, and a Theta-owned **gateway skill** (GLOSSARY) carries doctrine only (when to stage, submit, poll, fetch, record); no connector-style wrapper scripts sit between model and server. Enforcement stays server-side: path sandbox, command guard with ceilings, and one audit line per tool call. Client-side, a minimal **submit gate** (GLOSSARY) — the package's first tool-call-pipeline extension — confirms `submit_job` and `cancel_job`; read-only gateway tools run ungated. Every compute job lands in the project notebook as a method entry whose evidence item is a **job record** (GLOSSARY). Server config is a one-time user-level `pi mcp add`; the bearer token lives in the user's file, never in git.
+
+## Considered options
+
+- **The connector-skill shape, extended to compute** (helper scripts driving SSH) — closes ADR 0002's revisit trigger in the negative: the two layers differ in kind, not degree. A stateless script cannot hold a job across a session (jobs live in Slurm precisely so they survive the laptop closing), cannot emit the institutional audit line (an SSH session leaves nothing an auditor can read), and would push bearer-token handling into per-call script code. The session-spanning state and structured records whose cost ADR 0002 waited to see earned are exactly what the gateway needs — so the contest does not re-run: its verdict covered stateless request/response connectors and stands.
+- **pi tool registration over the gateway** (`registerTool` facades wrapping every tool) — double surface for the same calls: schema drift between server and facade, re-declared typing for tools already typed at the MCP boundary. Rejected; the submit gate extension touches the pipeline without re-declaring a single tool.
+- **slurmrestd** — rejected before design; the cluster's Slurm 22.05.8 does not expose it (survey record).
+
+## Consequences
+
+- The repo gains a gateway subtree (generic code only; institutional facts ride deploy-time env; the npm tarball excludes it) and its first tool-call-pipeline extension code, which M5's gate framework extends.
+- ADR 0002's revisit trigger is closed on record here; literature connectors are not reopened by it.
+- The gateway skill ships with setup docs in M4's theta-side strike, and the notebook's recorder gains the job-record path under the connector-script invariants.

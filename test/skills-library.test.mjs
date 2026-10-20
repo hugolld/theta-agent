@@ -321,10 +321,12 @@ const scanSurfaces = [
 	"skills/theta-lit-search/references/semantic-scholar.md",
 	"skills/theta-notebook/SKILL.md",
 	// ADR 0003 introduces the M3 provenance vocabulary; it is the surface that
-	// carries the new headwords until the theta-notebook skill ships. Earlier
-	// ADRs stay off the list — ADR 0002 predates the Connector skill headword
-	// and discusses its _Avoid_ terms by name.
+	// carries the new headwords until the theta-notebook skill ships. ADR 0004
+	// does the same for the M4 compute vocabulary until the gateway skill ships.
+	// Earlier ADRs stay off the list — ADR 0002 predates the Connector skill
+	// headword and discusses its _Avoid_ terms by name.
 	"docs/adr/0003-provenance-is-a-project-notebook.md",
+	"docs/adr/0004-compute-is-a-native-mcp-server.md",
 	// dogfood.md carries the Attestation leg headword — the auditor's legs
 	// and their registry are its working vocabulary.
 	"docs/agents/dogfood.md",

@@ -48,6 +48,22 @@ _Avoid_: evidence package, citation record
 The Ehrlich-line trust mark on an evidence item or an observation — re-executed, cross-checked, or asserted; it grades sources, never the researcher's judgment.
 _Avoid_: trust score, confidence level
 
+**Compute gateway**:
+The MCP server (theta-compute) on the cluster's login node wrapping the Slurm CLI; enforcement — path sandbox, command guard, audit line — stays server-side. M4 ships it.
+_Avoid_: compute daemon, job server
+
+**Gateway skill**:
+The Theta-owned skill carrying the compute doctrine — when to stage, submit, poll, fetch, and record — while the model calls the compute gateway's tools directly; no wrapper scripts.
+_Avoid_: compute connector, wrapper skill
+
+**Job record**:
+The evidence item a compute job appends to the project notebook as a method entry: job ID, gateway, template, argument digest, artifact manifest, final state.
+_Avoid_: run receipt, job receipt
+
+**Submit gate**:
+The permission extension that confirms `submit_job` and `cancel_job` before they reach the compute gateway; read-only gateway tools run ungated. M4 ships the minimal form; M5's gate framework extends it.
+_Avoid_: approval gate, consent prompt
+
 **Attestation leg**:
 One spot-check module of the dogfood auditor — skill read, script executed, notebook written — registered in one ordered array and run through one shared interface against the session's transcript.
 _Avoid_: spot-check block, inline check
