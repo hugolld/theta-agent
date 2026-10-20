@@ -14,4 +14,4 @@
 
 - The notebook is plain files in the project: inspectable, diff-friendly, and renderable by the M7 workbench with no pi runtime.
 - `.theta/` is gitignored in dogfood runs so the clean-tree proof holds; the dogfood auditor grows a notebook-written attestation (captured entry files, parsed and dated — never model self-report).
-- FAIR-run shapes wait for M4; approval gates wait for M5. The handoff's `provenance.ts` and `prompts/` sketches and its five-stage list are superseded — the M3 spec strike records the vault edits.
+- FAIR-run shapes wait for M4; the gate framework waits for M5 — M4 ships the minimal submit gate first (ADR 0004). The handoff's `provenance.ts` and `prompts/` sketches and its five-stage list are superseded — the M3 spec strike records the vault edits.
