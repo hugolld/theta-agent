@@ -16,6 +16,8 @@
 // gate runs at ready/merge time, where pending means wait.
 //
 // Usage: node scripts/check-strike.mjs <spec-issue-number>
+// A childless issue is a maintenance strike: no children to land, and the
+// evidence-freshness and CI-green gates still run (#46 retro).
 // Exit 0 = complete (or only expected exceptions remain); 1 = a child is
 // open with no branch commit, attested evidence is stale, or a PR check is
 // non-pass; 2 = usage or tracker error.
@@ -86,11 +88,21 @@ function main(argv) {
 		console.error(`cannot list issues on ${repo} — is gh authenticated?`);
 		return 2;
 	}
-	const parent = new RegExp(`#${spec}\\b`);
-	const children = JSON.parse(issues).filter((i) => parent.test(i.body ?? ""));
-	if (children.length === 0) {
-		console.error(`no issues name #${spec} as parent`);
+	const listed = JSON.parse(issues);
+	// The childless pass below must not mistake a truncated listing for an
+	// empty one: children past the limit would read as a maintenance strike.
+	if (listed.length >= 200) {
+		console.error("issue list hit the --limit 200 window — raise the limit in check-strike.mjs");
 		return 2;
+	}
+	const parent = new RegExp(`#${spec}\\b`);
+	const children = listed.filter((i) => parent.test(i.body ?? ""));
+	if (children.length === 0) {
+		// A childless issue is a maintenance strike (#46 retro): the child
+		// loop below no-ops; the evidence and CI gates still run.
+		console.log(
+			`no issues name #${spec} as parent — maintenance strike; evidence and CI gates still run.`,
+		);
 	}
 
 	// A child is landed when some commit on this branch references its number.
@@ -157,7 +169,11 @@ function main(argv) {
 	} else {
 		console.log("\nno PR checks available (no PR yet, or gh failed) — CI check skipped.");
 	}
-	console.log("\nstrike complete: every child is landed or closed.");
+	console.log(
+		children.length === 0
+			? "\nstrike complete: no children to land (maintenance strike)."
+			: "\nstrike complete: every child is landed or closed.",
+	);
 	return 0;
 }
 
