@@ -2,7 +2,12 @@
 # Local guardrail mirroring the verify workflow: block commits on a red suite
 # or red lint (JS via eslint, self-authored Python via ruff — vendored skill
 # trees stay verbatim and out of scope). Unset the env git exports to hooks —
-# fixture repos in the suite must not commit into this repository.
+# fixture repos in the suite must not commit into this repository. The suite's
+# full TAP output runs long; keep the tail summary only (a red run re-runs
+# `npm test` for the failure detail) so every commit stays cheap to read.
 unset GIT_DIR GIT_INDEX_FILE GIT_WORK_TREE GIT_OBJECT_DIRECTORY
 npm run lint:py --silent
-npm test --silent
+out=$(npm test --silent)
+status=$?
+printf '%s\n' "$out" | tail -n 12
+exit $status
