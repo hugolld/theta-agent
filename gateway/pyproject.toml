@@ -1,0 +1,13 @@
+[project]
+name = "theta-compute"
+version = "0.1.0"
+description = "theta-compute — the compute gateway (M4, ADR 0004): a FastMCP server wrapping the Slurm CLI with argv arrays only, behind bearer auth, one JSONL audit line per tool call"
+requires-python = ">=3.11"
+dependencies = [
+	"fastmcp>=4.1.3,<5",
+]
+
+# Not a build target: the gateway runs in place from this tree
+# (`uv run python -m theta_compute`); uv only manages the environment.
+[tool.uv]
+package = false

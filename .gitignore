@@ -11,3 +11,6 @@ CLAUDE.local.md
 
 # M3 project notebook written by dogfood runs in this checkout (ADR 0003)
 .theta/
+
+# gateway local uv environment (M4, ADR 0004)
+gateway/.venv/

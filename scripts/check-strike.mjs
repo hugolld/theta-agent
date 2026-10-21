@@ -43,6 +43,17 @@ export function evidenceFreshness(prBody, head) {
 		: { verdict: "stale", attested: unique };
 }
 
+// The pure half of child detection: a child declares its spec in a
+// "## Parent" section naming the issue number. A bare mention elsewhere
+// — a blocked-by list, a PR reference — is not a parent claim (#61's
+// ready gate: S2's blocked-by named S1 and read as an unlanded child,
+// which under any-mention semantics would block every strike on its
+// successor forever).
+export function declaredParent(body) {
+	const section = /^## Parent\s*\n\s*#(\d+)\b/m.exec(`${body ?? ""}`);
+	return section ? `#${section[1]}` : null;
+}
+
 // The pure half of the CI gate: parse `gh pr checks` output (tab-separated
 // name/status/elapsed/url rows; statuses pass, fail, pending, skipping).
 // Any non-pass row is red; zero parseable rows is a none (no PR yet, or gh
@@ -80,7 +91,7 @@ function main(argv) {
 	};
 
 	// Children declare their parent ("## Parent" naming the spec number) —
-	// matching the spec's body would false-positive on PR references.
+	// only that section counts, per declaredParent above.
 	const issues = run(
 		`gh issue list --repo ${repo} --state all --limit 200 --json number,title,state,body`,
 	);
@@ -95,8 +106,7 @@ function main(argv) {
 		console.error("issue list hit the --limit 200 window — raise the limit in check-strike.mjs");
 		return 2;
 	}
-	const parent = new RegExp(`#${spec}\\b`);
-	const children = listed.filter((i) => parent.test(i.body ?? ""));
+	const children = listed.filter((i) => declaredParent(i.body) === `#${spec}`);
 	if (children.length === 0) {
 		// A childless issue is a maintenance strike (#46 retro): the child
 		// loop below no-ops; the evidence and CI gates still run.

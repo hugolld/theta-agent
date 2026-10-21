@@ -5,7 +5,7 @@ import { test } from "node:test";
 // freshness gate, #27, and the CI-green gate, #41 retro). The gh/git
 // orchestration around them stays untested — same seam split as
 // audit-dogfood.mjs.
-import { ciChecks, evidenceFreshness } from "../scripts/check-strike.mjs";
+import { ciChecks, declaredParent, evidenceFreshness } from "../scripts/check-strike.mjs";
 
 const HEAD = "ac77fef6a3f0764f9c07346c8654e1eca275184f";
 const STALE = "243bd05f4b9c5e404c5e0259b8b9f94f1edd37c9";
@@ -71,4 +71,19 @@ test("no parseable check rows is a pass-with-note, not a failure", () => {
 	assert.equal(ciChecks("").verdict, "none");
 	assert.equal(ciChecks("no checks found").verdict, "none");
 	assert.equal(ciChecks(undefined).verdict, "none");
+});
+
+test("a Parent section declares the child's spec", () => {
+	const body = ["## Parent", "", "#49", "", "## What to build", "…"].join("\n");
+	assert.equal(declaredParent(body), "#49");
+	assert.equal(declaredParent(null), null);
+	assert.equal(declaredParent("## What to build\nno parent section"), null);
+});
+
+test("a bare mention is not a parent claim — the #61 ready-gate false positive", () => {
+	// S2's body names S1 in its blocked-by list while declaring #49 as
+	// parent: under any-mention matching, S1's gate read its successor as
+	// an unlanded child.
+	const body = ["## Parent", "", "#49", "", "- #51 (S1 — tracer skeleton)"].join("\n");
+	assert.equal(declaredParent(body), "#49");
 });
