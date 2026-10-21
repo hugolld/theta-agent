@@ -98,13 +98,19 @@ disk, and the guard's refusals. It runs with the repo suite: `npm test`.
 
 Institutional facts — the SSH alias, the cluster user, the remote
 directory — live in the owner's private notes, not in this public tree;
-the placeholders below are where they go.
+the placeholders below are where they go. Steps 1–4 and a 401 health
+check run as one command:
+
+```sh
+gateway/deploy.sh <login-node-alias> <remote-dir> <cluster-user> <token-file> [port]
+```
 
 1. Copy this subtree to the login node (the cluster's copy is the
    deployed one; institutional facts never come back into git):
 
    ```sh
-   rsync -a --delete --exclude .venv gateway/ <login-node-alias>:~/theta-compute/
+   rsync -a --delete --exclude .venv --exclude audit --exclude '.nfs*' \
+     gateway/ <login-node-alias>:theta-compute/
    ```
 
 2. Build the environment there. A login node with an older uv (the
