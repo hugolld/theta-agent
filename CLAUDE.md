@@ -21,6 +21,7 @@ Current state: 0.3.0 — M3 is shipped. The M1 base ships the `theta` launcher (
 - Extract a shared helper as soon as the same logic shape appears twice within one module (tests included); copying code verbatim is for separately shipped trees only — skill-to-skill, never within a file.
 - When a change supersedes text in a steering doc (`CLAUDE.md`, `GLOSSARY.md`, `docs/adr/`), the same strike edits that text.
 - `.npmrc` pins the official registry (the machine default is npmmirror).
+- PR bodies and repo prose are public surfaces: cluster account names, SSH aliases, and node names never enter them — they live in `CLAUDE.local.md`, and GitHub keeps body edit history, so a scrub-after is not undo. (The cluster's own name is public — ADR 0004 names it.) The Spec review checks.
 - No build step; tests use Node's built-in node:test runner (pi loads extension TS via jiti). Verify changes with `npm test`, `npm run lint`, `npm run lint:py` (ruff over the self-authored skill scripts and the gateway tree — vendored trees stay verbatim and out of scope), `npm run lint:dups` (jscpd duplication ratchet), and `npm run typecheck`; check shipped files with `npm pack --dry-run`.
 - Commits run the suite via the versioned `.githooks/pre-commit` hook; enable it per clone with `git config core.hooksPath .githooks`.
 - Dogfood acceptance criteria are met on captured evidence — session transcripts for the skill criteria, recorded exit status and stderr for clean boot — never the model's self-report. Procedure: `docs/agents/dogfood.md`.
@@ -28,7 +29,7 @@ Current state: 0.3.0 — M3 is shipped. The M1 base ships the `theta` launcher (
 ## Git workflow — one "coding strike" per task
 
 1. Start the strike in a new git worktree on a feature branch. A worktree inside the repo (`.claude/worktrees/`) resolves the checkout's `node_modules`; one placed elsewhere needs `npm ci` first. Files read before entering the worktree carry the old base — re-read anything you are about to anchor-edit, and fetch `origin main` before diffing against or removing the worktree.
-2. On the first commit, open a **draft** PR against `main`.
+2. On the first commit, open a **draft** PR against `main` and run `node scripts/check-strike.mjs <spec#>` there: the evidence and CI legs pass trivially at draft time, but the child walk already means it — a gate defect or a missing child surfaces with the strike ahead of it, not at ready time (S1's gate read a blocked-by mention as an unlanded child; #61 fixed the detection, and the early run keeps the next defect cheap).
 3. Commit and push every further change to that PR branch, and refresh the PR body as each strike lands — the body is read mid-flight by reviewers and the owner, not only before ready.
 4. Before marking the PR ready, run `node scripts/check-strike.mjs <spec#>` — every child of the spec issue must be landed on the branch or already closed (a closeout ticket for the post-merge steps is the expected open exception; a childless issue is a maintenance strike). The same gate fails a PR whose body attests dogfood evidence at an SHA that is not HEAD — recapture the pair, never rebind the words — and refuses while any PR check is non-pass, pending included (M3's red `verify` sat four hours past ready; only merge-day habit caught it). Refresh the PR's title and body to cover every landed child, then mark the PR ready and run a dedicated PR review pass before merging to `main`. For milestone-sized PRs, consider one external-model review round before merge — M2's Codex round caught a defect class two same-model rounds missed.
 5. The adversarial loop's stop condition is judgment: once findings require crafted attack strings that honest usage would never produce, stop, record them as a residual trust boundary, and move on. "Findings stay wording-level for two consecutive rounds" applies only to findings a realistic session could trigger; if it has not fired within ~10 rounds, it will not — an adversarial reviewer regenerates findings indefinitely, and "clean" is not a stopping condition it can reach.
@@ -50,7 +51,7 @@ Default five-role vocabulary (each label string equals its role name). See `docs
 
 ### Domain docs
 
-Single-context: root `GLOSSARY.md` + `docs/adr/`. See `docs/agents/domain.md`. Glossary edits are suite-enforced: `_Avoid_` terms are banned from self-authored prose and every headword word must appear in it — the scan list lives in `test/skills-library.test.mjs`.
+Single-context: root `GLOSSARY.md` + `docs/adr/`. See `docs/agents/domain.md`. Glossary edits are suite-enforced: `_Avoid_` terms are banned from self-authored prose and every headword word must appear in it — the scan list lives in `test/skills-library.test.mjs`, and self-authored prose (docs and skill text, not script comments) that carries glossary vocabulary joins that list in the same strike that lands it (S1's gateway README caught a banned term the moment it joined).
 
 ### Connector scripts
 
