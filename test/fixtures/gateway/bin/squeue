@@ -6,6 +6,10 @@ Prints the recorded job line in the gateway's pipe-delimited --format
 behavior:
 
 	424242  the recorded running job (the default answer for any id)
+	424343  a running job this gateway owns — job name theta-<user>-demo,
+	        composed from THETA_COMPUTE_USER (run_name "demo"; the
+	        cancel_job tests submit under that name)
+	666001  a gateway-owned job whose scancel fails (see the scancel stub)
 	999999  a well-formed id the queue does not hold — squeue's own
 	        "Invalid job id specified" failure, exit 1
 	555001  a Slurm-side failure — exit 2 with a stderr line
@@ -20,6 +24,7 @@ import sys
 import time
 
 RECORDED_JOB = "424242|RUNNING|pep5-af3|gpu|12:34|(None)\n"
+OWNED_IDS = {"424343", "666001"}
 NOT_FOUND_ID = "999999"
 FAILING_ID = "555001"
 HANGING_ID = "555002"
@@ -29,6 +34,11 @@ def requested_job(argv):
 	if "--job" in argv:
 		return argv[argv.index("--job") + 1]
 	return ""
+
+
+def owned_job(job):
+	user = os.environ.get("THETA_COMPUTE_USER", "test-user")
+	return f"{job}|RUNNING|theta-{user}-demo|cpu|0:04|(None)\n"
 
 
 def main():
@@ -45,6 +55,9 @@ def main():
 		sys.exit(2)
 	if job == HANGING_ID:
 		time.sleep(30)
+	if job in OWNED_IDS:
+		sys.stdout.write(owned_job(job))
+		return
 	sys.stdout.write(RECORDED_JOB)
 
 
