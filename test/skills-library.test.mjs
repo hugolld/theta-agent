@@ -326,6 +326,9 @@ const scanSurfaces = [
 	// headword and discusses its _Avoid_ terms by name.
 	"docs/adr/0003-provenance-is-a-project-notebook.md",
 	"docs/adr/0004-compute-is-a-native-mcp-server.md",
+	// The gateway README carries the compute headwords' working vocabulary
+	// (compute gateway, audit line) through the M4 strikes.
+	"gateway/README.md",
 	// dogfood.md carries the Attestation leg headword — the auditor's legs
 	// and their registry are its working vocabulary.
 	"docs/agents/dogfood.md",

@@ -1,0 +1,52 @@
+#!/usr/bin/env python3
+"""Stub squeue for the gateway boundary tests: recorded fixture output.
+
+Prints the recorded job line in the gateway's pipe-delimited --format
+(%i|%T|%j|%P|%M|%R) unless the requested --job id selects a scripted
+behavior:
+
+	424242  the recorded running job (the default answer for any id)
+	999999  a well-formed id the queue does not hold — squeue's own
+	        "Invalid job id specified" failure, exit 1
+	555001  a Slurm-side failure — exit 2 with a stderr line
+	555002  a Slurm hang — sleeps far past any test timeout
+
+When THETA_GATEWAY_STUB_ARGV names a file, every invocation appends one
+NUL-separated argv group, exactly as the sinfo stub does.
+"""
+
+import os
+import sys
+import time
+
+RECORDED_JOB = "424242|RUNNING|pep5-af3|gpu|12:34|(None)\n"
+NOT_FOUND_ID = "999999"
+FAILING_ID = "555001"
+HANGING_ID = "555002"
+
+
+def requested_job(argv):
+	if "--job" in argv:
+		return argv[argv.index("--job") + 1]
+	return ""
+
+
+def main():
+	log = os.environ.get("THETA_GATEWAY_STUB_ARGV")
+	if log:
+		with open(log, "ab") as handle:
+			handle.write(b"\0".join(os.fsencode(arg) for arg in sys.argv) + b"\n")
+	job = requested_job(sys.argv[1:])
+	if job == NOT_FOUND_ID:
+		sys.stderr.write("slurm_load_jobs error: Invalid job id specified\n")
+		sys.exit(1)
+	if job == FAILING_ID:
+		sys.stderr.write("slurm_load_jobs error: Socket timed out on fd 4\n")
+		sys.exit(2)
+	if job == HANGING_ID:
+		time.sleep(30)
+	sys.stdout.write(RECORDED_JOB)
+
+
+if __name__ == "__main__":
+	main()

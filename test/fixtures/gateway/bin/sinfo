@@ -1,0 +1,30 @@
+#!/usr/bin/env python3
+"""Stub sinfo for the gateway boundary tests: recorded fixture output.
+
+Emits one partition-state group per line, in the gateway's pipe-delimited
+--format (%P|%a|%l|%D|%t|%N). When THETA_GATEWAY_STUB_ARGV names a file,
+every invocation appends one NUL-separated argv group (the resolved
+program path, then each argument verbatim) — the proof the tests read:
+argv-array invocation never puts a shell between gateway and Slurm.
+"""
+
+import os
+import sys
+
+RECORDED = """\
+gpu*|up|infinite|2|idle|gpu[01-02]
+gpu*|up|infinite|2|alloc|gpu[03-04]
+cpu|up|7-00:00:00|8|idle|c[01-08]
+"""
+
+
+def main():
+	log = os.environ.get("THETA_GATEWAY_STUB_ARGV")
+	if log:
+		with open(log, "ab") as handle:
+			handle.write(b"\0".join(os.fsencode(arg) for arg in sys.argv) + b"\n")
+	sys.stdout.write(RECORDED)
+
+
+if __name__ == "__main__":
+	main()
