@@ -3,10 +3,9 @@
 Every invocation is a list — the binary name resolved by PATH, each
 argument its own element, never a string handed to a shell. Output format
 strings are pipe-delimited with one record per line, so the parsers never
-guess. The guard (what may become a Slurm argument at all) lives here
-too: a refusal is a policy decision and raises GuardRefusal, which the
-audit middleware records as DENY — a Slurm-side failure is not a refusal
-and raises SlurmError instead.
+guess. Policy — what may become a Slurm argument at all — is the guard's
+(guard.py); a failure down here is a SlurmError, an allowed call that
+failed.
 """
 
 from __future__ import annotations
@@ -24,9 +23,6 @@ SINFO_ARGV = ["sinfo", "--noheader", "--format", "%P|%a|%l|%D|%t|%N"]
 #: squeue: job id, state, name, partition, time used, reason.
 SQUEUE_ARGV = ["squeue", "--noheader", "--format", "%i|%T|%j|%P|%M|%R"]
 
-#: Slurm job ids as the gateway accepts them: plain digits in v1 (spec #49).
-_JOB_ID = re.compile(r"\d+")
-
 #: squeue's not-in-queue answer for a well-formed id (any Slurm version the
 #: cluster has run says exactly this; the stub binaries record it).
 _INVALID_JOB = re.compile(r"invalid job id", re.IGNORECASE)
@@ -34,17 +30,6 @@ _INVALID_JOB = re.compile(r"invalid job id", re.IGNORECASE)
 
 class SlurmError(Exception):
 	"""A Slurm command failed, timed out, or is missing."""
-
-
-class GuardRefusal(Exception):
-	"""The guard refused an argument before any subprocess ran."""
-
-
-def parse_job_id(raw: str) -> str:
-	"""Accept a plain-digits Slurm job id or refuse it (DENY)."""
-	if not _JOB_ID.fullmatch(raw):
-		raise GuardRefusal(f"invalid job id {raw!r}: a v1 job id is digits only")
-	return raw
 
 
 async def _run(argv: list[str], timeout_seconds: float) -> str:

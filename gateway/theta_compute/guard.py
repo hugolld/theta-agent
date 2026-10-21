@@ -9,9 +9,22 @@ keys and ceilings) grows here.
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
-from .slurm import GuardRefusal, parse_job_id
+#: Slurm job ids as the gateway accepts them: plain digits in v1 (spec #49).
+_JOB_ID = re.compile(r"\d+")
+
+
+class GuardRefusal(Exception):
+	"""The guard refused an argument before any subprocess ran."""
+
+
+def parse_job_id(raw: str) -> str:
+	"""Accept a plain-digits Slurm job id or refuse it (DENY)."""
+	if not _JOB_ID.fullmatch(raw):
+		raise GuardRefusal(f"invalid job id {raw!r}: a v1 job id is digits only")
+	return raw
 
 
 def guard_tool_arguments(tool: str, arguments: dict[str, Any]) -> None:

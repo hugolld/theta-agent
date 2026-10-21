@@ -20,13 +20,13 @@ from fastmcp.server.dependencies import get_access_token
 from fastmcp.server.middleware import CallNext, Middleware, MiddlewareContext
 from fastmcp.tools.base import ToolAnnotations
 
-from .audit import AuditLog
+from .audit import AuditLog, Decision
 from .auth import StaticBearerToken
 from .config import Config, ConfigError, load_config
-from .guard import guard_tool_arguments
-from .slurm import GuardRefusal, SlurmError, job_status as squeue_job_status
+from .guard import GuardRefusal, guard_tool_arguments, parse_job_id
+from .slurm import SlurmError
+from .slurm import job_status as squeue_job_status
 from .slurm import list_environments as sinfo_environments
-from .slurm import parse_job_id
 
 #: The argument name whose value rides the audit line's job_id field.
 JOB_ID_ARGUMENT = "job_id"
@@ -48,34 +48,34 @@ class AuditMiddleware(Middleware):
 		raw_job_id = arguments.get(JOB_ID_ARGUMENT)
 		job_id = raw_job_id if isinstance(raw_job_id, str) else None
 		token = get_access_token()
-		user = token.client_id if token is not None else "unauthenticated"
+		if token is None:
+			# The transport refuses unauthenticated calls with 401 before
+			# any tool runs; reaching here means auth is misconfigured —
+			# fail loudly rather than misattribute the audit trail.
+			raise RuntimeError("tool call reached the middleware unauthenticated")
+		user = token.client_id
+
+		def record(decision: Decision, reason: str | None) -> None:
+			self._audit.record(
+				user=user, tool=tool, arguments=arguments,
+				decision=decision, job_id=job_id, reason=reason,
+			)
+
 		# The guard runs before dispatch: a refusal is a policy decision
 		# (DENY) and never reaches a subprocess.
 		try:
 			guard_tool_arguments(tool, arguments)
 			result = await call_next(context)
 		except GuardRefusal as refusal:
-			self._audit.record(
-				user=user, tool=tool, arguments=arguments,
-				decision="DENY", job_id=job_id, reason=str(refusal),
-			)
+			record("DENY", str(refusal))
 			raise ToolError(str(refusal)) from refusal
 		except ToolError as error:
-			self._audit.record(
-				user=user, tool=tool, arguments=arguments,
-				decision="ALLOW", job_id=job_id, reason=f"tool error: {error}",
-			)
+			record("ALLOW", f"tool error: {error}")
 			raise
 		except Exception as error:
-			self._audit.record(
-				user=user, tool=tool, arguments=arguments,
-				decision="ALLOW", job_id=job_id, reason=f"internal error: {error!r}",
-			)
+			record("ALLOW", f"internal error: {error!r}")
 			raise
-		self._audit.record(
-			user=user, tool=tool, arguments=arguments,
-			decision="ALLOW", job_id=job_id, reason=None,
-		)
+		record("ALLOW", None)
 		return result
 
 

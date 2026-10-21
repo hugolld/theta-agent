@@ -1,6 +1,6 @@
 [project]
 name = "theta-compute"
-version = "0.4.0"
+version = "0.1.0"
 description = "theta-compute — the compute gateway (M4, ADR 0004): a FastMCP server wrapping the Slurm CLI with argv arrays only, behind bearer auth, one JSONL audit line per tool call"
 requires-python = ">=3.11"
 dependencies = [

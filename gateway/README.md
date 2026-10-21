@@ -62,11 +62,11 @@ Both declare the read-only hint and run ungated on the theta side.
 
 ## The audit trail
 
-One JSONL line per tool call, exactly:
+One JSONL line per tool call, in this byte shape — canonical JSON, sorted
+keys, no whitespace (the user value below is illustrative):
 
 ```json
-{"ts":"2026-10-21T00:54:46Z","user":"u18901642","tool":"job_status",
- "args_sha256":"sha256:…","decision":"ALLOW","job_id":"424242","reason":null}
+{"args_sha256":"sha256:7c5436bc2d8d4ac0751aff3bc8a18e8286be2c420163ad5e22a6062387794e75","decision":"ALLOW","job_id":"1851277","reason":null,"tool":"job_status","ts":"2026-10-21T01:05:08Z","user":"cluster-user"}
 ```
 
 | Field | Meaning |
@@ -75,8 +75,8 @@ One JSONL line per tool call, exactly:
 | `user` | the authenticated principal the token belongs to |
 | `tool` | tool name |
 | `args_sha256` | `sha256:<hex>` over the canonical JSON of the argument object (sorted keys, no whitespace) — the digest, never the arguments |
-| `decision` | `ALLOW` — the gateway dispatched the call to Slurm; `DENY` — the guard refused before any subprocess ran |
-| `job_id` | the call's job-id argument when the tool takes one, else null; on a DENY, the rejected value verbatim |
+| `decision` | `ALLOW` — the guard let the call through; `DENY` — the guard refused before any subprocess ran |
+| `job_id` | the call's job-id argument when the tool takes one, else null; on a DENY, the rejected value verbatim when it was a string (the digest always covers the full arguments) |
 | `reason` | null on success; a DENY names the refusal; an ALLOW that failed names the failure |
 
 A call without a valid token is answered HTTP 401 by the transport and is
@@ -96,29 +96,33 @@ disk, and the guard's refusals. It runs with the repo suite: `npm test`.
 
 ## Phase-0 deploy recipe (owner process + SSH forward)
 
+Institutional facts — the SSH alias, the cluster user, the remote
+directory — live in the owner's private notes, not in this public tree;
+the placeholders below are where they go.
+
 1. Copy this subtree to the login node (the cluster's copy is the
    deployed one; institutional facts never come back into git):
 
    ```sh
-   rsync -a --delete --exclude .venv gateway/ hebmu_cluster:~/hpc_projects/theta-compute/
+   rsync -a --delete --exclude .venv gateway/ <login-node-alias>:~/theta-compute/
    ```
 
 2. Build the environment there. A login node with an older uv (the
-   HEBMU one, 0.11) cannot run `--locked` against a lock written by a
+   HEBMU one has 0.11) cannot run `--locked` against a lock written by a
    newer uv — one unlocked `uv run` (no `--locked`) builds the
    environment and adapts the cluster's lock copy, and `--locked` holds
    from then on:
 
    ```sh
-   ssh hebmu_cluster
-   cd ~/hpc_projects/theta-compute
+   ssh <login-node-alias>
+   cd ~/theta-compute
    uv run python -m theta_compute   # builds the environment; Ctrl-C once it listens
    ```
 
 3. Start it there, bound to loopback, with the deploy env in place:
 
    ```sh
-   THETA_COMPUTE_TOKEN=<token> THETA_COMPUTE_USER=u18901642 \
+   THETA_COMPUTE_TOKEN=<token> THETA_COMPUTE_USER=<cluster-user> \
      THETA_COMPUTE_AUDIT_LOG=audit/audit.jsonl \
      nohup uv run --locked python -m theta_compute >gateway.out 2>&1 &
    ```
@@ -126,7 +130,7 @@ disk, and the guard's refusals. It runs with the repo suite: `npm test`.
 4. From the laptop, forward the port and leave it open:
 
    ```sh
-   ssh -N -L 8421:127.0.0.1:8421 hebmu_cluster
+   ssh -N -L 8421:127.0.0.1:8421 <login-node-alias>
    ```
 
 5. Register the server with pi once, user-level (the default file), so

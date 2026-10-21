@@ -9,8 +9,9 @@ sync):
 	args_sha256  "sha256:<hex>" over the canonical JSON of the argument
 	             object (sorted keys, no spaces) — the digest, never the
 	             arguments themselves
-	decision     "ALLOW" — the gateway dispatched the call to Slurm; reason
-	             is then null on success, or names the Slurm-side failure
+	decision     "ALLOW" — the guard let the call through; reason is then
+	             null on success, or names whatever failed after
+	             acceptance (a Slurm-side failure, a routing error)
 	             "DENY" — the guard refused before any subprocess ran;
 	             reason names the refusal
 	job_id       the call's job-id argument when the tool takes one, else
@@ -30,11 +31,13 @@ import os
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 #: The canonical-JSON shape every argument digest is taken over — sorted
 #: keys and no whitespace, so the same arguments always hash the same.
 CANONICAL_SEPARATORS = (",", ":")
+
+Decision = Literal["ALLOW", "DENY"]
 
 
 def canonical_json(value: Any) -> str:
@@ -55,7 +58,7 @@ class AuditEntry:
 	user: str
 	tool: str
 	args_sha256: str
-	decision: str
+	decision: Decision
 	job_id: str | None
 	reason: str | None
 
@@ -80,17 +83,13 @@ class AuditLog:
 		self._path = path
 		self._max_bytes = max_bytes
 
-	@property
-	def path(self) -> Path:
-		return self._path
-
 	def record(
 		self,
 		*,
 		user: str,
 		tool: str,
 		arguments: dict[str, Any],
-		decision: str,
+		decision: Decision,
 		job_id: str | None,
 		reason: str | None,
 	) -> None:

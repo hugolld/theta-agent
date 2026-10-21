@@ -169,33 +169,25 @@ async function startGateway(t, { env = {} } = {}) {
 	return { baseUrl, auditLog, argvLog, request, callTool };
 }
 
-// The audit JSONL, parsed; an absent file reads as no lines yet.
-async function readAudit(auditLog) {
+// A file's non-empty lines; an absent file reads as no lines yet.
+async function readLines(file) {
 	let raw;
 	try {
-		raw = await readFile(auditLog, "utf8");
+		raw = await readFile(file, "utf8");
 	} catch {
 		return [];
 	}
-	return raw
-		.split("\n")
-		.filter((line) => line !== "")
-		.map((line) => JSON.parse(line));
+	return raw.split("\n").filter((line) => line !== "");
 }
 
+// The audit JSONL, parsed.
+const readAudit = async (auditLog) => (await readLines(auditLog)).map((line) => JSON.parse(line));
+
 // The argv groups the stubs received: one NUL-separated group per line.
-async function readArgv(argvLog) {
-	let raw;
-	try {
-		raw = await readFile(argvLog, "utf8");
-	} catch {
-		return [];
-	}
-	return raw
-		.split("\n")
-		.filter((line) => line !== "")
-		.map((line) => line.split("\0"));
-}
+const readArgv = async (argvLog) => (await readLines(argvLog)).map((line) => line.split("\0"));
+
+// A tool result's text content, joined — the refusal and error messages.
+const toolText = (result) => result.content.map((part) => part.text).join("\n");
 
 // Canonical JSON as the gateway digests it: sorted keys, no whitespace.
 function canonicalJson(value) {
@@ -387,8 +379,7 @@ test("a malformed job id is denied at the guard and never reaches Slurm", { skip
 	for (const job_id of attacks) {
 		const result = await gateway.callTool("job_status", { job_id });
 		assert.equal(result.isError, true, `job id ${job_id}: refused`);
-		const text = result.content.map((part) => part.text).join("\n");
-		assert.match(text, /job id/i, `job id ${job_id}: the refusal names it`);
+		assert.match(toolText(result), /job id/i, `job id ${job_id}: the refusal names it`);
 	}
 	// No subprocess ran for any refused argument.
 	assert.equal((await readArgv(gateway.argvLog)).length, argvBefore);
@@ -414,8 +405,7 @@ test("a Slurm-side failure is an allowed call that failed", { skip: skipReason }
 
 	const result = await gateway.callTool("job_status", { job_id: "555001" });
 	assert.equal(result.isError, true);
-	const text = result.content.map((part) => part.text).join("\n");
-	assert.match(text, /squeue exited 2.*Socket timed out/);
+	assert.match(toolText(result), /squeue exited 2.*Socket timed out/);
 
 	// The access was allowed and dispatched; the failure is the reason.
 	const audit = await readAudit(gateway.auditLog);
@@ -437,8 +427,7 @@ test("a Slurm call past the timeout fails instead of hanging", { skip: skipReaso
 	const result = await gateway.callTool("job_status", { job_id: "555002" });
 	assert.ok(Date.now() - startedAt < 15_000, "the call returned, not hung");
 	assert.equal(result.isError, true);
-	const text = result.content.map((part) => part.text).join("\n");
-	assert.match(text, /timed out after 1s/);
+	assert.match(toolText(result), /timed out after 1s/);
 
 	const audit = await readAudit(gateway.auditLog);
 	assert.equal(audit.length, 1);
