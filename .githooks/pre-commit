@@ -1,10 +1,11 @@
 #!/bin/sh
-# Local guardrail mirroring the verify workflow: block commits on a red suite
-# or red lint (JS via eslint, self-authored Python via ruff — vendored skill
-# trees stay verbatim and out of scope). Unset the env git exports to hooks —
-# fixture repos in the suite must not commit into this repository. The suite's
-# full TAP output runs long; keep the tail summary only (a red run re-runs
-# `npm test` for the failure detail) so every commit stays cheap to read.
+# Local guardrail mirroring the verify workflow: block commits on a stale
+# gateway lock, a red suite, or red lint (JS via eslint, self-authored
+# Python via ruff — vendored skill trees stay verbatim and out of scope).
+# Unset the env git exports to hooks — fixture repos in the suite must not
+# commit into this repository. The suite's full TAP output runs long; keep
+# the tail summary only (a red run re-runs `npm test` for the failure
+# detail) so every commit stays cheap to read.
 unset GIT_DIR GIT_INDEX_FILE GIT_WORK_TREE GIT_OBJECT_DIRECTORY
 # A stale gateway lock fails the suite as nine servers that never listen —
 # name the cause first (S1's version bump staled it exactly that way).

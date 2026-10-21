@@ -19,6 +19,7 @@ jobs:
           cache: npm
       - uses: astral-sh/setup-uv@v6
       - run: npm ci
+      - run: uv lock --check --directory gateway
       - run: npm run test
       - run: npm run lint
       - run: npm run lint:dups

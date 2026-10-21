@@ -17,10 +17,10 @@
 # own remote shell can never match it.
 set -eu
 
-alias_name=$1
-remote_dir=$2
-cluster_user=$3
-token_file=$4
+alias_name=${1:-}
+remote_dir=${2:-}
+cluster_user=${3:-}
+token_file=${4:-}
 port=${5:-8421}
 
 [ -n "$alias_name" ] && [ -n "$remote_dir" ] && [ -n "$cluster_user" ] && [ -f "$token_file" ] ||
@@ -42,7 +42,9 @@ rsync -a --delete --exclude .venv --exclude __pycache__ --exclude audit --exclud
 # the lock is already current for that uv.
 ssh "$alias_name" "$remote && uv run python -c 'import theta_compute.server'"
 
-ssh "$alias_name" "pkill -f 'theta[_]compute'" || true
+# The anchored pattern spares bystanders (a grep over the audit log) while
+# still matching both the uv wrapper and the python it runs.
+ssh "$alias_name" "pkill -f '(python|uv run).*theta[_]compute'" || true
 sleep 1
 ssh "$alias_name" "read -r token; export PATH=\"\$HOME/.local/bin:\$PATH\"; cd '$remote_dir' && \
 	THETA_COMPUTE_TOKEN=\$token THETA_COMPUTE_USER='$cluster_user' \

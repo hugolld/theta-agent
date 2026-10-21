@@ -98,7 +98,7 @@ disk, and the guard's refusals. It runs with the repo suite: `npm test`.
 
 Institutional facts — the SSH alias, the cluster user, the remote
 directory — live in the owner's private notes, not in this public tree;
-the placeholders below are where they go. Steps 1–4 and a 401 health
+the placeholders below are where they go. Steps 1–3 and a 401 health
 check run as one command:
 
 ```sh
@@ -109,7 +109,7 @@ gateway/deploy.sh <login-node-alias> <remote-dir> <cluster-user> <token-file> [p
    deployed one; institutional facts never come back into git):
 
    ```sh
-   rsync -a --delete --exclude .venv --exclude audit --exclude '.nfs*' \
+   rsync -a --delete --exclude .venv --exclude __pycache__ --exclude audit --exclude '.nfs*' \
      gateway/ <login-node-alias>:theta-compute/
    ```
 
@@ -121,8 +121,8 @@ gateway/deploy.sh <login-node-alias> <remote-dir> <cluster-user> <token-file> [p
 
    ```sh
    ssh <login-node-alias>
-   cd ~/theta-compute
-   uv run python -m theta_compute   # builds the environment; Ctrl-C once it listens
+   cd theta-compute
+   uv run python -c 'import theta_compute.server'   # adapt the lock; no server starts
    ```
 
 3. Start it there, bound to loopback, with the deploy env in place:
