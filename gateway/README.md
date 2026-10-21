@@ -100,31 +100,41 @@ disk, and the guard's refusals. It runs with the repo suite: `npm test`.
    deployed one; institutional facts never come back into git):
 
    ```sh
-   rsync -a --delete gateway/ hebmu_cluster:~/hpc_projects/theta-compute/
+   rsync -a --delete --exclude .venv gateway/ hebmu_cluster:~/hpc_projects/theta-compute/
    ```
 
-2. Start it there, bound to loopback, with the deploy env in place:
+2. Build the environment there. A login node with an older uv (the
+   HEBMU one, 0.11) cannot run `--locked` against a lock written by a
+   newer uv — one unlocked `uv run` (no `--locked`) builds the
+   environment and adapts the cluster's lock copy, and `--locked` holds
+   from then on:
 
    ```sh
    ssh hebmu_cluster
    cd ~/hpc_projects/theta-compute
-   THETA_COMPUTE_TOKEN=<token> nohup uv run --locked python -m theta_compute \
-     >~/hpc_projects/theta-compute/gateway.out 2>&1 &
+   uv run python -m theta_compute   # builds the environment; Ctrl-C once it listens
    ```
 
-3. From the laptop, forward the port and leave it open:
+3. Start it there, bound to loopback, with the deploy env in place:
+
+   ```sh
+   THETA_COMPUTE_TOKEN=<token> THETA_COMPUTE_USER=u18901642 \
+     THETA_COMPUTE_AUDIT_LOG=audit/audit.jsonl \
+     nohup uv run --locked python -m theta_compute >gateway.out 2>&1 &
+   ```
+
+4. From the laptop, forward the port and leave it open:
 
    ```sh
    ssh -N -L 8421:127.0.0.1:8421 hebmu_cluster
    ```
 
-4. Register the server with pi once, user-level, so the token lives only
-   in the user's own file — never in git (the theta-side strike owns the
-   researcher-facing setup; this is the one-time owner entry):
+5. Register the server with pi once, user-level (the default file), so
+   the token lives only in the user's own `~/.pi/agent/mcp.json` — never
+   in git (the theta-side strike owns the researcher-facing setup; this
+   is the one-time owner entry, verified against pi 0.99):
 
    ```sh
-   pi mcp add --transport streamable-http --url http://127.0.0.1:8421/mcp \
-     --header "Authorization: Bearer <token>" theta-compute
+   pi mcp add theta-compute --url http://127.0.0.1:8421/mcp \
+     --header "Authorization=Bearer <token>"
    ```
-
-   (Verify the exact flags with `pi mcp add --help` on your pi version.)
