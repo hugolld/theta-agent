@@ -12,12 +12,18 @@ in — the tools re-run the pure parsers rather than trusting transit.
 from __future__ import annotations
 
 import base64
-import binascii
 import os
 from pathlib import Path
 from typing import Any
 
-from .guard import GuardRefusal, parse_run_name, parse_staged_path, resolve_in_sandbox
+from .guard import (
+	GuardRefusal,
+	decode_b64,
+	out_of_band_hint,
+	parse_staged_path,
+	resolve_in_sandbox,
+	run_dir,
+)
 
 #: The batch script every submission writes into the run directory.
 SCRIPT_NAME = "job.sbatch"
@@ -26,17 +32,6 @@ SCRIPT_NAME = "job.sbatch"
 #: (Slurm expands %j to the job id at submission time).
 STDOUT_NAME = "slurm-{job_id}.out"
 STDERR_NAME = "slurm-{job_id}.err"
-
-
-def run_dir(root: Path, run_name: str) -> Path:
-	"""One run's directory under the staging root."""
-	parse_run_name(run_name)
-	return root.expanduser() / run_name
-
-
-def out_of_band_hint(root: Path, run_name: str) -> str:
-	"""The documented over-cap answer: where files go instead of the wire."""
-	return f"move the files with scp instead — the run directory is {run_dir(root, run_name)}/ on the cluster"
 
 
 def stage_files(root: Path, run_name: str, files: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -50,11 +45,7 @@ def stage_files(root: Path, run_name: str, files: list[dict[str, Any]]) -> list[
 	for entry in files:
 		relative = parse_staged_path(entry["path"])
 		target = resolve_in_sandbox(root, run_name, relative)
-		try:
-			content = base64.b64decode(entry["content_b64"], validate=True)
-		except (binascii.Error, ValueError) as error:
-			raise GuardRefusal(f"invalid content_b64 for {relative!r}: {error}") from None
-		resolved.append((relative, target, content))
+		resolved.append((relative, target, decode_b64(relative, entry["content_b64"])))
 	staged = []
 	for relative, target, content in resolved:
 		target.parent.mkdir(parents=True, exist_ok=True)
@@ -73,12 +64,12 @@ def render_batch_script(root: Path, run_name: str, directives: dict[str, str], u
 	"""Render the guarded sbatch script: gateway-forced identity and log
 	paths, the allow-listed directives in sorted order, and a fixed body —
 	the client controls directives only, never commands."""
-	formed_run_dir = run_dir(root, run_name)
+	run_directory = run_dir(root, run_name)
 	lines = [
 		"#!/bin/bash",
 		f"#SBATCH --job-name={job_name(user, run_name)}",
-		f"#SBATCH --output={formed_run_dir}/{STDOUT_NAME.format(job_id='%j')}",
-		f"#SBATCH --error={formed_run_dir}/{STDERR_NAME.format(job_id='%j')}",
+		f"#SBATCH --output={run_directory}/{STDOUT_NAME.format(job_id='%j')}",
+		f"#SBATCH --error={run_directory}/{STDERR_NAME.format(job_id='%j')}",
 	]
 	lines += [f"#SBATCH --{key}={directives[key]}" for key in sorted(directives)]
 	body = f"printf 'theta-compute run {run_name} job %s on %s\\n' \"$SLURM_JOB_ID\" \"$SLURMD_NODENAME\""

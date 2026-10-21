@@ -585,7 +585,7 @@ test("stage_files over the in-band cap names the out-of-band path", { skip: skip
 	const text = toolText(result);
 	assert.match(text, /in-band cap of 8 bytes/, "the refusal names the cap");
 	assert.ok(
-		text.includes(`scp the files to ${gateway.stagingRoot}/over-run/`),
+		text.includes(`the run directory is ${gateway.stagingRoot}/over-run/`),
 		"the refusal names the out-of-band path",
 	);
 	assert.equal(await exists(path.join(gateway.stagingRoot, "over-run")), false, "nothing staged");
@@ -630,12 +630,14 @@ test("submit_job renders the guarded script and submits the file path", { skip: 
 
 	const audit = await readAudit(gateway.auditLog);
 	assert.equal(audit.length, 1);
+	// The minted job id rides the audit line — no argument carried it, but
+	// the trail ties the submission to its job.
 	assertAuditLine(audit[0], {
 		user: "test-user",
 		tool: "submit_job",
 		args_sha256: argumentDigest(args),
 		decision: "ALLOW",
-		job_id: null,
+		job_id: "777001",
 		reason: null,
 	});
 });
@@ -674,6 +676,28 @@ test("submit_job refuses keys, characters, and ceilings outside the guard", { sk
 		assert.equal(line.decision, "DENY");
 		assert.equal(line.tool, "submit_job");
 	}
+});
+
+test("a zero-GPU deployment removes gres from the raw path", { skip: skipReason }, async (t) => {
+	const gateway = await startGateway(t, { env: { THETA_COMPUTE_MAX_GPUS: "0" } });
+
+	const refused = await gateway.callTool("submit_job", {
+		run_name: "demo",
+		directives: { gres: "gpu:1" },
+	});
+	assert.equal(refused.isError, true);
+	assert.match(toolText(refused), /allows no GPUs in raw directives/);
+
+	// A deployment with the GPU ceiling at zero still submits CPU jobs.
+	const plain = await gateway.callTool("submit_job", {
+		run_name: "demo",
+		directives: { partition: "cpu" },
+	});
+	assert.equal(plain.isError, false);
+	assert.equal(plain.structuredContent.job_id, "777001");
+
+	const audit = await readAudit(gateway.auditLog);
+	assert.deepEqual(audit.map((line) => line.decision), ["DENY", "ALLOW"]);
 });
 
 test("job_logs tails the run directory's own log files", { skip: skipReason }, async (t) => {
@@ -901,7 +925,7 @@ test("the offline lifecycle: stage, submit, read the logs, fetch the artifacts",
 		audit.map((line) => [line.tool, line.decision, line.job_id, line.reason]),
 		[
 			["stage_files", "ALLOW", null, null],
-			["submit_job", "ALLOW", null, null],
+			["submit_job", "ALLOW", jobId, null],
 			["job_logs", "ALLOW", jobId, null],
 			["fetch_artifacts", "ALLOW", null, null],
 		],

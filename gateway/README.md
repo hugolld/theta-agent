@@ -54,7 +54,7 @@ an SSH port-forward, below).
 | `THETA_COMPUTE_MAX_MEM_MB` | 65536 | ceiling for `mem`, in MB |
 | `THETA_COMPUTE_MAX_NTASKS` | 16 | ceiling for `ntasks` |
 | `THETA_COMPUTE_MAX_CPUS_PER_TASK` | 16 | ceiling for `cpus-per-task` |
-| `THETA_COMPUTE_MAX_GPUS` | 1 | ceiling for `gres` (`gpu:N`) |
+| `THETA_COMPUTE_MAX_GPUS` | 1 | ceiling for `gres` (`gpu:N`); 0 removes `gres` from the raw path entirely |
 | `THETA_COMPUTE_HOST` | 127.0.0.1 | bind address — keep loopback behind the forward |
 | `THETA_COMPUTE_PORT` | 8421 | bind port |
 
@@ -129,7 +129,7 @@ keys, no whitespace (the user value below is illustrative):
 | `tool` | tool name |
 | `args_sha256` | `sha256:<hex>` over the canonical JSON of the argument object (sorted keys, no whitespace) — the digest, never the arguments |
 | `decision` | `ALLOW` — the guard let the call through; `DENY` — the guard refused before any subprocess ran |
-| `job_id` | the call's job-id argument when the tool takes one, else null; on a DENY, the rejected value verbatim when it was a string (the digest always covers the full arguments) |
+| `job_id` | the call's job-id argument when the tool takes one; else the id a successful `submit_job` minted; on a DENY, the rejected value verbatim when it was a string (the digest always covers the full arguments) |
 | `reason` | null on success; a DENY names the refusal; an ALLOW that failed names the failure |
 
 A call without a valid token is answered HTTP 401 by the transport and is

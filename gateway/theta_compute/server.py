@@ -16,6 +16,7 @@ call, structured answer.
 from __future__ import annotations
 
 import sys
+from contextvars import ContextVar
 from typing import Any
 
 from fastmcp import FastMCP
@@ -36,6 +37,7 @@ from .guard import (
 	guard_tool_arguments,
 	parse_job_id,
 	parse_tail_lines,
+	run_dir,
 )
 from .slurm import SlurmError
 from .slurm import cancel_job as slurm_cancel
@@ -45,6 +47,17 @@ from .slurm import submit_job as slurm_submit
 
 #: The argument name whose value rides the audit line's job_id field.
 JOB_ID_ARGUMENT = "job_id"
+
+#: The job id a submit_job mints mid-call. No argument carried it, but the
+#: institutional trail must tie the submission to its job — the middleware
+#: reads this when it records the line.
+_minted_job_id: ContextVar[str | None] = ContextVar("theta_minted_job_id", default=None)
+
+
+def _boundary_error(error: Exception) -> ToolError:
+	"""The one mapping from internal failures to the boundary's error: the
+	message is the failure, nothing added."""
+	return ToolError(str(error))
 
 
 class AuditMiddleware(Middleware):
@@ -63,6 +76,7 @@ class AuditMiddleware(Middleware):
 		arguments = dict(context.message.arguments or {})
 		raw_job_id = arguments.get(JOB_ID_ARGUMENT)
 		job_id = raw_job_id if isinstance(raw_job_id, str) else None
+		_minted_job_id.set(None)
 		token = get_access_token()
 		if token is None:
 			# The transport refuses unauthenticated calls with 401 before
@@ -74,7 +88,11 @@ class AuditMiddleware(Middleware):
 		def record(decision: Decision, reason: str | None) -> None:
 			self._audit.record(
 				user=user, tool=tool, arguments=arguments,
-				decision=decision, job_id=job_id, reason=reason,
+				decision=decision,
+				# A minted submit id rides the line when no argument carried
+				# a job id — the trail ties the submission to its job.
+				job_id=job_id if job_id is not None else _minted_job_id.get(),
+				reason=reason,
 			)
 
 		# The guard runs before dispatch: a refusal is a policy decision
@@ -147,12 +165,12 @@ def build_app(config: Config) -> FastMCP:
 		try:
 			staged = staging.stage_files(config.staging_root, run_name, files)
 		except GuardRefusal as error:
-			raise ToolError(str(error)) from error
+			raise _boundary_error(error) from error
 		except OSError as error:
 			raise ToolError(f"staging run {run_name!r} failed: {error}") from error
 		return {
 			"run_name": run_name,
-			"run_dir": str(staging.run_dir(config.staging_root, run_name)),
+			"run_dir": str(run_dir(config.staging_root, run_name)),
 			"staged": staged,
 		}
 
@@ -171,12 +189,11 @@ def build_app(config: Config) -> FastMCP:
 		try:
 			script_path = staging.write_batch_script(config.staging_root, run_name, script)
 			job_id = await slurm_submit(str(script_path), config.slurm_timeout_seconds)
-		except GuardRefusal as error:
-			raise ToolError(str(error)) from error
-		except SlurmError as error:
-			raise ToolError(str(error)) from error
+		except (GuardRefusal, SlurmError) as error:
+			raise _boundary_error(error) from error
 		except OSError as error:
 			raise ToolError(f"writing the batch script for run {run_name!r} failed: {error}") from error
+		_minted_job_id.set(job_id)
 		return {
 			"job_id": job_id,
 			"job_name": staging.job_name(config.user, run_name),
@@ -201,7 +218,7 @@ def build_app(config: Config) -> FastMCP:
 			stderr_log = staging.stderr_log_for(stdout_log)
 			stderr = staging.tail_text(stderr_log, count, config.inband_max_bytes) if stderr_log.exists() else ""
 		except GuardRefusal as error:
-			raise ToolError(str(error)) from error
+			raise _boundary_error(error) from error
 		except OSError as error:
 			raise ToolError(f"reading logs for job {parsed} failed: {error}") from error
 		return {"found": True, "job_id": parsed, "stdout": stdout, "stderr": stderr}
@@ -247,10 +264,8 @@ def build_app(config: Config) -> FastMCP:
 			files, total = staging.collect_artifacts(
 				config.staging_root, run_name, paths, config.inband_max_bytes
 			)
-		except GuardRefusal as error:
-			raise ToolError(str(error)) from error
-		except FileNotFoundError as error:
-			raise ToolError(str(error)) from error
+		except (GuardRefusal, FileNotFoundError) as error:
+			raise _boundary_error(error) from error
 		except OSError as error:
 			raise ToolError(f"fetching run {run_name!r} failed: {error}") from error
 		return {"run_name": run_name, "total_bytes": total, "files": files}

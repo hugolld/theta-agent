@@ -114,7 +114,9 @@ def load_config(env: dict[str, str] | None = None) -> Config:
 		max_mem_mb=_positive_int(source, "THETA_COMPUTE_MAX_MEM_MB", DEFAULT_MAX_MEM_MB),
 		max_ntasks=_positive_int(source, "THETA_COMPUTE_MAX_NTASKS", DEFAULT_MAX_NTASKS),
 		max_cpus_per_task=_positive_int(source, "THETA_COMPUTE_MAX_CPUS_PER_TASK", DEFAULT_MAX_CPUS_PER_TASK),
-		max_gpus=_positive_int(source, "THETA_COMPUTE_MAX_GPUS", DEFAULT_MAX_GPUS),
+		# Zero is a legal GPU ceiling: it removes gres from the raw path
+		# entirely (the typed AF3 tool still owns the GPUs it fixes).
+		max_gpus=_int_in_range(source, "THETA_COMPUTE_MAX_GPUS", DEFAULT_MAX_GPUS, 0, None),
 	)
 
 

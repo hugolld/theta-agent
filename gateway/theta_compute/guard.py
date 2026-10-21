@@ -132,6 +132,25 @@ def resolve_in_sandbox(root: Path, run_name: str, relative: str) -> Path:
 	return resolved
 
 
+def run_dir(root: Path, run_name: str) -> Path:
+	"""One run's directory under the staging root."""
+	parse_run_name(run_name)
+	return root.expanduser() / run_name
+
+
+def out_of_band_hint(root: Path, run_name: str) -> str:
+	"""The over-cap answer's second half: where the files go instead."""
+	return f"move the files with scp instead — the run directory is {run_dir(root, run_name)}/ on the cluster"
+
+
+def decode_b64(relative: str, raw: str) -> bytes:
+	"""Decode one staged payload, refusing (DENY) what is not base64."""
+	try:
+		return base64.b64decode(raw, validate=True)
+	except (binascii.Error, ValueError) as error:
+		raise GuardRefusal(f"invalid content_b64 for {relative!r}: {error}") from None
+
+
 def parse_walltime(raw: str) -> int:
 	"""Parse a Slurm time value to seconds, or refuse it (DENY)."""
 	match = _WALLTIME.fullmatch(raw)
@@ -196,6 +215,8 @@ def guard_directives(raw: Any, limits: GuardLimits) -> dict[str, str]:
 	if "cpus-per-task" in checked and not _within(checked["cpus-per-task"], limits.max_cpus_per_task):
 		raise GuardRefusal(f"cpus-per-task {checked['cpus-per-task']!r} is over the ceiling — at most {limits.max_cpus_per_task}")
 	if "gres" in checked:
+		if limits.max_gpus == 0:
+			raise GuardRefusal("gres is not allowed here — this deployment allows no GPUs in raw directives")
 		match = _GRES.fullmatch(checked["gres"])
 		if match is None or not 1 <= int(match.group(1)) <= limits.max_gpus:
 			raise GuardRefusal(f"gres {checked['gres']!r} is not allowed — whole GPUs only, gpu:N with N at most {limits.max_gpus}")
@@ -252,14 +273,11 @@ def _guard_stage_files(run_name: str, raw_files: Any, limits: GuardLimits) -> No
 			raise GuardRefusal(f"invalid file record: {relative!r} is staged twice in one call")
 		seen.add(relative)
 		resolve_in_sandbox(limits.staging_root, run_name, relative)
-		try:
-			total += len(base64.b64decode(content, validate=True))
-		except (binascii.Error, ValueError) as error:
-			raise GuardRefusal(f"invalid content_b64 for {relative!r}: {error}") from None
+		total += len(decode_b64(relative, content))
 		if total > limits.inband_max_bytes:
 			raise GuardRefusal(
 				f"staged payload is over the in-band cap of {limits.inband_max_bytes} bytes — "
-				f"stage out of band instead: scp the files to {limits.staging_root.expanduser() / run_name}/ on the cluster"
+				+ out_of_band_hint(limits.staging_root, run_name)
 			)
 
 
