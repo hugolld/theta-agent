@@ -18,7 +18,7 @@ Current state: 0.3.0 — M3 is shipped. The M1 base ships the `theta` launcher (
 ## Conventions
 
 - Conventional commits (`feat:`, `chore:`, `docs:`). Tabs and existing field order in `package.json`.
-- Extract a shared helper as soon as the same logic shape appears twice within one module (tests included); copying code verbatim is for separately shipped trees only — skill-to-skill, never within a file.
+- Extract a shared helper as soon as the same logic shape appears twice — tree-wide, not per-module: a module boundary created mid-strike is where duplication is born, so the shared shape gets one home before the second caller (tests included). Copying code verbatim is for separately shipped trees only — skill-to-skill, never within a file.
 - When a change supersedes text in a steering doc (`CLAUDE.md`, `GLOSSARY.md`, `docs/adr/`), the same strike edits that text.
 - `.npmrc` pins the official registry (the machine default is npmmirror).
 - PR bodies and repo prose are public surfaces: cluster account names, SSH aliases, and node names never enter them — they live in `CLAUDE.local.md`, and GitHub keeps body edit history, so a scrub-after is not undo. (The cluster's own name is public — ADR 0004 names it.) The Spec review checks.
@@ -59,7 +59,7 @@ Connector helper scripts (`theta-lit-search`, plus the `theta-notebook` recorder
 
 ### Compute gateway
 
-`gateway/` holds `theta-compute` (M4, ADR 0004): a FastMCP server wrapping the Slurm CLI, out of the npm tarball and out of Python lint's blind spot. Institutional facts ride deploy-time env; the audit-line shape, ALLOW/DENY semantics, and the phase-0 deploy recipe live in `gateway/README.md`. The offline tests drive the tools at the MCP boundary against the stub Slurm binaries in `test/fixtures/gateway/bin/`.
+`gateway/` holds `theta-compute` (M4, ADR 0004): a FastMCP server wrapping the Slurm CLI, out of the npm tarball and out of Python lint's blind spot. Institutional facts ride deploy-time env; the audit-line shape, ALLOW/DENY semantics, and the phase-0 deploy recipe live in `gateway/README.md`. The offline tests drive the tools at the MCP boundary against the stub Slurm binaries in `test/fixtures/gateway/bin/`. A live step blocked on the cluster path parks — one scheduled re-probe, never a retry loop (waiting over one live connection is not retrying) — and resumes from the parked step when the path returns.
 
 ### SKILL.md frontmatter
 
