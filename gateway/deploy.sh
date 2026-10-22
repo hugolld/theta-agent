@@ -53,17 +53,24 @@ ssh "$alias_name" "read -r token; export PATH=\"\$HOME/.local/bin:\$PATH\"; cd '
 	< "$token_file"
 
 payload='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"deploy","version":"0"}}}'
-i=0
-while [ "$i" -lt 40 ]; do
-	code=$(ssh "$alias_name" "curl -s -o /dev/null -w '%{http_code}' -X POST \
-		http://127.0.0.1:$port/mcp -H 'content-type: application/json' \
-		-H 'accept: application/json, text/event-stream' -d '$payload'" 2>/dev/null || true)
-	if [ "$code" = "401" ]; then
-		echo "gateway up: 401 without a token on $alias_name 127.0.0.1:$port"
-		exit 0
-	fi
-	i=$((i + 1))
-	sleep 1
-done
+# One connection, remote wait: the bastion resets rapid serial connects,
+# so the 401 loop runs on the far side of a single ssh — the payload rides
+# stdin (its quotes are never re-parsed), same 40 x 1s budget.
+code=$(printf '%s' "$payload" | ssh "$alias_name" '
+	read -r json
+	i=0
+	while [ "$i" -lt 40 ]; do
+		c=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
+			http://127.0.0.1:'"$port"'/mcp -H "content-type: application/json" \
+			-H "accept: application/json, text/event-stream" -d "$json")
+		[ "$c" = "401" ] && { echo 401; exit 0; }
+		i=$((i + 1))
+		sleep 1
+	done
+	echo timeout' 2>/dev/null || true)
+if [ "$code" = "401" ]; then
+	echo "gateway up: 401 without a token on $alias_name 127.0.0.1:$port"
+	exit 0
+fi
 echo "gateway did not answer 401 within 40s — check $remote_dir/gateway.out" >&2
 exit 1
