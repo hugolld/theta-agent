@@ -27,6 +27,9 @@ SQUEUE_ARGV = ["squeue", "--noheader", "--format", "%i|%T|%j|%P|%M|%R"]
 #: cluster has run says exactly this; the stub binaries record it).
 _INVALID_JOB = re.compile(r"invalid job id", re.IGNORECASE)
 
+#: sbatch's one-line submission answer.
+_SUBMITTED = re.compile(r"Submitted batch job (\d+)")
+
 
 class SlurmError(Exception):
 	"""A Slurm command failed, timed out, or is missing."""
@@ -105,3 +108,21 @@ def _parse_job(line: str) -> dict[str, Any]:
 def is_unknown_job(error: SlurmError) -> bool:
 	"""True when a failed squeue named the id invalid — the not-found path."""
 	return bool(_INVALID_JOB.search(str(error)))
+
+
+async def submit_job(script_path: str, timeout_seconds: float) -> str:
+	"""Submit one rendered script file; return the job id sbatch assigned.
+
+	sbatch receives the file path and nothing else — the script is the
+	guard's render, and no shell sits between (spec #49).
+	"""
+	stdout = await _run(["sbatch", script_path], timeout_seconds)
+	match = _SUBMITTED.search(stdout)
+	if match is None:
+		raise SlurmError(f"sbatch answered without a job id: {stdout.strip()!r}")
+	return match.group(1)
+
+
+async def cancel_job(job_id: str, timeout_seconds: float) -> None:
+	"""Cancel one job by id."""
+	await _run(["scancel", job_id], timeout_seconds)

@@ -1,0 +1,39 @@
+#!/usr/bin/env python3
+"""Stub sbatch for the gateway boundary tests: accept the script, answer.
+
+Answers "Submitted batch job 777001" for every submission — a deterministic
+id the tests then use for job_logs and fetch_artifacts — and stands in for
+the scheduler running the script's fixed body: it reads the submitted
+script, finds the gateway-forced --output path, expands %j to the emitted
+job id, and writes one output line into it (the real cluster's job writes
+its own stdout there; offline, the stub is the only thing that can). When
+THETA_GATEWAY_STUB_ARGV names a file, every invocation appends one
+NUL-separated argv group, exactly as the sinfo stub does.
+"""
+
+import os
+import re
+import sys
+
+JOB_ID = "777001"
+
+
+def main():
+	log = os.environ.get("THETA_GATEWAY_STUB_ARGV")
+	if log:
+		with open(log, "ab") as handle:
+			handle.write(b"\0".join(os.fsencode(arg) for arg in sys.argv) + b"\n")
+	script = sys.argv[-1]
+	with open(script, encoding="utf-8") as handle:
+		text = handle.read()
+	output = re.search(r"^#SBATCH --output=(.+)$", text, re.MULTILINE)
+	if output:
+		target = output.group(1).replace("%j", JOB_ID)
+		os.makedirs(os.path.dirname(target), exist_ok=True)
+		with open(target, "a", encoding="utf-8") as handle:
+			handle.write(f"stub sbatch ran {os.path.basename(script)} (job {JOB_ID})\n")
+	sys.stdout.write(f"Submitted batch job {JOB_ID}\n")
+
+
+if __name__ == "__main__":
+	main()

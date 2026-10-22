@@ -1,17 +1,22 @@
-"""The FastMCP app: two read-only tools behind bearer auth, one audit
+"""The FastMCP app: the seven generic tools behind bearer auth, one audit
 line per tool call (spec #49, ADR 0004).
 
 The audit middleware is the only cross-cutting code: it sees every tool
 call after authentication (a call without a valid token is answered 401
 by the transport and is not a tool call), records the decision line, and
-maps a guard refusal to a DENY line plus a tool error. The tools
-themselves stay thin — argument guard, Slurm wrapper call, structured
-answer.
+maps a guard refusal to a DENY line plus a tool error. The guard itself
+is pre-dispatch — refusals decidable from the arguments alone (shapes,
+the path sandbox, the directive ceilings, the in-band cap) are DENY;
+refusals that need a call to run first (cancelling a job the prefix says
+is not this user's) happen inside the tool and record as an allowed call
+that failed. The tools themselves stay thin — argument guard, wrapper
+call, structured answer.
 """
 
 from __future__ import annotations
 
 import sys
+from contextvars import ContextVar
 from typing import Any
 
 from fastmcp import FastMCP
@@ -20,23 +25,47 @@ from fastmcp.server.dependencies import get_access_token
 from fastmcp.server.middleware import CallNext, Middleware, MiddlewareContext
 from fastmcp.tools.base import ToolAnnotations
 
+from . import staging
 from .audit import AuditLog, Decision
 from .auth import StaticBearerToken
 from .config import Config, ConfigError, load_config
-from .guard import GuardRefusal, guard_tool_arguments, parse_job_id
+from .guard import (
+	DEFAULT_TAIL_LINES,
+	GuardLimits,
+	GuardRefusal,
+	guard_directives,
+	guard_tool_arguments,
+	parse_job_id,
+	parse_tail_lines,
+	run_dir,
+)
 from .slurm import SlurmError
+from .slurm import cancel_job as slurm_cancel
 from .slurm import job_status as squeue_job_status
 from .slurm import list_environments as sinfo_environments
+from .slurm import submit_job as slurm_submit
 
 #: The argument name whose value rides the audit line's job_id field.
 JOB_ID_ARGUMENT = "job_id"
+
+#: The job id a submit_job mints mid-call. No argument carried it, but the
+#: institutional trail must tie the submission to its job — the middleware
+#: reads this when it records the line.
+_minted_job_id: ContextVar[str | None] = ContextVar("theta_minted_job_id", default=None)
+
+
+def _boundary_error(error: Exception) -> ToolError:
+	"""The one mapping from internal failures to the boundary's error: the
+	message is the failure, nothing added."""
+	return ToolError(str(error))
 
 
 class AuditMiddleware(Middleware):
 	"""One audit JSONL line per tool call: ALLOW dispatched, DENY refused."""
 
-	def __init__(self, audit: AuditLog) -> None:
+	def __init__(self, audit: AuditLog, limits: GuardLimits) -> None:
 		self._audit = audit
+		self._limits = limits
 
 	async def on_call_tool(
 		self,
@@ -47,6 +76,7 @@ class AuditMiddleware(Middleware):
 		arguments = dict(context.message.arguments or {})
 		raw_job_id = arguments.get(JOB_ID_ARGUMENT)
 		job_id = raw_job_id if isinstance(raw_job_id, str) else None
+		_minted_job_id.set(None)
 		token = get_access_token()
 		if token is None:
 			# The transport refuses unauthenticated calls with 401 before
@@ -58,13 +88,17 @@ class AuditMiddleware(Middleware):
 		def record(decision: Decision, reason: str | None) -> None:
 			self._audit.record(
 				user=user, tool=tool, arguments=arguments,
-				decision=decision, job_id=job_id, reason=reason,
+				decision=decision,
+				# A minted submit id rides the line when no argument carried
+				# a job id — the trail ties the submission to its job.
+				job_id=job_id if job_id is not None else _minted_job_id.get(),
+				reason=reason,
 			)
 
 		# The guard runs before dispatch: a refusal is a policy decision
-		# (DENY) and never reaches a subprocess.
+		# (DENY) and never reaches a subprocess or a file.
 		try:
-			guard_tool_arguments(tool, arguments)
+			guard_tool_arguments(tool, arguments, self._limits)
 			result = await call_next(context)
 		except GuardRefusal as refusal:
 			record("DENY", str(refusal))
@@ -85,11 +119,12 @@ def build_app(config: Config) -> FastMCP:
 	app = FastMCP(
 		name="theta-compute",
 		instructions=(
-			"The Theta compute gateway: read-only Slurm access. "
-			"Every call is authenticated and audited; see gateway/README.md."
+			"The Theta compute gateway: staged Slurm runs. Stage input files, "
+			"submit a guarded job, watch it, fetch its artifacts — every call "
+			"is authenticated and audited; see gateway/README.md."
 		),
 		auth=StaticBearerToken(config.token, config.user),
-		middleware=[AuditMiddleware(audit)],
+		middleware=[AuditMiddleware(audit, config.guard_limits())],
 	)
 
 	@app.tool(annotations=ToolAnnotations(read_only_hint=True, open_world_hint=False))
@@ -117,6 +152,123 @@ def build_app(config: Config) -> FastMCP:
 			return await squeue_job_status(parsed, config.slurm_timeout_seconds)
 		except SlurmError as error:
 			raise ToolError(str(error)) from error
+
+	@app.tool(annotations=ToolAnnotations(read_only_hint=False, open_world_hint=False))
+	async def stage_files(run_name: str, files: list[dict[str, Any]]) -> dict[str, Any]:
+		"""Stage input files into one run's directory under the staging root.
+
+		Files travel in-band as base64 (32 MiB per call by default) and the
+		path sandbox confines them to the run directory. Past the cap the
+		refusal names the out-of-band path: scp to the run directory on the
+		cluster. Staging lands whole or not at all.
+		"""
+		try:
+			staged = staging.stage_files(config.staging_root, run_name, files)
+		except GuardRefusal as error:
+			raise _boundary_error(error) from error
+		except OSError as error:
+			raise ToolError(f"staging run {run_name!r} failed: {error}") from error
+		return {
+			"run_name": run_name,
+			"run_dir": str(run_dir(config.staging_root, run_name)),
+			"staged": staged,
+		}
+
+	@app.tool(annotations=ToolAnnotations(read_only_hint=False, destructive_hint=True, open_world_hint=False))
+	async def submit_job(run_name: str, directives: dict[str, str | int] | None = None) -> dict[str, Any]:
+		"""Submit the run's guarded batch script to Slurm; answers the job id.
+
+		Directives are scheduler sizing only — partition, time, mem, ntasks,
+		cpus-per-task, gres — each inside a ceiling; the job name (the
+		per-user theta- prefix), the log paths, and the script body are
+		gateway-forced. This spends cluster time: the theta side confirms
+		it before the call leaves.
+		"""
+		checked = guard_directives(directives or {}, config.guard_limits())
+		script = staging.render_batch_script(config.staging_root, run_name, checked, config.user)
+		try:
+			script_path = staging.write_batch_script(config.staging_root, run_name, script)
+			job_id = await slurm_submit(str(script_path), config.slurm_timeout_seconds)
+		except (GuardRefusal, SlurmError) as error:
+			raise _boundary_error(error) from error
+		except OSError as error:
+			raise ToolError(f"writing the batch script for run {run_name!r} failed: {error}") from error
+		_minted_job_id.set(job_id)
+		return {
+			"job_id": job_id,
+			"job_name": staging.job_name(config.user, run_name),
+			"script_path": str(script_path),
+		}
+
+	@app.tool(annotations=ToolAnnotations(read_only_hint=True, open_world_hint=False))
+	async def job_logs(job_id: str, tail_lines: int | None = None) -> dict[str, Any]:
+		"""Read one job's stdout and stderr from its run directory.
+
+		Returns the last tail_lines of each (100 by default, 1000 at most).
+		Answers found: false when no run in the staging tree holds a log
+		for the id — a job that never started, or not a gateway job.
+		"""
+		parsed = parse_job_id(job_id)
+		count = DEFAULT_TAIL_LINES if tail_lines is None else parse_tail_lines(tail_lines)
+		try:
+			stdout_log = staging.find_job_log(config.staging_root, parsed)
+			if stdout_log is None:
+				return {"found": False, "job_id": parsed}
+			stdout = staging.tail_text(stdout_log, count, config.inband_max_bytes)
+			stderr_log = staging.stderr_log_for(stdout_log)
+			stderr = staging.tail_text(stderr_log, count, config.inband_max_bytes) if stderr_log.exists() else ""
+		except GuardRefusal as error:
+			raise _boundary_error(error) from error
+		except OSError as error:
+			raise ToolError(f"reading logs for job {parsed} failed: {error}") from error
+		return {"found": True, "job_id": parsed, "stdout": stdout, "stderr": stderr}
+
+	@app.tool(annotations=ToolAnnotations(read_only_hint=False, destructive_hint=True, open_world_hint=False))
+	async def cancel_job(job_id: str) -> dict[str, Any]:
+		"""Cancel one gateway-owned job (the theta- prefix marks ownership).
+
+		Only jobs whose name carries this user's theta-<user>- prefix are
+		cancelled; anything else is refused. Answers found: false when the
+		queue no longer holds the id — nothing to cancel, not an error.
+		"""
+		parsed = parse_job_id(job_id)
+		prefix = f"theta-{config.user}-"
+		try:
+			status = await squeue_job_status(parsed, config.slurm_timeout_seconds)
+			if not status["found"]:
+				return {"found": False, "canceled": False, "job_id": parsed}
+			name = status["name"]
+			if not name.startswith(prefix):
+				# The prefix check needs squeue's answer, so this refusal is
+				# an allowed call that failed — the audit line's reason
+				# names it (see gateway/README.md).
+				raise ToolError(
+					f"job {parsed} ({name!r}) does not carry this user's ownership prefix ({prefix}) — refusing to cancel a job the gateway does not own"
+				)
+			await slurm_cancel(parsed, config.slurm_timeout_seconds)
+		except SlurmError as error:
+			raise ToolError(str(error)) from error
+		return {"found": True, "canceled": True, "job_id": parsed, "job_name": name}
+
+	@app.tool(annotations=ToolAnnotations(read_only_hint=True, open_world_hint=False))
+	async def fetch_artifacts(run_name: str, paths: list[str] | None = None) -> dict[str, Any]:
+		"""Fetch one run's files back in-band: the whole run directory by
+		default, or the named picks.
+
+		The answer is whole or not at all — every file is read and sized
+		within the in-band cap before anything returns. Past the cap the
+		refusal names the out-of-band path: scp from the run directory on
+		the cluster.
+		"""
+		try:
+			files, total = staging.collect_artifacts(
+				config.staging_root, run_name, paths, config.inband_max_bytes
+			)
+		except (GuardRefusal, FileNotFoundError) as error:
+			raise _boundary_error(error) from error
+		except OSError as error:
+			raise ToolError(f"fetching run {run_name!r} failed: {error}") from error
+		return {"run_name": run_name, "total_bytes": total, "files": files}
 
 	return app
 
