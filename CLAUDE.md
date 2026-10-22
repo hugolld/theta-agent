@@ -59,7 +59,7 @@ Connector helper scripts (`theta-lit-search`, plus the `theta-notebook` recorder
 
 ### Compute gateway
 
-`gateway/` holds `theta-compute` (M4, ADR 0004): a FastMCP server wrapping the Slurm CLI, out of the npm tarball and out of Python lint's blind spot. Institutional facts ride deploy-time env; the audit-line shape, ALLOW/DENY semantics, and the phase-0 deploy recipe live in `gateway/README.md`. The offline tests drive the tools at the MCP boundary against the stub Slurm binaries in `test/fixtures/gateway/bin/`. A live leg blocked on the cluster path parks — one scheduled re-probe, never a retry loop — and resumes from the parked step when the path returns.
+`gateway/` holds `theta-compute` (M4, ADR 0004): a FastMCP server wrapping the Slurm CLI, out of the npm tarball and out of Python lint's blind spot. Institutional facts ride deploy-time env; the audit-line shape, ALLOW/DENY semantics, and the phase-0 deploy recipe live in `gateway/README.md`. The offline tests drive the tools at the MCP boundary against the stub Slurm binaries in `test/fixtures/gateway/bin/`. A live step blocked on the cluster path parks — one scheduled re-probe, never a retry loop (waiting over one live connection is not retrying) — and resumes from the parked step when the path returns.
 
 ### SKILL.md frontmatter
 

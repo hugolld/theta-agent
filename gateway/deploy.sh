@@ -62,7 +62,7 @@ code=$(printf '%s' "$payload" | ssh "$alias_name" '
 	read -r json
 	i=0
 	while [ "$i" -lt 180 ]; do
-		c=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
+		c=$(curl -s --max-time 3 -o /dev/null -w "%{http_code}" -X POST \
 			http://127.0.0.1:'"$port"'/mcp -H "content-type: application/json" \
 			-H "accept: application/json, text/event-stream" -d "$json")
 		[ "$c" = "401" ] && { echo 401; exit 0; }
@@ -73,6 +73,10 @@ code=$(printf '%s' "$payload" | ssh "$alias_name" '
 if [ "$code" = "401" ]; then
 	echo "gateway up: 401 without a token on $alias_name 127.0.0.1:$port"
 	exit 0
+fi
+if [ -z "$code" ]; then
+	echo "health check never completed — the connection died; re-run the deploy" >&2
+	exit 1
 fi
 echo "gateway did not answer 401 within 3min — check $remote_dir/gateway.out" >&2
 exit 1
