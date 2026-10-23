@@ -5,10 +5,11 @@
 # public tree; the token is read from a local file so it never rides in a
 # process listing or a shell's history.
 #
-# Usage: deploy.sh <ssh-alias> <remote-dir> <cluster-user> <token-file> [port]
+# Usage: deploy.sh <ssh-alias> <remote-dir> <cluster-user> <token-file> [port] [templates-dir]
 # remote-dir is absolute or relative to the remote home — a quoted tilde
 # does not expand on the far side, so pass `hpc_projects/theta-compute`,
-# not `~/hpc_projects/theta-compute`.
+# not `~/hpc_projects/theta-compute`. templates-dir is the on-cluster
+# template registry directory; given, the typed tools ride the deploy env.
 #
 # What it does: rsync the tree (never touching the remote audit log or
 # venv), adapt the remote lock copy for an older uv, restart the gateway
@@ -22,9 +23,17 @@ remote_dir=${2:-}
 cluster_user=${3:-}
 token_file=${4:-}
 port=${5:-8421}
+templates_dir=${6:-}
 
 [ -n "$alias_name" ] && [ -n "$remote_dir" ] && [ -n "$cluster_user" ] && [ -f "$token_file" ] ||
-	{ echo "usage: deploy.sh <ssh-alias> <remote-dir> <cluster-user> <token-file> [port]" >&2; exit 1; }
+	{ echo "usage: deploy.sh <ssh-alias> <remote-dir> <cluster-user> <token-file> [port] [templates-dir]" >&2; exit 1; }
+
+# The template registry rides the restart env only when given.
+if [ -n "$templates_dir" ]; then
+	templates_env="THETA_COMPUTE_TEMPLATES='$templates_dir' "
+else
+	templates_env=""
+fi
 
 repo_root=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 
@@ -49,6 +58,7 @@ sleep 1
 ssh "$alias_name" "read -r token; export PATH=\"\$HOME/.local/bin:\$PATH\"; cd '$remote_dir' && \
 	THETA_COMPUTE_TOKEN=\$token THETA_COMPUTE_USER='$cluster_user' \
 	THETA_COMPUTE_AUDIT_LOG=audit/audit.jsonl THETA_COMPUTE_PORT='$port' \
+	$templates_env\
 	nohup uv run --locked python -m theta_compute >gateway.out 2>&1 < /dev/null &" \
 	< "$token_file"
 

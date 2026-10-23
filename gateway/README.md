@@ -23,6 +23,7 @@ gateway/
                         scripts, artifact reads
     audit.py            the JSONL audit trail and its rotation
     slurm.py            sinfo/squeue/sbatch/scancel wrappers — argv only
+    templates.py        the template registry: load, validate, render
     server.py           the FastMCP app, audit middleware, tool surface
 ```
 
@@ -48,6 +49,7 @@ an SSH port-forward, below).
 | `THETA_COMPUTE_AUDIT_MAX_BYTES` | 10485760 | rotation ceiling in bytes |
 | `THETA_COMPUTE_SLURM_TIMEOUT` | 30 | per-command Slurm timeout in seconds |
 | `THETA_COMPUTE_STAGING_ROOT` | `~/theta-compute-runs` | the staging root: every run directory lives under it |
+| `THETA_COMPUTE_TEMPLATES` | — (unset) | the template registry directory; unset leaves the seven generic tools as the whole surface |
 | `THETA_COMPUTE_INBAND_MAX_BYTES` | 33554432 | the in-band transfer cap (32 MiB) for stage and fetch alike |
 | `THETA_COMPUTE_PARTITIONS` | `cpu` | the partitions a raw submit may name |
 | `THETA_COMPUTE_MAX_WALLTIME` | `24:00:00` | ceiling for `time` |
@@ -60,9 +62,11 @@ an SSH port-forward, below).
 
 ## Tools
 
-Seven generic tools. The four read-only ones declare the read-only hint
-and run ungated on the theta side; `submit_job` and `cancel_job` declare
-the destructive hint — the theta-side submit gate confirms them.
+Seven generic tools, plus the typed `run_alphafold3` when a template
+registry is configured (below). The four read-only ones declare the
+read-only hint and run ungated on the theta side; `submit_job`,
+`cancel_job`, and `run_alphafold3` declare the destructive hint — the
+theta-side submit gate confirms them.
 
 - **`list_environments`** — every partition-state group sinfo reports
   (`sinfo --noheader --format "%P|%a|%l|%D|%t|%N"`), parsed to records:
@@ -90,6 +94,13 @@ the destructive hint — the theta-side submit gate confirms them.
   in-band (base64): the whole tree by default, or the named picks. Whole
   or not at all — every file is read and sized inside the cap before
   anything returns.
+- **`run_alphafold3(run_name, fold_input)`** — the typed tool: validate
+  the AF3-native fold-input JSON (name, sequences, modelSeeds, dialect
+  `"alphafold3"`, version 1), stage its canonical bytes into the run
+  directory, render the registered template's free variables only, and
+  submit. Answers `{job_id, job_name, script_path, fold_input_path,
+  output_dir}`. Registered only when `THETA_COMPUTE_TEMPLATES` is set and
+  its registry registers an `alphafold3` template.
 
 ## The guard: sandbox, allow-list, ceilings
 
@@ -112,6 +123,53 @@ the destructive hint — the theta-side submit gate confirms them.
   the out-of-band path: move the files with scp to (or from) the run
   directory on the cluster — large inputs (an MSA, a feature directory)
   travel that way by design.
+
+## The template registry
+
+Typed tools render institutional job templates — the cluster's own
+production scripts, never files in this repo (ADR 0004). The registry is
+one deploy-time directory (`THETA_COMPUTE_TEMPLATES`) holding each
+template's script beside a `registry.json` manifest:
+
+```json
+{
+	"alphafold3": {
+		"script": "alphafold3.sbatch",
+		"free": ["RUN_DIR", "JOB_NAME"],
+		"input_file": "af_input/fold_input.json",
+		"output_dir": "af_output"
+	}
+}
+```
+
+- **Free variables** are the only client-shaped parts of a rendered
+  script, and the vocabulary is closed: `{{RUN_DIR}}` (the run
+  directory, absolute — the `cd` and the input/output binds) and
+  `{{JOB_NAME}}` (the gateway-forced `theta-<user>-` ownership name).
+  A template declares exactly the tokens its script carries; a declared
+  token the script never uses, a token the manifest never declared, or a
+  name outside the vocabulary refuses at startup.
+- **`input_file` and `output_dir`** are paths inside the run directory —
+  the manifest's own words must match what the script's fixed text binds
+  on the container side; the registry validates the shapes (relative,
+  no escapes), the deploy keeps the two consistent.
+- **Startup validation.** A missing `registry.json`, invalid JSON, a
+  missing script, or a registry that registers no `alphafold3` template
+  refuses to boot — the same fail-loudly contract as a missing token.
+  A directory that registers only other templates is legal for the
+  registry and fatal for the typed tool, which has nothing to render.
+- Everything else in the script is fixed text: partition, gres, binds,
+  the SIF, the runner line. `run_alphafold3` takes no directives at all
+  — any extra argument is an override attempt and a guard refusal.
+
+The on-cluster recipe (owner, one time): copy the production af3 template
+into the registry directory, replace the run-dir occurrences (the `cd`
+and the three run binds) with `{{RUN_DIR}}` and the job name with
+`{{JOB_NAME}}`, keep single `fold_input.json` as the input contract, and
+write `registry.json` beside it. The probed live template, its drift
+findings, and the pinned values (XLA_FLAGS line, platform model and
+database paths, the nvidia bind) live on-cluster in the template mirror —
+institutional facts, not repo content.
 
 ## The audit trail
 
@@ -155,10 +213,16 @@ boundary: it spawns this server with the stub `sinfo`/`squeue`/`sbatch`/
 stubs record the argv they receive — the proof that no shell sits between
 gateway and Slurm) and asserts tool results over the wire, the 401 path,
 files in the staging root, the audit lines on disk, and the guard's
-refusals. The sbatch stub answers a deterministic job id and writes the
-script's forced output file itself, standing in for the scheduler running
-the fixed body — so the offline lifecycle (stage, submit, logs, fetch)
-runs against real files. It runs with the repo suite: `npm test`.
+refusals. `test/gateway-templates.test.mjs` drives `run_alphafold3` the
+same way against the synthetic fixture registry in
+`test/fixtures/gateway/templates/` (shaped like the probed production
+template, generic paths — the real one is institutional), including the
+registry's boot refusals. Both share the harness in
+`test/helpers/gateway.mjs`. The sbatch stub answers a deterministic job
+id and writes the script's forced output file itself, standing in for the
+scheduler running the fixed body — so the offline lifecycle (stage,
+submit, logs, fetch, fold) runs against real files. It runs with the repo
+suite: `npm test`.
 
 ## Phase-0 deploy recipe (owner process + SSH forward)
 
@@ -168,7 +232,7 @@ the placeholders below are where they go. Steps 1–3 and a 401 health
 check run as one command:
 
 ```sh
-gateway/deploy.sh <login-node-alias> <remote-dir> <cluster-user> <token-file> [port]
+gateway/deploy.sh <login-node-alias> <remote-dir> <cluster-user> <token-file> [port] [templates-dir]
 ```
 
 1. Copy this subtree to the login node (the cluster's copy is the
@@ -191,11 +255,14 @@ gateway/deploy.sh <login-node-alias> <remote-dir> <cluster-user> <token-file> [p
    uv run python -c 'import theta_compute.server'   # adapt the lock; no server starts
    ```
 
-3. Start it there, bound to loopback, with the deploy env in place:
+3. Start it there, bound to loopback, with the deploy env in place
+   (`THETA_COMPUTE_TEMPLATES` names the on-cluster template registry
+   directory when the typed tool is in service):
 
    ```sh
    THETA_COMPUTE_TOKEN=<token> THETA_COMPUTE_USER=<cluster-user> \
      THETA_COMPUTE_AUDIT_LOG=audit/audit.jsonl \
+     THETA_COMPUTE_TEMPLATES=<templates-dir> \
      nohup uv run --locked python -m theta_compute >gateway.out 2>&1 &
    ```
 

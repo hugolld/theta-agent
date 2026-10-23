@@ -60,6 +60,10 @@ _Avoid_: compute daemon, job server
 The one cluster-side directory that holds every run directory; the boundary the gateway's path sandbox enforces and the target the over-cap error names for the out-of-band scp move.
 _Avoid_: staging area, staging directory, staging folder
 
+**Template registry**:
+The deploy-time directory the compute gateway loads its typed tools' job templates from: each template's script plus a `registry.json` manifest naming its free variables, input file, and output directory. Template bytes are institutional and never enter git.
+_Avoid_: template cache, template store
+
 **Gateway skill**:
 The Theta-owned skill carrying the compute doctrine — when to stage, submit, poll, fetch, and record — while the model calls the compute gateway's tools directly; no wrapper scripts.
 _Avoid_: compute connector, wrapper skill
