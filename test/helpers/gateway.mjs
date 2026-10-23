@@ -88,7 +88,7 @@ export async function startGateway(t, { env = {} } = {}) {
 	// match the resolved form the gateway reports.
 	await mkdir(path.join(scratch, "staging"), { recursive: true });
 	const stagingRoot = await realpath(path.join(scratch, "staging"));
-	const { child, port, stderr, kill } = await spawnGateway(t, {
+	const { child, port, stderr, kill } = await spawnGateway({
 		env: {
 			THETA_COMPUTE_AUDIT_LOG: auditLog,
 			THETA_COMPUTE_STAGING_ROOT: stagingRoot,
@@ -157,7 +157,7 @@ export async function startGateway(t, { env = {} } = {}) {
 // its child — the whole group takes the kill signal together. The
 // caller owns when kill() runs (its t.after, its ordering with scratch
 // cleanup); stderr() reads what has accumulated so far.
-function spawnGateway(t, { env = {} }) {
+function spawnGateway({ env = {} }) {
 	return freePort().then((port) => {
 		const child = spawn("uv", ["run", "--locked", "python", "-m", "theta_compute"], {
 			cwd: gatewayDir,
@@ -194,7 +194,7 @@ function spawnGateway(t, { env = {} }) {
 // startGateway for the ConfigError path — nothing ever listens.
 export function startGatewayExit(t, { env = {}, timeoutMs = 60_000 } = {}) {
 	return new Promise((resolve, reject) => {
-		spawnGateway(t, { env: { THETA_COMPUTE_AUDIT_LOG: "/dev/null", ...env } }).then(
+		spawnGateway({ env: { THETA_COMPUTE_AUDIT_LOG: "/dev/null", ...env } }).then(
 			({ child, stderr, kill }) => {
 				const timer = setTimeout(() => {
 					kill();

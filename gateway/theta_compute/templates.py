@@ -35,9 +35,10 @@ from .guard import GuardRefusal, parse_staged_path
 REGISTRY_NAME = "registry.json"
 
 #: The free-variable vocabulary the renderer can substitute. A manifest
-#: may declare a subset; never anything else. The tuple is the one order
-#: the error messages name the vocabulary in.
+#: may declare a subset; never anything else.
 FREE_VARIABLES = frozenset({"RUN_DIR", "JOB_NAME"})
+
+#: The one order the error messages name the vocabulary in.
 _VOCABULARY = "RUN_DIR and JOB_NAME"
 
 #: The token syntax in a template script: {{NAME}}, uppercase and

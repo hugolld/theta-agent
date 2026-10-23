@@ -122,8 +122,7 @@ def build_app(config: Config, template_specs: dict[str, template_registry.Templa
 	The typed tools register only when a template registry is configured —
 	the seven generic tools are the fixed base surface; a deployment
 	without templates serves exactly that."""
-	specs = template_specs
-	if config.templates_dir is not None and "alphafold3" not in specs:
+	if config.templates_dir is not None and "alphafold3" not in template_specs:
 		raise ConfigError(
 			"the template registry registers no alphafold3 template — run_alphafold3 has nothing to render; check THETA_COMPUTE_TEMPLATES"
 		)
@@ -293,7 +292,7 @@ def build_app(config: Config, template_specs: dict[str, template_registry.Templa
 		return {"run_name": run_name, "total_bytes": total, "files": files}
 
 	if config.templates_dir is not None:
-		af3 = specs["alphafold3"]
+		af3 = template_specs["alphafold3"]
 
 		@app.tool(annotations=ToolAnnotations(read_only_hint=False, destructive_hint=True, open_world_hint=False))
 		async def run_alphafold3(run_name: str, fold_input: dict[str, Any]) -> dict[str, Any]:
