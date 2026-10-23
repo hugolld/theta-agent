@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import sys
 from contextvars import ContextVar
+from pathlib import Path
 from typing import Any
 
 from fastmcp import FastMCP
@@ -115,13 +116,13 @@ class AuditMiddleware(Middleware):
 		return result
 
 
-def build_app(config: Config, template_specs: dict[str, template_registry.TemplateSpec] | None = None) -> FastMCP:
+def build_app(config: Config, template_specs: dict[str, template_registry.TemplateSpec]) -> FastMCP:
 	"""Assemble the gateway: verifier, audit middleware, tool surface.
 
 	The typed tools register only when a template registry is configured —
 	the seven generic tools are the fixed base surface; a deployment
 	without templates serves exactly that."""
-	specs = template_specs or {}
+	specs = template_specs
 	if config.templates_dir is not None and "alphafold3" not in specs:
 		raise ConfigError(
 			"the template registry registers no alphafold3 template — run_alphafold3 has nothing to render; check THETA_COMPUTE_TEMPLATES"
@@ -185,6 +186,17 @@ def build_app(config: Config, template_specs: dict[str, template_registry.Templa
 			"staged": staged,
 		}
 
+	async def _submit_script(script_path: Path) -> str:
+		"""Submit one rendered script and mint the job id onto the audit
+		line — the submit half both submitting tools share. A Slurm-side
+		failure stays an allowed call that failed."""
+		try:
+			job_id = await slurm_submit(str(script_path), config.slurm_timeout_seconds)
+		except SlurmError as error:
+			raise _boundary_error(error) from error
+		_minted_job_id.set(job_id)
+		return job_id
+
 	@app.tool(annotations=ToolAnnotations(read_only_hint=False, destructive_hint=True, open_world_hint=False))
 	async def submit_job(run_name: str, directives: dict[str, str | int] | None = None) -> dict[str, Any]:
 		"""Submit the run's guarded batch script to Slurm; answers the job id.
@@ -199,12 +211,11 @@ def build_app(config: Config, template_specs: dict[str, template_registry.Templa
 		script = staging.render_batch_script(config.staging_root, run_name, checked, config.user)
 		try:
 			script_path = staging.write_batch_script(config.staging_root, run_name, script)
-			job_id = await slurm_submit(str(script_path), config.slurm_timeout_seconds)
-		except (GuardRefusal, SlurmError) as error:
+		except GuardRefusal as error:
 			raise _boundary_error(error) from error
 		except OSError as error:
 			raise ToolError(f"writing the batch script for run {run_name!r} failed: {error}") from error
-		_minted_job_id.set(job_id)
+		job_id = await _submit_script(script_path)
 		return {
 			"job_id": job_id,
 			"job_name": staging.job_name(config.user, run_name),
@@ -281,7 +292,7 @@ def build_app(config: Config, template_specs: dict[str, template_registry.Templa
 			raise ToolError(f"fetching run {run_name!r} failed: {error}") from error
 		return {"run_name": run_name, "total_bytes": total, "files": files}
 
-	if "alphafold3" in specs:
+	if config.templates_dir is not None:
 		af3 = specs["alphafold3"]
 
 		@app.tool(annotations=ToolAnnotations(read_only_hint=False, destructive_hint=True, open_world_hint=False))
@@ -312,12 +323,11 @@ def build_app(config: Config, template_specs: dict[str, template_registry.Templa
 				script_path = staging.write_staged_file(
 					config.staging_root, run_name, af3.script_name, script.encode("utf-8")
 				)
-				job_id = await slurm_submit(str(script_path), config.slurm_timeout_seconds)
-			except (GuardRefusal, SlurmError) as error:
+			except GuardRefusal as error:
 				raise _boundary_error(error) from error
 			except OSError as error:
 				raise ToolError(f"staging the alphafold3 run {run_name!r} failed: {error}") from error
-			_minted_job_id.set(job_id)
+			job_id = await _submit_script(script_path)
 			return {
 				"job_id": job_id,
 				"job_name": name,

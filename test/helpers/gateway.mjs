@@ -79,7 +79,6 @@ export async function rpcMessages(response) {
 // ends. Resolves once an authenticated initialize has succeeded, with a
 // client bound to that session.
 export async function startGateway(t, { env = {} } = {}) {
-	const port = await freePort();
 	const scratch = await mkdtemp(path.join(tmpdir(), "theta-gateway-"));
 	const auditLog = path.join(scratch, "audit.jsonl");
 	const argvLog = path.join(scratch, "stub-argv.log");
@@ -89,35 +88,16 @@ export async function startGateway(t, { env = {} } = {}) {
 	// match the resolved form the gateway reports.
 	await mkdir(path.join(scratch, "staging"), { recursive: true });
 	const stagingRoot = await realpath(path.join(scratch, "staging"));
-	// Detached: uv runs python as its child, so the whole group takes the
-	// kill signal together.
-	const child = spawn("uv", ["run", "--locked", "python", "-m", "theta_compute"], {
-		cwd: gatewayDir,
+	const { child, port, stderr, kill } = await spawnGateway(t, {
 		env: {
-			...process.env,
-			PATH: `${stubBin}:${process.env.PATH ?? ""}`,
-			THETA_COMPUTE_TOKEN: TOKEN,
-			THETA_COMPUTE_USER: "test-user",
 			THETA_COMPUTE_AUDIT_LOG: auditLog,
 			THETA_COMPUTE_STAGING_ROOT: stagingRoot,
-			THETA_COMPUTE_HOST: "127.0.0.1",
-			THETA_COMPUTE_PORT: String(port),
 			THETA_GATEWAY_STUB_ARGV: argvLog,
 			...env,
 		},
-		stdio: ["ignore", "ignore", "pipe"],
-		detached: true,
-	});
-	let stderr = "";
-	child.stderr.on("data", (chunk) => {
-		stderr += chunk;
 	});
 	t.after(() => {
-		try {
-			process.kill(-child.pid, "SIGTERM");
-		} catch {
-			child.kill("SIGTERM");
-		}
+		kill();
 		rm(scratch, { recursive: true, force: true });
 	});
 
@@ -126,7 +106,7 @@ export async function startGateway(t, { env = {} } = {}) {
 	let sessionId;
 	for (;;) {
 		if (child.exitCode !== null) {
-			assert.fail(`gateway exited ${child.exitCode} before listening\n${stderr}`);
+			assert.fail(`gateway exited ${child.exitCode} before listening\n${stderr()}`);
 		}
 		try {
 			const probe = await rpc(baseUrl, {
@@ -153,7 +133,7 @@ export async function startGateway(t, { env = {} } = {}) {
 			// not listening yet
 		}
 		if (Date.now() > deadline) {
-			assert.fail(`gateway not ready within ${READINESS_TIMEOUT_MS}ms\n${stderr}`);
+			assert.fail(`gateway not ready within ${READINESS_TIMEOUT_MS}ms\n${stderr()}`);
 		}
 		await sleep(150);
 	}
@@ -172,52 +152,65 @@ export async function startGateway(t, { env = {} } = {}) {
 	return { baseUrl, auditLog, argvLog, stagingRoot, request, callTool };
 }
 
+// One gateway process: the env assembly, the detached spawn, and the
+// teardown both start shapes share. Detached because uv runs python as
+// its child — the whole group takes the kill signal together. The
+// caller owns when kill() runs (its t.after, its ordering with scratch
+// cleanup); stderr() reads what has accumulated so far.
+function spawnGateway(t, { env = {} }) {
+	return freePort().then((port) => {
+		const child = spawn("uv", ["run", "--locked", "python", "-m", "theta_compute"], {
+			cwd: gatewayDir,
+			env: {
+				...process.env,
+				PATH: `${stubBin}:${process.env.PATH ?? ""}`,
+				THETA_COMPUTE_TOKEN: TOKEN,
+				THETA_COMPUTE_USER: "test-user",
+				THETA_COMPUTE_HOST: "127.0.0.1",
+				THETA_COMPUTE_PORT: String(port),
+				...env,
+			},
+			stdio: ["ignore", "ignore", "pipe"],
+			detached: true,
+		});
+		let captured = "";
+		child.stderr.on("data", (chunk) => {
+			captured += chunk;
+		});
+		const stderr = () => captured;
+		const kill = () => {
+			try {
+				process.kill(-child.pid, "SIGTERM");
+			} catch {
+				child.kill("SIGTERM");
+			}
+		};
+		return { child, port, stderr, kill };
+	});
+}
+
 // A gateway expected to refuse to boot (a bad deploy env): resolves with
 // its exit code and stderr once the process exits. The mirror of
 // startGateway for the ConfigError path — nothing ever listens.
 export function startGatewayExit(t, { env = {}, timeoutMs = 60_000 } = {}) {
 	return new Promise((resolve, reject) => {
-		freePort().then((port) => {
-			const child = spawn("uv", ["run", "--locked", "python", "-m", "theta_compute"], {
-				cwd: gatewayDir,
-				env: {
-					...process.env,
-					PATH: `${stubBin}:${process.env.PATH ?? ""}`,
-					THETA_COMPUTE_TOKEN: TOKEN,
-					THETA_COMPUTE_USER: "test-user",
-					THETA_COMPUTE_AUDIT_LOG: "/dev/null",
-					THETA_COMPUTE_HOST: "127.0.0.1",
-					THETA_COMPUTE_PORT: String(port),
-					...env,
-				},
-				stdio: ["ignore", "ignore", "pipe"],
-				detached: true,
-			});
-			let stderr = "";
-			child.stderr.on("data", (chunk) => {
-				stderr += chunk;
-			});
-			const timer = setTimeout(() => {
-				try {
-					process.kill(-child.pid, "SIGTERM");
-				} catch {
-					child.kill("SIGTERM");
-				}
-				reject(new Error(`gateway did not exit within ${timeoutMs}ms\n${stderr}`));
-			}, timeoutMs);
-			t.after(() => {
-				clearTimeout(timer);
-				try {
-					process.kill(-child.pid, "SIGTERM");
-				} catch {
-					// already gone
-				}
-			});
-			child.on("exit", (code) => {
-				clearTimeout(timer);
-				resolve({ code, stderr });
-			});
-		}, reject);
+		spawnGateway(t, { env: { THETA_COMPUTE_AUDIT_LOG: "/dev/null", ...env } }).then(
+			({ child, stderr, kill }) => {
+				const timer = setTimeout(() => {
+					kill();
+					reject(new Error(`gateway did not exit within ${timeoutMs}ms\n${stderr()}`));
+				}, timeoutMs);
+				t.after(() => {
+					clearTimeout(timer);
+					kill();
+				});
+				child.on("exit", (code) => {
+					clearTimeout(timer);
+					resolve({ code, stderr: stderr() });
+				});
+			},
+			reject,
+		);
 	});
 }
 

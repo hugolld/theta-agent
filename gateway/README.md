@@ -162,6 +162,11 @@ template's script beside a `registry.json` manifest:
   the SIF, the runner line. `run_alphafold3` takes no directives at all
   — any extra argument is an override attempt and a guard refusal.
 
+Spec #49's optional project code is deliberately absent from v1: the
+probed production template carries no account line to render it into,
+so the closed vocabulary is that decision on record. The vocabulary
+grows when an institutional template needs one.
+
 The on-cluster recipe (owner, one time): copy the production af3 template
 into the registry directory, replace the run-dir occurrences (the `cd`
 and the three run binds) with `{{RUN_DIR}}` and the job name with

@@ -100,10 +100,18 @@ def _load_template(directory: Path, name: str, spec: dict[str, Any]) -> Template
 	output_dir = _staged_field(where, spec, "output_dir")
 	script = script_path.read_text(encoding="utf-8")
 	declared, carried = set(free_raw), set(_TOKEN.findall(script))
-	for token in sorted(carried - declared):
-		raise ConfigError(f"THETA_COMPUTE_TEMPLATES: {script_name} carries undeclared token {token} — declare it in {REGISTRY_NAME} or remove it from the script")
-	for token in sorted(declared - carried):
-		raise ConfigError(f"THETA_COMPUTE_TEMPLATES: {REGISTRY_NAME} declares {token} but {script_name} never carries its token")
+	undeclared = sorted(carried - declared)
+	if undeclared:
+		noun = "token" if len(undeclared) == 1 else "tokens"
+		raise ConfigError(
+			f"THETA_COMPUTE_TEMPLATES: {script_name} carries undeclared {noun} {', '.join(undeclared)} — declare {noun} in {REGISTRY_NAME} or remove {noun} from the script"
+		)
+	absent = sorted(declared - carried)
+	if absent:
+		carried_word = "its token" if len(absent) == 1 else "them"
+		raise ConfigError(
+			f"THETA_COMPUTE_TEMPLATES: {REGISTRY_NAME} declares {', '.join(absent)} but {script_name} never carries {carried_word}"
+		)
 	return TemplateSpec(
 		name=name,
 		script_name=script_name,

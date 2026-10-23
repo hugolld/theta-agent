@@ -63,7 +63,9 @@ DEFAULT_TAIL_LINES = 100
 
 #: The typed fold tool's whole argument surface (spec #49): a run name and
 #: the fold-input JSON. Partition, gres, and binds are template-fixed —
-#: every other key is an override attempt and refuses.
+#: every other key is an override attempt and refuses. The spec's optional
+#: project code is deliberately absent from v1 (gateway/README.md names
+#: the decision): the production template has no account line to render.
 ALPHAFOLD3_ARGUMENTS = frozenset({"run_name", "fold_input"})
 
 
