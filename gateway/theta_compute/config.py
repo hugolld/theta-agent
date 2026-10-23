@@ -3,9 +3,10 @@
 Nothing is configurable from the client — the tool surface is fixed — and
 no institutional fact lives in git (ADR 0004): the bearer token, the user
 name it belongs to, the audit log's location and rotation ceiling, the
-Slurm timeout, the bind address, the staging root, the in-band transfer
-cap, and the directive ceilings (which partitions a raw job may touch,
-how long, how big) all ride env.
+Slurm timeout, the bind address, the staging root, the template directory
+the typed tools render from, the in-band transfer cap, and the directive
+ceilings (which partitions a raw job may touch, how long, how big) all
+ride env.
 """
 
 from __future__ import annotations
@@ -56,6 +57,8 @@ class Config:
 	host: str
 	port: int
 	staging_root: Path
+	#: The deploy-time template directory (None: no typed tools registered).
+	templates_dir: Path | None
 	inband_max_bytes: int
 	partitions: tuple[str, ...]
 	max_walltime_seconds: int
@@ -95,6 +98,12 @@ def load_config(env: dict[str, str] | None = None) -> Config:
 	port = _int_in_range(source, "THETA_COMPUTE_PORT", DEFAULT_PORT, 1, 65535)
 
 	staging_root = Path(source.get("THETA_COMPUTE_STAGING_ROOT") or DEFAULT_STAGING_ROOT).expanduser()
+	templates_raw = source.get("THETA_COMPUTE_TEMPLATES") or ""
+	templates_dir: Path | None = None
+	if templates_raw:
+		templates_dir = Path(templates_raw).expanduser()
+		if not templates_dir.is_dir():
+			raise ConfigError(f"THETA_COMPUTE_TEMPLATES={templates_raw!r} is not a directory")
 	inband = _positive_int(source, "THETA_COMPUTE_INBAND_MAX_BYTES", DEFAULT_INBAND_MAX_BYTES)
 	partitions = _partitions(source, "THETA_COMPUTE_PARTITIONS", DEFAULT_PARTITIONS)
 	walltime = _walltime(source, "THETA_COMPUTE_MAX_WALLTIME", DEFAULT_MAX_WALLTIME)
@@ -108,6 +117,7 @@ def load_config(env: dict[str, str] | None = None) -> Config:
 		host=source.get("THETA_COMPUTE_HOST") or DEFAULT_HOST,
 		port=port,
 		staging_root=staging_root,
+		templates_dir=templates_dir,
 		inband_max_bytes=inband,
 		partitions=partitions,
 		max_walltime_seconds=walltime,

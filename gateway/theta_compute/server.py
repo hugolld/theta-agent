@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import sys
 from contextvars import ContextVar
+from pathlib import Path
 from typing import Any
 
 from fastmcp import FastMCP
@@ -26,6 +27,7 @@ from fastmcp.server.middleware import CallNext, Middleware, MiddlewareContext
 from fastmcp.tools.base import ToolAnnotations
 
 from . import staging
+from . import templates as template_registry
 from .audit import AuditLog, Decision
 from .auth import StaticBearerToken
 from .config import Config, ConfigError, load_config
@@ -38,6 +40,7 @@ from .guard import (
 	parse_job_id,
 	parse_tail_lines,
 	run_dir,
+	validate_fold_input,
 )
 from .slurm import SlurmError
 from .slurm import cancel_job as slurm_cancel
@@ -113,8 +116,16 @@ class AuditMiddleware(Middleware):
 		return result
 
 
-def build_app(config: Config) -> FastMCP:
-	"""Assemble the gateway: verifier, audit middleware, tool surface."""
+def build_app(config: Config, template_specs: dict[str, template_registry.TemplateSpec]) -> FastMCP:
+	"""Assemble the gateway: verifier, audit middleware, tool surface.
+
+	The typed tools register only when a template registry is configured —
+	the seven generic tools are the fixed base surface; a deployment
+	without templates serves exactly that."""
+	if config.templates_dir is not None and "alphafold3" not in template_specs:
+		raise ConfigError(
+			"the template registry registers no alphafold3 template — run_alphafold3 has nothing to render; check THETA_COMPUTE_TEMPLATES"
+		)
 	audit = AuditLog(config.audit_log, config.audit_max_bytes)
 	app = FastMCP(
 		name="theta-compute",
@@ -174,6 +185,17 @@ def build_app(config: Config) -> FastMCP:
 			"staged": staged,
 		}
 
+	async def _submit_script(script_path: Path) -> str:
+		"""Submit one rendered script and mint the job id onto the audit
+		line — the submit half both submitting tools share. A Slurm-side
+		failure stays an allowed call that failed."""
+		try:
+			job_id = await slurm_submit(str(script_path), config.slurm_timeout_seconds)
+		except SlurmError as error:
+			raise _boundary_error(error) from error
+		_minted_job_id.set(job_id)
+		return job_id
+
 	@app.tool(annotations=ToolAnnotations(read_only_hint=False, destructive_hint=True, open_world_hint=False))
 	async def submit_job(run_name: str, directives: dict[str, str | int] | None = None) -> dict[str, Any]:
 		"""Submit the run's guarded batch script to Slurm; answers the job id.
@@ -188,12 +210,11 @@ def build_app(config: Config) -> FastMCP:
 		script = staging.render_batch_script(config.staging_root, run_name, checked, config.user)
 		try:
 			script_path = staging.write_batch_script(config.staging_root, run_name, script)
-			job_id = await slurm_submit(str(script_path), config.slurm_timeout_seconds)
-		except (GuardRefusal, SlurmError) as error:
+		except GuardRefusal as error:
 			raise _boundary_error(error) from error
 		except OSError as error:
 			raise ToolError(f"writing the batch script for run {run_name!r} failed: {error}") from error
-		_minted_job_id.set(job_id)
+		job_id = await _submit_script(script_path)
 		return {
 			"job_id": job_id,
 			"job_name": staging.job_name(config.user, run_name),
@@ -270,6 +291,50 @@ def build_app(config: Config) -> FastMCP:
 			raise ToolError(f"fetching run {run_name!r} failed: {error}") from error
 		return {"run_name": run_name, "total_bytes": total, "files": files}
 
+	if config.templates_dir is not None:
+		af3 = template_specs["alphafold3"]
+
+		@app.tool(annotations=ToolAnnotations(read_only_hint=False, destructive_hint=True, open_world_hint=False))
+		async def run_alphafold3(run_name: str, fold_input: dict[str, Any]) -> dict[str, Any]:
+			"""Fold one input on the cluster's registered AlphaFold3 template.
+
+			Takes a run name and the AF3-native fold-input JSON (name,
+			sequences, modelSeeds, dialect "alphafold3", version 1). The
+			gateway validates the envelope, stages the JSON into the run
+			directory, renders the template's free variables only — the
+			job name and the run directory — and submits. Partition, gres,
+			and binds are fixed by the template; the typed tool exposes no
+			overrides. Answers the job id, the job name, the script, the
+			staged input, and the output directory the artifacts land in.
+			This spends GPU time: the theta side confirms it before the
+			call leaves.
+			"""
+			# The guard already refused what policy refuses; the pure
+			# parser re-runs here (transit is not trust) and returns the
+			# canonical bytes to stage.
+			payload = validate_fold_input(fold_input, config.inband_max_bytes)
+			name = staging.job_name(config.user, run_name)
+			run_directory = run_dir(config.staging_root, run_name)
+			try:
+				input_path = staging.write_staged_file(config.staging_root, run_name, af3.input_file, payload)
+				output_path = staging.make_staged_dir(config.staging_root, run_name, af3.output_dir)
+				script = template_registry.render(af3, run_directory, name)
+				script_path = staging.write_staged_file(
+					config.staging_root, run_name, af3.script_name, script.encode("utf-8")
+				)
+			except GuardRefusal as error:
+				raise _boundary_error(error) from error
+			except OSError as error:
+				raise ToolError(f"staging the alphafold3 run {run_name!r} failed: {error}") from error
+			job_id = await _submit_script(script_path)
+			return {
+				"job_id": job_id,
+				"job_name": name,
+				"script_path": str(script_path),
+				"fold_input_path": str(input_path),
+				"output_dir": str(output_path),
+			}
+
 	return app
 
 
@@ -277,10 +342,20 @@ def main() -> int:
 	"""Run the gateway over streamable HTTP until interrupted."""
 	try:
 		config = load_config()
+		registry = (
+			template_registry.load_registry(config.templates_dir)
+			if config.templates_dir is not None
+			else {}
+		)
+		app = build_app(config, registry)
 	except ConfigError as error:
 		print(f"theta-compute: {error}", file=sys.stderr)
 		return 1
-	app = build_app(config)
+	if registry:
+		print(
+			f"theta-compute: {len(registry)} template(s) registered from {config.templates_dir}",
+			file=sys.stderr,
+		)
 	print(
 		f"theta-compute listening on http://{config.host}:{config.port}/mcp "
 		f"(user {config.user}, audit {config.audit_log})",

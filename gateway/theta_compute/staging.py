@@ -76,12 +76,27 @@ def render_batch_script(root: Path, run_name: str, directives: dict[str, str], u
 	return "\n".join([*lines, "", body]) + "\n"
 
 
+def write_staged_file(root: Path, run_name: str, relative: str, data: bytes) -> Path:
+	"""Write one file into the run directory through the sandbox (the
+	shared write shape: resolve, make the parent, write the bytes)."""
+	target = resolve_in_sandbox(root, run_name, relative)
+	target.parent.mkdir(parents=True, exist_ok=True)
+	target.write_bytes(data)
+	return target
+
+
+def make_staged_dir(root: Path, run_name: str, relative: str) -> Path:
+	"""Make one directory inside the run directory through the sandbox —
+	a template binds its input and output paths, and a bind needs the
+	host directory to exist."""
+	target = resolve_in_sandbox(root, run_name, relative)
+	target.mkdir(parents=True, exist_ok=True)
+	return target
+
+
 def write_batch_script(root: Path, run_name: str, script: str) -> Path:
 	"""Write the rendered script into the run directory; return its path."""
-	target = resolve_in_sandbox(root, run_name, SCRIPT_NAME)
-	target.parent.mkdir(parents=True, exist_ok=True)
-	target.write_text(script, encoding="utf-8")
-	return target
+	return write_staged_file(root, run_name, SCRIPT_NAME, script.encode("utf-8"))
 
 
 def find_job_log(root: Path, job_id: str) -> Path | None:

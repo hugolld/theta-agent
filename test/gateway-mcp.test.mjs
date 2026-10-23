@@ -1,246 +1,32 @@
 import assert from "node:assert/strict";
-import { spawn, spawnSync } from "node:child_process";
-import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, readFile, realpath, rm, stat, symlink, writeFile } from "node:fs/promises";
-import net from "node:net";
+import { mkdir, readFile, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 
-// Offline tests for the theta-compute gateway (#51 tracer, #52 generic
-// tools), driven at the MCP tool-call boundary: node:test speaks raw MCP
-// streamable HTTP (initialize, session, tools/list, tools/call) to a
-// FastMCP server spawned from gateway/, with stub Slurm binaries first on
-// its PATH. What is asserted is external behavior only: JSON-RPC results
-// over the wire, the HTTP status of unauthenticated calls, the audit
-// JSONL on disk, files in the staging root, and the argv the stubs
-// actually received — never a Python helper. Contract basis: ADR 0004
-// and the gateway README's audit-line shape.
+import {
+	CLIENT_INFO,
+	PROTOCOL_VERSION,
+	assertAuditLine,
+	argumentDigest,
+	b64,
+	exists,
+	readArgv,
+	readArgvCalls,
+	readAudit,
+	rpc,
+	skipReason,
+	startGateway,
+	toolText,
+	unb64,
+} from "./helpers/gateway.mjs";
 
-const gatewayDir = fileURLToPath(new URL("../gateway", import.meta.url));
-const stubBin = fileURLToPath(new URL("fixtures/gateway/bin", import.meta.url));
-const TOKEN = "test-token-4f2a";
-
-// The gateway runs from its locked uv environment (gateway/uv.lock). With
-// no uv on PATH (unusual), skip rather than fail: CI installs uv.
-const uvProbe = spawnSync("uv", ["--version"]);
-const skipReason = uvProbe.status === 0 ? false : "no uv found on PATH";
-
-const PROTOCOL_VERSION = "2025-06-18";
-const CLIENT_INFO = { name: "node-test", version: "0" };
-const READINESS_TIMEOUT_MS = 120_000;
-
-// A free loopback port, claimed and released before the gateway takes it.
-function freePort() {
-	return new Promise((resolve, reject) => {
-		const server = net.createServer();
-		server.unref();
-		server.on("error", reject);
-		server.listen(0, "127.0.0.1", () => {
-			const { port } = server.address();
-			server.close(() => resolve(port));
-		});
-	});
-}
-
-const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-
-// One JSON-RPC request over streamable HTTP. Returns the raw Response so
-// callers can assert on status and headers (the 401 path has no body).
-async function rpc(baseUrl, { method, params, id, token, sessionId }) {
-	const body = { jsonrpc: "2.0", method };
-	if (params !== undefined) body.params = params;
-	if (id !== undefined) body.id = id;
-	return fetch(`${baseUrl}/mcp`, {
-		method: "POST",
-		headers: {
-			"content-type": "application/json",
-			accept: "application/json, text/event-stream",
-			...(token === undefined ? {} : { authorization: `Bearer ${token}` }),
-			...(sessionId === undefined ? {} : { "mcp-session-id": sessionId }),
-		},
-		body: JSON.stringify(body),
-	});
-}
-
-// The JSON-RPC messages in one response: a bare JSON object, or every
-// `data:` payload when the server answered server-sent events.
-async function rpcMessages(response) {
-	const raw = await response.text();
-	if (raw === "") return [];
-	const contentType = response.headers.get("content-type") ?? "";
-	if (contentType.includes("text/event-stream")) {
-		return raw
-			.split("\n")
-			.filter((line) => line.startsWith("data:"))
-			.map((line) => JSON.parse(line.slice("data:".length).trim()));
-	}
-	return [JSON.parse(raw)];
-}
-
-// One gateway process in a scratch dir (audit log and stub-argv log live
-// there), killed with its process group when the test ends however it
-// ends. Resolves once an authenticated initialize has succeeded, with a
-// client bound to that session.
-async function startGateway(t, { env = {} } = {}) {
-	const port = await freePort();
-	const scratch = await mkdtemp(path.join(tmpdir(), "theta-gateway-"));
-	const auditLog = path.join(scratch, "audit.jsonl");
-	const argvLog = path.join(scratch, "stub-argv.log");
-	// The staging root is created and resolved before spawn: the gateway
-	// sandbox-resolves every path it touches, and on macOS the temp dir
-	// sits behind the /var -> /private/var symlink — asserted paths must
-	// match the resolved form the gateway reports.
-	await mkdir(path.join(scratch, "staging"), { recursive: true });
-	const stagingRoot = await realpath(path.join(scratch, "staging"));
-	// Detached: uv runs python as its child, so the whole group takes the
-	// kill signal together.
-	const child = spawn("uv", ["run", "--locked", "python", "-m", "theta_compute"], {
-		cwd: gatewayDir,
-		env: {
-			...process.env,
-			PATH: `${stubBin}:${process.env.PATH ?? ""}`,
-			THETA_COMPUTE_TOKEN: TOKEN,
-			THETA_COMPUTE_USER: "test-user",
-			THETA_COMPUTE_AUDIT_LOG: auditLog,
-			THETA_COMPUTE_STAGING_ROOT: stagingRoot,
-			THETA_COMPUTE_HOST: "127.0.0.1",
-			THETA_COMPUTE_PORT: String(port),
-			THETA_GATEWAY_STUB_ARGV: argvLog,
-			...env,
-		},
-		stdio: ["ignore", "ignore", "pipe"],
-		detached: true,
-	});
-	let stderr = "";
-	child.stderr.on("data", (chunk) => {
-		stderr += chunk;
-	});
-	t.after(() => {
-		try {
-			process.kill(-child.pid, "SIGTERM");
-		} catch {
-			child.kill("SIGTERM");
-		}
-		rm(scratch, { recursive: true, force: true });
-	});
-
-	const baseUrl = `http://127.0.0.1:${port}`;
-	const deadline = Date.now() + READINESS_TIMEOUT_MS;
-	let sessionId;
-	for (;;) {
-		if (child.exitCode !== null) {
-			assert.fail(`gateway exited ${child.exitCode} before listening\n${stderr}`);
-		}
-		try {
-			const probe = await rpc(baseUrl, {
-				method: "initialize",
-				params: {
-					protocolVersion: PROTOCOL_VERSION,
-					capabilities: {},
-					clientInfo: CLIENT_INFO,
-				},
-				id: 0,
-				token: TOKEN,
-			});
-			if (probe.status === 200) {
-				sessionId = probe.headers.get("mcp-session-id");
-				assert.ok(sessionId, "initialize answered 200 without a session id");
-				await rpc(baseUrl, {
-					method: "notifications/initialized",
-					sessionId,
-					token: TOKEN,
-				});
-				break;
-			}
-		} catch {
-			// not listening yet
-		}
-		if (Date.now() > deadline) {
-			assert.fail(`gateway not ready within ${READINESS_TIMEOUT_MS}ms\n${stderr}`);
-		}
-		await sleep(150);
-	}
-
-	let nextId = 1;
-	const request = async (method, params) => {
-		const response = await rpc(baseUrl, { method, params, id: nextId++, token: TOKEN, sessionId });
-		assert.equal(response.status, 200, `${method} over the boundary`);
-		const messages = await rpcMessages(response);
-		const message = messages.find((candidate) => candidate.id !== undefined);
-		assert.ok(message, `${method} answered with a JSON-RPC message`);
-		assert.equal(message.error, undefined, `${method} errored: ${JSON.stringify(message.error)}`);
-		return message.result;
-	};
-	const callTool = (name, args) => request("tools/call", { name, arguments: args });
-	return { baseUrl, auditLog, argvLog, stagingRoot, request, callTool };
-}
-
-// A file's non-empty lines; an absent file reads as no lines yet.
-async function readLines(file) {
-	let raw;
-	try {
-		raw = await readFile(file, "utf8");
-	} catch {
-		return [];
-	}
-	return raw.split("\n").filter((line) => line !== "");
-}
-
-// The audit JSONL, parsed.
-const readAudit = async (auditLog) => (await readLines(auditLog)).map((line) => JSON.parse(line));
-
-// The argv groups the stubs received: one NUL-separated group per line.
-const readArgv = async (argvLog) => (await readLines(argvLog)).map((line) => line.split("\0"));
-
-// A tool result's text content, joined — the refusal and error messages.
-const toolText = (result) => result.content.map((part) => part.text).join("\n");
-
-// Canonical JSON as the gateway digests it: sorted keys, no whitespace.
-function canonicalJson(value) {
-	if (Array.isArray(value)) return value.map(canonicalJson);
-	if (value !== null && typeof value === "object") {
-		return Object.fromEntries(
-			Object.keys(value)
-				.sort()
-				.map((key) => [key, canonicalJson(value[key])]),
-		);
-	}
-	return value;
-}
-
-const argumentDigest = (args) =>
-	`sha256:${createHash("sha256").update(JSON.stringify(canonicalJson(args)), "utf8").digest("hex")}`;
-
-// In-band payloads cross the wire as base64 (#52).
-const b64 = (text) => Buffer.from(text, "utf8").toString("base64");
-const unb64 = (encoded) => Buffer.from(encoded, "base64").toString("utf8");
-
-// The stub-argv log as {program, args} pairs — basename-checked so the
-// resolved stub path never matters.
-async function readArgvCalls(argvLog) {
-	const groups = await readArgv(argvLog);
-	return groups.map(([program, ...args]) => ({ program: path.basename(program), args }));
-}
-
-// A path exists on disk.
-async function exists(file) {
-	try {
-		await stat(file);
-		return true;
-	} catch {
-		return false;
-	}
-}
-
-// Every audit line's fixed fields, checked apart from the timestamp,
-// which must merely be a UTC second-resolution ISO instant.
-function assertAuditLine(line, expected) {
-	const { ts, ...rest } = line;
-	assert.match(ts, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/, "ts is a UTC ISO instant");
-	assert.deepEqual(rest, expected);
-}
+// Offline tests for the theta-compute gateway's seven generic tools (#51
+// tracer, #52), driven at the MCP tool-call boundary against the stub Slurm
+// binaries. The shared harness (spawn, probe, audit and argv readers) lives
+// in helpers/gateway.mjs; the typed-tool tests in gateway-templates.test.mjs
+// use it too. What is asserted is external behavior only — never a Python
+// helper. Contract basis: ADR 0004 and the gateway README's audit-line shape.
 
 test("an unauthenticated call is refused before any tool or audit line", { skip: skipReason }, async (t) => {
 	const gateway = await startGateway(t);
