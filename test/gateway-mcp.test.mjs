@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, readFile, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -7,7 +7,6 @@ import { test } from "node:test";
 import {
 	CLIENT_INFO,
 	PROTOCOL_VERSION,
-	TOKEN,
 	assertAuditLine,
 	argumentDigest,
 	b64,

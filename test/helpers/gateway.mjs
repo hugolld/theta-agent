@@ -172,6 +172,55 @@ export async function startGateway(t, { env = {} } = {}) {
 	return { baseUrl, auditLog, argvLog, stagingRoot, request, callTool };
 }
 
+// A gateway expected to refuse to boot (a bad deploy env): resolves with
+// its exit code and stderr once the process exits. The mirror of
+// startGateway for the ConfigError path — nothing ever listens.
+export function startGatewayExit(t, { env = {}, timeoutMs = 60_000 } = {}) {
+	return new Promise((resolve, reject) => {
+		freePort().then((port) => {
+			const child = spawn("uv", ["run", "--locked", "python", "-m", "theta_compute"], {
+				cwd: gatewayDir,
+				env: {
+					...process.env,
+					PATH: `${stubBin}:${process.env.PATH ?? ""}`,
+					THETA_COMPUTE_TOKEN: TOKEN,
+					THETA_COMPUTE_USER: "test-user",
+					THETA_COMPUTE_AUDIT_LOG: "/dev/null",
+					THETA_COMPUTE_HOST: "127.0.0.1",
+					THETA_COMPUTE_PORT: String(port),
+					...env,
+				},
+				stdio: ["ignore", "ignore", "pipe"],
+				detached: true,
+			});
+			let stderr = "";
+			child.stderr.on("data", (chunk) => {
+				stderr += chunk;
+			});
+			const timer = setTimeout(() => {
+				try {
+					process.kill(-child.pid, "SIGTERM");
+				} catch {
+					child.kill("SIGTERM");
+				}
+				reject(new Error(`gateway did not exit within ${timeoutMs}ms\n${stderr}`));
+			}, timeoutMs);
+			t.after(() => {
+				clearTimeout(timer);
+				try {
+					process.kill(-child.pid, "SIGTERM");
+				} catch {
+					// already gone
+				}
+			});
+			child.on("exit", (code) => {
+				clearTimeout(timer);
+				resolve({ code, stderr });
+			});
+		}, reject);
+	});
+}
+
 // A file's non-empty lines; an absent file reads as no lines yet.
 export async function readLines(file) {
 	let raw;
@@ -193,7 +242,7 @@ export const readArgv = async (argvLog) => (await readLines(argvLog)).map((line)
 export const toolText = (result) => result.content.map((part) => part.text).join("\n");
 
 // Canonical JSON as the gateway digests it: sorted keys, no whitespace.
-function canonicalJson(value) {
+export function canonicalJson(value) {
 	if (Array.isArray(value)) return value.map(canonicalJson);
 	if (value !== null && typeof value === "object") {
 		return Object.fromEntries(

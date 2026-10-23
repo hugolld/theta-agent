@@ -1,0 +1,8 @@
+{
+	"alphafold3": {
+		"script": "alphafold3.sbatch",
+		"free": ["RUN_DIR", "JOB_NAME"],
+		"input_file": "af_input/fold_input.json",
+		"output_dir": "af_output"
+	}
+}

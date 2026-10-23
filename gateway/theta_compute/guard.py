@@ -24,6 +24,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from .audit import canonical_json
+
 #: Slurm job ids as the gateway accepts them: plain digits in v1 (spec #49).
 _JOB_ID = re.compile(r"\d+")
 
@@ -58,6 +60,11 @@ _COUNT = re.compile(r"\d+")
 #: job_logs tail size: between one line and the ceiling (vault spec: max 1000).
 MAX_TAIL_LINES = 1000
 DEFAULT_TAIL_LINES = 100
+
+#: The typed fold tool's whole argument surface (spec #49): a run name and
+#: the fold-input JSON. Partition, gres, and binds are template-fixed —
+#: every other key is an override attempt and refuses.
+ALPHAFOLD3_ARGUMENTS = frozenset({"run_name", "fold_input"})
 
 
 class GuardRefusal(Exception):
@@ -232,6 +239,40 @@ def _format_seconds(total: int) -> str:
 	return f"{hours // 24}-{hours % 24:02d}:{seconds // 60:02d}:{seconds % 60:02d}"
 
 
+def validate_fold_input(raw: Any, inband_max_bytes: int) -> bytes:
+	"""Check the fold-input envelope — the AF3-native dialect S0 probed on
+	the cluster (name, sequences, modelSeeds, dialect, version) — and
+	return its canonical bytes (the audit digest's own serialization, so
+	the staged file hashes to the same digest). Extra keys pass: the
+	dialect carries more than the envelope and refusing them would freeze
+	the science payloads to this gateway's version."""
+	if not isinstance(raw, dict):
+		raise GuardRefusal(f"invalid fold_input {raw!r}: expected a JSON object in the AlphaFold3 dialect")
+	if not isinstance(raw.get("name"), str) or not raw["name"]:
+		raise GuardRefusal("invalid fold_input: fold_input.name must be a non-empty string")
+	sequences = raw.get("sequences")
+	if not isinstance(sequences, list) or not sequences:
+		raise GuardRefusal("invalid fold_input: fold_input.sequences must be a non-empty list")
+	seeds = raw.get("modelSeeds")
+	if (
+		not isinstance(seeds, list)
+		or not seeds
+		or not all(isinstance(seed, int) and not isinstance(seed, bool) for seed in seeds)
+	):
+		raise GuardRefusal("invalid fold_input: fold_input.modelSeeds must be a list of integers")
+	if raw.get("dialect") != "alphafold3" or isinstance(raw.get("dialect"), bool):
+		raise GuardRefusal('invalid fold_input: fold_input.dialect must be "alphafold3"')
+	version = raw.get("version")
+	if isinstance(version, bool) or not isinstance(version, int) or version != 1:
+		raise GuardRefusal("invalid fold_input: fold_input.version must be 1")
+	payload = canonical_json(raw).encode("utf-8")
+	if len(payload) > inband_max_bytes:
+		raise GuardRefusal(
+			f"fold_input is over the in-band cap of {inband_max_bytes} bytes — the typed tool carries its input in the call"
+		)
+	return payload
+
+
 def guard_tool_arguments(tool: str, arguments: dict[str, Any], limits: GuardLimits) -> None:
 	"""Refuse arguments that may not reach a Slurm argv or the staging
 	tree, or return. The whole check is pre-dispatch: a refusal here is a
@@ -251,6 +292,14 @@ def guard_tool_arguments(tool: str, arguments: dict[str, Any], limits: GuardLimi
 			guard_directives(arguments.get("directives") or {}, limits)
 		else:
 			_guard_fetch_paths(run_name, arguments.get("paths"), limits)
+	if tool == "run_alphafold3":
+		extra = sorted(set(arguments) - ALPHAFOLD3_ARGUMENTS)
+		if extra:
+			raise GuardRefusal(
+				f"run_alphafold3 takes run_name and fold_input only (refused: {', '.join(extra)}) — partition, gres, and binds are fixed by the template"
+			)
+		parse_run_name(arguments.get("run_name"))
+		validate_fold_input(arguments.get("fold_input"), limits.inband_max_bytes)
 	# list_environments takes no arguments; nothing to guard.
 
 
