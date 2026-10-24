@@ -15,6 +15,8 @@ not ship it.
 gateway/
   pyproject.toml        locked uv environment (fastmcp, Python >= 3.11)
   uv.lock
+  pyrightconfig.json     pins Pyright to .venv and Python 3.12 (editor
+                        diagnostics; no CI leg runs it)
   theta_compute/
     config.py           deploy-time env -> one validated Config
     auth.py             the static bearer-token verifier
