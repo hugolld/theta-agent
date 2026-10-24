@@ -1,0 +1,19 @@
+# 0005 — Dogfood sessions run in a clean-room rig
+
+- **Status**: accepted (2026-10-24)
+- **Context**: A pi session executing theta under test runs shell commands with the operator's full user rights on the dev laptop — credentials, vault, and dotfiles all within reach. The repo already contains its scripts (connector-script invariants) and its server (compute gateway, enforcement server-side), but nothing contains the session itself; dogfood.md's own trust inventory names the gap and declines to close it on the host ("containing that would require a parent-controlled supervisor, which this recipe intentionally is not"). The package's support claim is macOS/Linux (M8 targets Windows), while every dogfood run so far executed on the dev laptop's warm state — a populated `~/.pi`, host skills, a zsh default — that no fresh Linux user sees. Spec #70.
+- **Decision**: Dogfood and adversarial runs execute inside a **clean-room rig** (GLOSSARY): a disposable Linux container per run, shipped as checked-in tooling under `test/rig/` (outside the npm tarball's `files` set) with a runner script. Per run, the layout: the repo mounts read-only as a clone source only; the session's checkout is a fresh `git clone` of the pinned HEAD into a throwaway volume — clean by construction, writable where the notebook leg needs `.theta/`; the evidence dir mounts at `/session`, so transcript and process files land on the host as they are written; and the one credential the rig receives is a prepared provider config (the target provider's key extracted from the host pi config), mounted read-only and copied into the container's ephemeral home. The auditor runs in-container, where the cwd, checkout, and session dir it binds are self-consistent. The container is the parent-controlled boundary the one-shot recipe does not attempt on the host.
+
+## Considered options
+
+- **A remote test host on a lab workstation** — reachability would depend on where the operator sits (LAN or VPN topology), two hosts would have to stay identical with no reset discipline between them, and the publish workflow stays anchored to the dev laptop regardless (browser-2FA, merged-checkout rule). Rejected.
+- **A dedicated local user account** — native and cheap, but state accumulates exactly as it does on the operator's account, and evidence runs lose the reset guarantee. Not chosen; remains the fallback if the macOS leg ever needs containing the same way.
+- **A read-only mount of the repo as the session's checkout** — fails three auditor constraints at once: the session's cwd must be the checkout, the tree must be clean at audit time, and the notebook leg writes the checkout's gitignored `.theta/`. The clone-into-volume shape satisfies all three without trusting the session to keep a mount clean.
+
+## Consequences
+
+- The Linux leg of the support claim is exercised for real on every run: case-sensitive paths, GNU coreutils, a non-zsh login shell, and an empty first-run `~/.pi` — the state a fresh user actually has.
+- Gateway live tests stay outside the rig by design: no cluster credential enters the container, and the gateway's deploy recipe owns the cluster leg (ADR 0004). The rig's network egress serves the scholarly APIs, nothing else.
+- The image pins its base tags and the pi version; milestone boundaries re-pin them, the way the vendored trees re-sync.
+- Resource Saver on the dev laptop pauses the VM when idle; the runner treats a slow first command as a wake, not a failure.
+- arm64-native this strike; `--platform linux/amd64` remains a documented option, not a gate.

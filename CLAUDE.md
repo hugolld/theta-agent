@@ -24,7 +24,7 @@ Current state: 0.3.0 — M3 is shipped. The M1 base ships the `theta` launcher (
 - PR bodies and repo prose are public surfaces: cluster account names, SSH aliases, and node names never enter them — they live in `CLAUDE.local.md`, and GitHub keeps body edit history, so a scrub-after is not undo. (The cluster's own name is public — ADR 0004 names it.) The Spec review checks.
 - No build step; tests use Node's built-in node:test runner (pi loads extension TS via jiti). Verify changes with `npm test`, `npm run lint`, `npm run lint:py` (ruff over the self-authored skill scripts and the gateway tree — vendored trees stay verbatim and out of scope), `npm run lint:dups` (jscpd duplication ratchet), and `npm run typecheck`; check shipped files with `npm pack --dry-run`.
 - Commits run the suite via the versioned `.githooks/pre-commit` hook; enable it per clone with `git config core.hooksPath .githooks`.
-- Dogfood acceptance criteria are met on captured evidence — session transcripts for the skill criteria, recorded exit status and stderr for clean boot — never the model's self-report. Procedure: `docs/agents/dogfood.md`.
+- Dogfood acceptance criteria are met on captured evidence — session transcripts for the skill criteria, recorded exit status and stderr for clean boot — never the model's self-report. Procedure: `docs/agents/dogfood.md`. Dogfood and adversarial sessions run in the clean-room rig (`test/rig/`, ADR 0005): `node test/rig/run.mjs run "<prompt>"`; the provider key is the one credential that enters it, and gateway live legs stay host-side.
 
 ## Git workflow — one "coding strike" per task
 
