@@ -3,6 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { execSync } from "node:child_process";
 import { createHash } from "node:crypto";
+import { gitStatus, manifestSha256 } from "./dogfood-gates.mjs";
 
 // SemVer comparison: true when a >= b. Prereleases follow SemVer precedence
 // (a release outranks its own prerelease; numeric identifiers compare
@@ -1931,9 +1932,7 @@ export function auditSession(dir, rootArg, legs = []) {
 			`expected ${names.length} checkout skill advertisements, found ${checkoutRecords.length}`,
 		);
 	}
-	const dirty = execSync("git status --porcelain --untracked-files=all", {
-		cwd: root,
-	}).toString().trim();
+	const dirty = gitStatus(root);
 	if (dirty) {
 		throw new Error(`working tree dirty:\n${dirty}`);
 	}
@@ -1943,9 +1942,7 @@ export function auditSession(dir, rootArg, legs = []) {
 		throw new Error(`HEAD moved since the run: ${preHead} -> ${head}`);
 	}
 	const manifestSha = fs.readFileSync(`${dir}/manifest-sha256`, "utf8").trim();
-	const curManifest = createHash("sha256")
-		.update(fs.readFileSync(`${root}/package.json`))
-		.digest("hex");
+	const curManifest = manifestSha256(root);
 	if (curManifest !== manifestSha) {
 		throw new Error("package.json changed since the run");
 	}
@@ -1998,9 +1995,7 @@ export function auditSession(dir, rootArg, legs = []) {
 	}
 	// Final state recheck: the audited bytes and the cited HEAD must still
 	// describe the tree at attestation time.
-	const dirtyFinal = execSync("git status --porcelain --untracked-files=all", {
-		cwd: root,
-	}).toString().trim();
+	const dirtyFinal = gitStatus(root);
 	if (dirtyFinal) {
 		throw new Error(`working tree dirty at attestation time:\n${dirtyFinal}`);
 	}

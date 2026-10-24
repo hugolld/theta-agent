@@ -37,6 +37,21 @@ kill $watchdog 2>/dev/null; pkill -P $watchdog 2>/dev/null
 - Keep the prompt neutral: a prompt that names a skill adds nothing, and a neutral one keeps the spot-check honest.
 - Boot-clean is process evidence: `exit-status` must hold 0 and `stderr.txt` must be 0 bytes. Both persist in the session dir next to the transcript, and the audit below re-verifies them fail-closed.
 
+## Run the one-shot in the clean-room rig
+
+The recipe above runs with the operator's full user rights. The clean-room rig (ADR 0005, GLOSSARY) moves the run into a disposable Linux container where a session can damage at most its own scratch space, and exercises the Linux leg for real — case-sensitive paths, GNU coreutils, a non-zsh shell, an empty first-run `~/.pi`. From a clean checkout:
+
+```sh
+node test/rig/run.mjs build
+node test/rig/run.mjs run "<prompt>"
+```
+
+The runner gates on a clean tree host-side, records the pre-run HEAD and `package.json` digest, and prepares the one credential the rig receives: the target provider's key, extracted from the host pi config into a 0600 temp dir and mounted read-only. Inside, the checkout is a fresh clone of the pinned HEAD, staged through a host-side scratch clone (a worktree's `.git` pointer names a host path and does not survive the mount) — clean by construction, writable where the notebook leg needs `.theta/` — the session dir mounts at `/session` so the transcript and process files land on the host as they are written, and the auditor runs from the clone, where every path it binds is self-consistent; the attestation is printed and saved beside the evidence. Evidence lands under the operator's evidence root unless `--session-dir` says otherwise.
+
+Two mechanical differences from the host recipe, both recorded in the evidence: GNU `timeout` stands in for the hand-rolled watchdog (SIGTERM at the bound, SIGKILL 15 s later; exit 124 writes the `watchdog` sentinel the audit rejects), and the runner refuses a non-ASCII prompt before the run instead of after it. Resource Saver may pause the Docker VM between runs; the runner waits out the wake instead of reporting a false failure.
+
+The boundary is deliberate: no SSH keys and no cluster token enter the rig, so gateway live legs stay on the host path (ADR 0004). Adversarial sessions get the same walls with a keyboard: `node test/rig/run.mjs shell`.
+
 ## Ground-truth the evidence
 
 The pi session transcript is the record. Pi advertises the skill library in the session's system records — assert against those records only. Grepping the whole file proves nothing: the user prompt and tool activity can carry a skill name into a session where nothing was advertised.
