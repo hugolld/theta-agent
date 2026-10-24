@@ -20,7 +20,7 @@ import { createHash } from "node:crypto";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const rigDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(rigDir, "../..");
@@ -88,16 +88,17 @@ function parseFlags(argv) {
 
 // The one credential the rig receives: the target provider's entry from the
 // host pi config, alone in a 0600 temp dir. Never logged, removed at exit.
-function prepareProviderConfig(provider) {
+export function prepareProviderConfig(provider, configPath = path.join(process.env.HOME, ".pi/agent/models.json")) {
 	let hostConfig;
 	try {
-		hostConfig = JSON.parse(readFileSync(path.join(process.env.HOME, ".pi/agent/models.json"), "utf8"));
+		hostConfig = JSON.parse(readFileSync(configPath, "utf8"));
 	} catch {
 		fail("cannot read ~/.pi/agent/models.json — no provider config on this host");
 	}
 	const entry = hostConfig?.providers?.[provider];
 	if (!entry || typeof entry !== "object") fail(`provider ${provider} not in ~/.pi/agent/models.json`);
 	const dir = mkdtempSync(path.join(tmpdir(), "rig-pi-"));
+	mkdirSync(path.join(dir, "agent"), { recursive: true });
 	writeFileSync(
 		path.join(dir, "agent/models.json"),
 		JSON.stringify({ providers: { [provider]: entry } }, null, "\t") + "\n",
@@ -204,8 +205,10 @@ function main() {
 		console.log(`rig: evidence in ${sessionDir}`);
 	} finally {
 		run("docker", ["rm", "-f", container], { stdio: "ignore" });
-		rmSync(providerDir, { recursive: true, force: true });
+		rmSync(providerDir ?? "", { recursive: true, force: true });
 	}
 }
 
-main();
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+	main();
+}

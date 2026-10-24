@@ -1,8 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { readFile, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
 import { spawnSync } from "node:child_process";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { prepareProviderConfig } from "./rig/run.mjs";
 
 const dockerfile = await readFile(fileURLToPath(new URL("./rig/Dockerfile", import.meta.url)), "utf8");
 const runnerPath = fileURLToPath(new URL("./rig/run.mjs", import.meta.url));
@@ -42,6 +45,24 @@ test("runner parses and answers help without a daemon", () => {
 	const help = spawnSync(process.execPath, [runnerPath, "help"]);
 	assert.equal(help.status, 0, help.stderr);
 	assert.match(help.stdout.toString(), /^usage: /);
+});
+
+// The credential path: the prepared config carries the target provider and
+// nothing else, at 0600 — the rig's one-credential boundary starts here.
+test("provider config prep extracts one provider, 0600, nothing else", async (t) => {
+	const dir = await mkdtemp(path.join(tmpdir(), "rig-test-"));
+	const configPath = path.join(dir, "models.json");
+	await writeFile(configPath, JSON.stringify({
+		providers: { "keep-me": { apiKey: "k1" }, "drop-me": { apiKey: "k2" } },
+	}), { mode: 0o600 });
+	const prepared = prepareProviderConfig("keep-me", configPath);
+	t.after(() => Promise.all([rm(prepared, { recursive: true, force: true }), rm(dir, { recursive: true, force: true })]));
+	const text = await readFile(path.join(prepared, "agent/models.json"), "utf8");
+	const parsed = JSON.parse(text);
+	assert.deepEqual(Object.keys(parsed.providers), ["keep-me"]);
+	assert.equal(parsed.providers["keep-me"].apiKey, "k1");
+	const mode = (await stat(path.join(prepared, "agent/models.json"))).mode & 0o777;
+	assert.equal(mode, 0o600);
 });
 
 // The live leg builds the image and boots it. It needs Docker and network;
