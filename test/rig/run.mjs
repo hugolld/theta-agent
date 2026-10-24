@@ -38,8 +38,15 @@ function fail(message) {
 	process.exit(1);
 }
 
+// spawnSync's env option replaces the environment rather than merging, so
+// an opts.env that rode alone would wipe PATH and every spawn after it would
+// die ENOENT. Always inherit, then overlay.
 function run(cmd, args, opts = {}) {
-	const result = spawnSync(cmd, args, { encoding: "utf8", ...opts });
+	const result = spawnSync(cmd, args, {
+		encoding: "utf8",
+		...opts,
+		env: { ...process.env, ...opts.env },
+	});
 	if (result.error) fail(`cannot run ${cmd}: ${result.error.message}`);
 	return result;
 }
