@@ -216,7 +216,9 @@ function main() {
 			`--session-dir /session --print "$RIG_PROMPT" < /dev/null 2> /session/stderr.txt; echo $?`,
 			{ env: { RIG_PROMPT: rest.join(" ") } },
 		);
-		const exitStatus = Number.parseInt(exitLine.trim(), 10);
+		// The echoed status is the last stdout line — the model's reply comes first.
+		const exitStatus = Number.parseInt(exitLine.trim().split("\n").at(-1) ?? "", 10);
+		if (!Number.isInteger(exitStatus)) fail(`cannot read the session exit status: ${JSON.stringify(exitLine.trim().split("\n").at(-1))}`);
 		writeFileSync(path.join(sessionDir, "exit-status"), `${exitStatus}\n`);
 		if (exitStatus === 124) writeFileSync(path.join(sessionDir, "watchdog"), "fired\n");
 		if (exitStatus !== 0) fail(`session exited ${exitStatus} — evidence in ${sessionDir}`);
