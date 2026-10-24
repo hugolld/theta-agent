@@ -16,11 +16,11 @@
 // into the container's ephemeral home, never printed.
 
 import { spawnSync } from "node:child_process";
-import { createHash } from "node:crypto";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { gitStatus, manifestSha256 } from "../../scripts/dogfood-gates.mjs";
 
 const rigDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(rigDir, "../..");
@@ -172,8 +172,13 @@ function main() {
 	}
 	if (subcommand !== "run" && subcommand !== "shell") fail(`unknown subcommand: ${subcommand}`);
 
-	const status = run("git", ["-C", repoRoot, "status", "--porcelain", "--untracked-files=all"]).stdout;
-	if (status.trim()) fail("working tree dirty — commit first");
+	let status;
+	try {
+		status = gitStatus(repoRoot);
+	} catch (error) {
+		fail(`cannot read git status: ${error.message}`);
+	}
+	if (status) fail("working tree dirty — commit first");
 	headSha = run("git", ["-C", repoRoot, "rev-parse", "HEAD"]).stdout.trim();
 
 	let providerDir;
@@ -192,10 +197,7 @@ function main() {
 			writeFileSync(path.join(sessionDir, "pre-head"), headSha);
 			writeFileSync(path.join(sessionDir, "prompt.txt"), prompt);
 			writeFileSync(path.join(sessionDir, "expected-model"), `${flags.provider} ${flags.model}\n`);
-			writeFileSync(
-				path.join(sessionDir, "manifest-sha256"),
-				createHash("sha256").update(readFileSync(path.join(repoRoot, "package.json"))).digest("hex"),
-			);
+			writeFileSync(path.join(sessionDir, "manifest-sha256"), manifestSha256(repoRoot));
 		}
 
 		startContainer(providerDir);
@@ -210,16 +212,19 @@ function main() {
 
 		// GNU timeout stands in for the host recipe's hand-rolled watchdog:
 		// SIGTERM at the bound, SIGKILL 15s later, 124 recorded on timeout.
-		const exitLine = execIn(
+		// The exit status lands as a file, exactly as the host recipe writes
+		// it — stdout belongs to the model's reply, and nothing glues onto it.
+		execIn(
 			`cd "$HOME/theta" && timeout --signal=TERM --kill-after=15 ${flags.timeout} ` +
 			`node bin/theta.mjs --dev --provider ${flags.provider} --model ${flags.model} ` +
-			`--session-dir /session --print "$RIG_PROMPT" < /dev/null 2> /session/stderr.txt; echo $?`,
+			`--session-dir /session --print "$RIG_PROMPT" < /dev/null 2> /session/stderr.txt; echo $? > /session/exit-status`,
 			{ env: { RIG_PROMPT: rest.join(" ") } },
 		);
-		// The echoed status is the last stdout line — the model's reply comes first.
-		const exitStatus = Number.parseInt(exitLine.trim().split("\n").at(-1) ?? "", 10);
-		if (!Number.isInteger(exitStatus)) fail(`cannot read the session exit status: ${JSON.stringify(exitLine.trim().split("\n").at(-1))}`);
-		writeFileSync(path.join(sessionDir, "exit-status"), `${exitStatus}\n`);
+		const exitStatus = Number.parseInt(
+			readFileSync(path.join(sessionDir, "exit-status"), "utf8").trim(),
+			10,
+		);
+		if (!Number.isInteger(exitStatus)) fail("cannot read the session exit-status file");
 		if (exitStatus === 124) writeFileSync(path.join(sessionDir, "watchdog"), "fired\n");
 		if (exitStatus !== 0) fail(`session exited ${exitStatus} — evidence in ${sessionDir}`);
 

@@ -10,7 +10,8 @@ FROM python:3.12-slim-bookworm@sha256:6a0e06f5ba0b373d051aabd3fffb9b873f27f9a2a3
 # No apt stage: on constrained networks transparent HTTP proxies stall large
 # apt transfers, and every needed tool rides an official image anyway. The
 # full node image ships git and ca-certificates; bookworm python matches its
-# glibc generation, so the /usr/local copy links cleanly.
+# glibc generation, so the /usr/local copy links cleanly. No uv either: the
+# skill scripts import the standard library only, python3 covers them.
 FROM node:22-bookworm@sha256:63538dfe497cc29dfafdda25ada09b46db68a3f4cc205abf1f5d6bf0913f3384
 
 COPY --from=python /usr/local /usr/local
