@@ -137,14 +137,14 @@ function startContainer(providerDir) {
 	const mounts = ["-v", `${sourceDir}:/pkg-src:ro`, "-v", `${providerDir}:/pi-ro:ro`];
 	if (sessionDir) mounts.push("-v", `${sessionDir}:/session`);
 	docker("run", "-d", "--name", container, ...mounts, image, "sleep", "infinity");
-	execIn(`git clone --quiet /pkg-src /theta && git -C /theta checkout --quiet --detach ${headSha}`);
+	execIn(`git clone --quiet /pkg-src "$HOME/theta" && git -C "$HOME/theta" checkout --quiet --detach ${headSha}`);
 	execIn("mkdir -p ~/.pi/agent && cp /pi-ro/agent/models.json ~/.pi/agent/models.json && chmod 600 ~/.pi/agent/models.json");
 }
 
 // The auditor binds cwd to the checkout, so run it from /theta and capture
 // the attestation for the evidence dir; printed output is the record.
 function audit() {
-	const attestation = execIn("cd /theta && node scripts/audit-dogfood.mjs /session");
+	const attestation = execIn('cd "$HOME/theta" && node scripts/audit-dogfood.mjs /session');
 	writeFileSync(path.join(sessionDir, "attestation.txt"), attestation);
 	console.log(attestation);
 }
@@ -204,7 +204,7 @@ function main() {
 		// GNU timeout stands in for the host recipe's hand-rolled watchdog:
 		// SIGTERM at the bound, SIGKILL 15s later, 124 recorded on timeout.
 		const exitLine = execIn(
-			`cd /theta && timeout --signal=TERM --kill-after=15 ${flags.timeout} ` +
+			`cd "$HOME/theta" && timeout --signal=TERM --kill-after=15 ${flags.timeout} ` +
 			`node bin/theta.mjs --dev --provider ${flags.provider} --model ${flags.model} ` +
 			`--session-dir /session --print "$RIG_PROMPT" < /dev/null 2> /session/stderr.txt; echo $?`,
 			{ env: { RIG_PROMPT: rest.join(" ") } },

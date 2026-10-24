@@ -21,8 +21,7 @@ RUN npm install -g @earendil-works/pi-coding-agent@1.4.0 \
 
 # Non-root: the session inside owns its home and nothing else.
 RUN useradd --create-home --shell /bin/bash theta
-
 USER theta
-WORKDIR /work
+WORKDIR /home/theta
 
 CMD ["pi", "--version"]
