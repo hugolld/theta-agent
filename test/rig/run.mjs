@@ -31,6 +31,7 @@ const defaultModel = "glm-5.3-flash";
 
 let sessionDir;
 let headSha;
+let sourceDir;
 
 function fail(message) {
 	console.error(`rig: ${message}`);
@@ -120,9 +121,20 @@ function execIn(command, opts = {}) {
 	return result.stdout;
 }
 
+// A worktree's .git is a pointer file naming a host path, which does not
+// survive the mount — so the clone source is always a scratch clone staged
+// host-side, where the pointer resolves. The container then clones /pkg-src,
+// a plain repo, at the pinned HEAD.
+function stageCloneSource() {
+	const dir = mkdtempSync(path.join(tmpdir(), "rig-src-"));
+	const staged = run("git", ["clone", "--quiet", "--no-hardlinks", repoRoot, dir]);
+	if (staged.status !== 0) fail(`cannot stage a clone of ${repoRoot}: ${staged.stderr}`);
+	return dir;
+}
+
 function startContainer(providerDir) {
 	docker("rm", "-f", container); // a leftover from a killed run
-	const mounts = ["-v", `${repoRoot}:/pkg-src:ro`, "-v", `${providerDir}:/pi-ro:ro`];
+	const mounts = ["-v", `${sourceDir}:/pkg-src:ro`, "-v", `${providerDir}:/pi-ro:ro`];
 	if (sessionDir) mounts.push("-v", `${sessionDir}:/session`);
 	docker("run", "-d", "--name", container, ...mounts, image, "sleep", "infinity");
 	execIn(`git clone --quiet /pkg-src /theta && git -C /theta checkout --quiet --detach ${headSha}`);
@@ -160,6 +172,7 @@ function main() {
 	let providerDir;
 	try {
 		providerDir = prepareProviderConfig(flags.provider);
+		sourceDir = stageCloneSource();
 
 		if (subcommand === "run") {
 			const prompt = rest.join(" ");
@@ -205,6 +218,7 @@ function main() {
 		console.log(`rig: evidence in ${sessionDir}`);
 	} finally {
 		run("docker", ["rm", "-f", container], { stdio: "ignore" });
+		rmSync(sourceDir ?? "", { recursive: true, force: true });
 		rmSync(providerDir ?? "", { recursive: true, force: true });
 	}
 }
