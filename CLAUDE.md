@@ -19,6 +19,7 @@ Current state: 0.3.0 — M3 is shipped. The M1 base ships the `theta` launcher (
 
 - Conventional commits (`feat:`, `chore:`, `docs:`). Tabs and existing field order in `package.json`.
 - Extract a shared helper as soon as the same logic shape appears twice — tree-wide, not per-module: a module boundary created mid-strike is where duplication is born, so the shared shape gets one home before the second caller (tests included). Copying code verbatim is for separately shipped trees only — skill-to-skill, never within a file.
+- Failure paths in runner and helper scripts: child-process spawns inherit the environment (overlay onto `process.env`, never replace it — the eslint `spawn-env-inherit` rule enforces direct call sites); `finally` cleanup never masks the primary failure; a machine-readable result lands as a file when its channel is shared with payload output (the exit-status rule).
 - When a change supersedes text in a steering doc (`CLAUDE.md`, `GLOSSARY.md`, `docs/adr/`), the same strike edits that text.
 - `.npmrc` pins the official registry (the machine default is npmmirror).
 - PR bodies and repo prose are public surfaces: cluster account names, SSH aliases, and node names never enter them — they live in `CLAUDE.local.md`, and GitHub keeps body edit history, so a scrub-after is not undo. (The cluster's own name is public — ADR 0004 names it.) The Spec review checks.
