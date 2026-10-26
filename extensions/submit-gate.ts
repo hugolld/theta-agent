@@ -23,7 +23,7 @@ import type {
  * here. pi refuses a second server whose name differs only in `-` vs `_`,
  * so this prefix names exactly one server namespace either way.
  */
-const GATEWAY_PREFIX = "mcp__theta_compute__";
+export const GATEWAY_PREFIX = "mcp__theta_compute__";
 
 /**
  * The gate only judges calls in the gateway's namespace, and narrowing the

@@ -14,6 +14,7 @@ Current state: 0.3.0 — M3 is shipped. The M1 base ships the `theta` launcher (
 - Keep the `pi-package` keyword (gallery eligibility) and the explicit `pi` manifest (`extensions`, `skills`) in `package.json`. Manifest fields are arrays of strings — pi silently drops bare-string fields (guarded by `test/manifest.test.mjs`).
 - Never install `pi-mcp-adapter` — an installed adapter replaces pi's built-in MCP support (native since pi 0.99).
 - Target pi ≥ 0.99 and Node ≥ 22. Package loading uses `pi -e <source>`; local-path sources load without copying, so a repo checkout works exactly like the installed package.
+- The pi extension API is read from the installed package, not the web: `docs/extensions.md` (events, the tool-call pipeline, UI modes), `docs/mcp.md` (tool naming and exposure — MCP tool names are sanitized to `[A-Za-z0-9_]`, so a server hyphen registers as an underscore), and `dist/core/extensions/types.d.ts` for the exact event and context shapes.
 
 ## Conventions
 
@@ -35,7 +36,7 @@ Current state: 0.3.0 — M3 is shipped. The M1 base ships the `theta` launcher (
 4. Before marking the PR ready, run `node scripts/check-strike.mjs <spec#>` — every child of the spec issue must be landed on the branch or already closed (a closeout ticket for the post-merge steps is the expected open exception; a childless issue is a maintenance strike). The same gate fails a PR whose body attests dogfood evidence at an SHA that is not HEAD — recapture the pair, never rebind the words — and refuses while any PR check is non-pass, pending included (M3's red `verify` sat four hours past ready; only merge-day habit caught it). Refresh the PR's title and body to cover every landed child, then mark the PR ready and run a dedicated PR review pass before merging to `main`. For milestone-sized PRs, consider one external-model review round before merge — M2's Codex round caught a defect class two same-model rounds missed.
 5. The adversarial loop's stop condition is judgment: once findings require crafted attack strings that honest usage would never produce, stop, record them as a residual trust boundary, and move on. "Findings stay wording-level for two consecutive rounds" applies only to findings a realistic session could trigger; if it has not fired within ~10 rounds, it will not — an adversarial reviewer regenerates findings indefinitely, and "clean" is not a stopping condition it can reach.
 6. While a review round is in flight, hold further commits on that branch; when its report arrives, triage against the SHA it reviewed.
-7. At teardown, finish every git step — including the local branch delete — before removing the worktree; a session standing in a removed worktree loses its git context (the S3 retro session removed its worktree first and stranded its own cleanup).
+7. At teardown, run the sequence from the main checkout — a git command that runs inside the worktree acts on the feature branch (the S4 retro's stray pull fast-forwarded it) — and finish every git step, including the local branch delete, before removing the worktree; a session standing in a removed worktree loses its git context (the S3 retro session removed its worktree first and stranded its own cleanup).
 
 ## Publishing
 
