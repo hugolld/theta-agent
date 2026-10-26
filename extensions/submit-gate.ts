@@ -16,8 +16,14 @@ import type {
  * is destructive. M5's gate framework extends this shape.
  */
 
-/** pi registers MCP tools as `mcp__<server>__<tool>` (pi MCP docs). */
-const GATEWAY_PREFIX = "mcp__theta-compute__";
+/**
+ * pi registers MCP tools as `mcp__<server>__<tool>`, sanitized: every
+ * character outside [A-Za-z0-9_] becomes `_` (pi's `createMcpToolName`) —
+ * so the hyphen in the server's registered name lands as an underscore
+ * here. pi refuses a second server whose name differs only in `-` vs `_`,
+ * so this prefix names exactly one server namespace either way.
+ */
+const GATEWAY_PREFIX = "mcp__theta_compute__";
 
 /**
  * The gate only judges calls in the gateway's namespace, and narrowing the

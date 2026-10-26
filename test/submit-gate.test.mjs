@@ -12,11 +12,15 @@ const { createSubmitGate, default: registerSubmitGate } = await jiti.import(
 	"../extensions/submit-gate.ts",
 );
 
-const SERVER = "mcp__theta-compute__";
+// pi sanitizes registered MCP tool names: every character outside
+// [A-Za-z0-9_] becomes `_` (pi's createMcpToolName), so the server's
+// hyphen lands as an underscore — the stub must spell the names the way
+// pi actually registers them, or it mirrors a bug instead of the contract.
+const SERVER = "mcp__theta_compute__";
 
-// The annotations the gateway server declares today (gateway/server.py);
-// the four read-only tools, the two transfer tools that are neither, and
-// the three destructive ones the gate confirms.
+// The annotations the gateway server declares today (gateway/server.py):
+// the four read-only tools, the one transfer tool that is neither
+// (stage_files), and the three destructive ones the gate confirms.
 const gatewayTool = (name, annotations) => ({
 	name: `${SERVER}${name}`,
 	annotations,
@@ -47,6 +51,15 @@ function stubContext(answer) {
 	};
 }
 
+const makeEvent = (toolName, input = {}) => ({
+	type: "tool_call",
+	toolCallId: "t1",
+	toolName,
+	input,
+});
+
+const escapeRegExp = (core) => core.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
 const makeGate = () => createSubmitGate({ getAllTools: () => TOOL_INFOS });
 
 test("ungated gateway calls pass through without touching the confirm", async () => {
@@ -55,7 +68,7 @@ test("ungated gateway calls pass through without touching the confirm", async ()
 	// still ungated: only the destructive hint confirms.
 	for (const name of ["job_status", "job_logs", "list_environments", "stage_files", "fetch_artifacts"]) {
 		const ctx = stubContext(false);
-		const result = await gate({ type: "tool_call", toolCallId: "t1", toolName: `${SERVER}${name}`, input: {} }, ctx);
+		const result = await gate(makeEvent(`${SERVER}${name}`), ctx);
 		assert.equal(result, undefined, `${name} should pass through`);
 		assert.deepEqual(ctx.calls, [], `${name} must not prompt`);
 	}
@@ -69,12 +82,12 @@ test("every destructive gateway call prompts, and approval passes it through", a
 		["run_alphafold3", { run_name: "af3-run-2", fold_input: {} }],
 	]) {
 		const ctx = stubContext(true);
-		const result = await gate({ type: "tool_call", toolCallId: "t1", toolName: `${SERVER}${name}`, input }, ctx);
+		const result = await gate(makeEvent(`${SERVER}${name}`, input), ctx);
 		assert.equal(result, undefined, `${name} approved should pass through`);
 		assert.equal(ctx.calls.length, 1, `${name} must prompt exactly once`);
 		const [title, message] = ctx.calls[0];
 		assert.equal(typeof title, "string");
-		assert.match(message, new RegExp(name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+		assert.match(message, new RegExp(escapeRegExp(name)));
 	}
 });
 
@@ -82,30 +95,21 @@ test("a refused destructive call is blocked with a reason naming the gate", asyn
 	const gate = makeGate();
 	for (const name of ["submit_job", "cancel_job", "run_alphafold3"]) {
 		const ctx = stubContext(false);
-		const result = await gate(
-			{ type: "tool_call", toolCallId: "t1", toolName: `${SERVER}${name}`, input: {} },
-			ctx,
-		);
+		const result = await gate(makeEvent(`${SERVER}${name}`), ctx);
 		assert.deepEqual(Object.keys(result ?? {}).sort(), ["block", "reason"]);
 		assert.equal(result.block, true, `${name} refused must be blocked`);
 		assert.match(result.reason, /submit gate/);
-		assert.match(result.reason, new RegExp(name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+		assert.match(result.reason, new RegExp(escapeRegExp(name)));
 	}
 });
 
 test("the confirm message carries the call's target", async () => {
 	const gate = makeGate();
 	const ctx = stubContext(true);
-	await gate(
-		{ type: "tool_call", toolCallId: "t1", toolName: `${SERVER}submit_job`, input: { run_name: "af3-run-1" } },
-		ctx,
-	);
+	await gate(makeEvent(`${SERVER}submit_job`, { run_name: "af3-run-1" }), ctx);
 	assert.match(ctx.calls[0][1], /af3-run-1/);
 	const ctx2 = stubContext(true);
-	await gate(
-		{ type: "tool_call", toolCallId: "t2", toolName: `${SERVER}cancel_job`, input: { job_id: "1851277" } },
-		ctx2,
-	);
+	await gate(makeEvent(`${SERVER}cancel_job`, { job_id: "1851277" }), ctx2);
 	assert.match(ctx2.calls[0][1], /1851277/);
 });
 
@@ -114,11 +118,11 @@ test("every non-gateway call passes through ungated", async () => {
 	for (const toolName of [
 		"bash",
 		"write",
-		"mcp__other-server__submit_job",
+		"mcp__other_server__submit_job",
 		`${SERVER}not_a_registered_tool`,
 	]) {
 		const ctx = stubContext(false);
-		const result = await gate({ type: "tool_call", toolCallId: "t1", toolName, input: {} }, ctx);
+		const result = await gate(makeEvent(toolName), ctx);
 		assert.equal(result, undefined, `${toolName} is not the gateway's to gate`);
 		assert.deepEqual(ctx.calls, [], `${toolName} must not prompt`);
 	}
@@ -136,9 +140,6 @@ test("the default export registers the gate as the tool_call handler", async () 
 	assert.deepEqual(registered.map(([event]) => event), ["tool_call"]);
 	const [, handler] = registered[0];
 	const ctx = stubContext(false);
-	const result = await handler(
-		{ type: "tool_call", toolCallId: "t1", toolName: `${SERVER}submit_job`, input: {} },
-		ctx,
-	);
+	const result = await handler(makeEvent(`${SERVER}submit_job`), ctx);
 	assert.equal(result.block, true);
 });
