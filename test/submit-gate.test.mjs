@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
+import path from "node:path";
 import { test } from "node:test";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { createJiti } from "jiti";
 
 // The submit gate is the package's first tool-call-pipeline extension (spec
@@ -8,7 +10,7 @@ import { createJiti } from "jiti";
 // confirm on the handler context and a stub getAllTools mirroring the
 // gateway server's shipped tool annotations.
 const jiti = createJiti(import.meta.url);
-const { createSubmitGate, default: registerSubmitGate } = await jiti.import(
+const { createSubmitGate, GATEWAY_PREFIX, default: registerSubmitGate } = await jiti.import(
 	"../extensions/submit-gate.ts",
 );
 
@@ -61,6 +63,29 @@ const makeEvent = (toolName, input = {}) => ({
 const escapeRegExp = (core) => core.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 const makeGate = () => createSubmitGate({ getAllTools: () => TOOL_INFOS });
+
+// The S4 retro's pin: the gate's prefix must match the tool names pi
+// actually registers. The stub above spells the sanitized form by hand —
+// this test compares it against pi's own createMcpToolName, so a prefix
+// edited wrong (the #74 review bug: a hyphen where pi registers an
+// underscore) or a pi sanitization change goes red here instead of
+// shipping an inert gate. The deep module is not a root export of
+// pi-coding-agent; the resolved path rides the installed tree the suite
+// already tests against.
+test("the gate's prefix matches the names pi registers for the server", async () => {
+	const indexUrl = import.meta.resolve("@earendil-works/pi-coding-agent");
+	const toolsJs = pathToFileURL(
+		path.join(path.dirname(fileURLToPath(indexUrl)), "extensions", "mcp", "tools.js"),
+	);
+	const { createMcpToolName } = await import(toolsJs);
+	for (const tool of ["submit_job", "cancel_job", "run_alphafold3", "job_status"]) {
+		const registered = createMcpToolName("theta-compute", tool);
+		assert.ok(
+			registered.startsWith(GATEWAY_PREFIX),
+			`${registered} does not carry the gate's prefix ${GATEWAY_PREFIX}`,
+		);
+	}
+});
 
 test("ungated gateway calls pass through without touching the confirm", async () => {
 	const gate = makeGate();
