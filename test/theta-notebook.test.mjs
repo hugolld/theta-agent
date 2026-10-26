@@ -685,6 +685,7 @@ test("job-record usage errors exit 1 and write nothing into the project", { skip
 		{ name: "confidence with a job record", args: ["--confidence", "x", "--on", "hyp-0001", "--job-record", jobRecordFixture, "--grade", "asserted"] },
 		{ name: "job record without grade", args: ["--method", "x", "--job-record", jobRecordFixture] },
 		{ name: "grade without a job record", args: ["--method", "x", "--grade", "asserted"] },
+		{ name: "cross-checked on a job record", args: ["--method", "x", "--job-record", jobRecordFixture, "--grade", "cross-checked"] },
 		{ name: "job record file missing", args: ["--method", "x", "--job-record", "/nonexistent/record.json", "--grade", "asserted"] },
 		{ name: "job record not JSON", args: ["--method", "x", "--grade", "asserted", "--job-record", await badRecord("not-json.json", "{oops")] },
 		{ name: "job record not an object", args: ["--method", "x", "--grade", "asserted", "--job-record", await badRecord("array.json", "[]")] },

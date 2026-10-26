@@ -46,11 +46,11 @@ node test/rig/run.mjs build
 node test/rig/run.mjs run "<prompt>"
 ```
 
-Spot-check leg arguments ride `--leg`, repeatable, in the auditor's leg order — the attestation is then captured clean-room, from the clone:
+Spot-check leg arguments ride `--leg`, repeatable, one per auditor leg slot in its order (skill, script, notebook) — `-` skips a slot, so a script-plus-notebook capture runs the skill leg as `-`:
 
 ```sh
 node test/rig/run.mjs run "<real task routing into the skill>" \
-  --leg skills/theta-notebook/scripts/notebook.py --leg .theta
+  --leg - --leg skills/theta-notebook/scripts/notebook.py --leg .theta
 ```
 
 The runner gates on a clean tree host-side, records the pre-run HEAD and `package.json` digest, and prepares the one credential the rig receives: the target provider's key, extracted from the host pi config into a 0600 temp dir and mounted read-only. Inside, the checkout is a fresh clone of the pinned HEAD, staged through a host-side scratch clone (a worktree's `.git` pointer names a host path and does not survive the mount) — clean by construction, writable where the notebook leg needs `.theta/` — the session dir mounts at `/session` so the transcript and process files land on the host as they are written, and the auditor runs from the clone, where every path it binds is self-consistent; the attestation is printed and saved beside the evidence. Evidence lands under the operator's evidence root unless `--session-dir` says otherwise.

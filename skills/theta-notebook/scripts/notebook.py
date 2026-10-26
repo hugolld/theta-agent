@@ -43,9 +43,10 @@ run name, template (null for a raw submit), argument digest, final state,
 observed date, and the artifact manifest when the artifacts were fetched
 (paths and sizes, never file contents). It is mutually exclusive with
 `--evidence` -- one evidence item per call -- and shares the pairing rule:
-`--grade` is required exactly when either is given. The grade `re-executed`
-claims the machinery recomputed the result, so the recorder accepts it only
-when the record carries the artifact manifest.
+`--grade` is required exactly when either is given, and the record's grades
+are `asserted` and `re-executed` (cross-checked is a retrieval's mark). The
+grade `re-executed` claims the machinery recomputed the result, so the
+recorder accepts it only when the record carries the artifact manifest.
 
 Contract basis: docs/adr/0003-provenance-is-a-project-notebook.md,
 docs/adr/0004-compute-is-a-native-mcp-server.md, and the connector-script
@@ -179,8 +180,8 @@ def build_parser() -> Parser:
 	parser = Parser(
 		prog="notebook.py",
 		description="Append one dated provenance entry to the project notebook in "
-		".theta/, storing the connector's structured output as a content-addressed "
-		"evidence item when the entry carries evidence.",
+		".theta/, storing the evidence source's structured output as a "
+		"content-addressed evidence item when the entry carries evidence.",
 	)
 	types = parser.add_mutually_exclusive_group(required=True)
 	types.add_argument(
@@ -226,8 +227,9 @@ def build_parser() -> Parser:
 		"--grade",
 		choices=GRADES,
 		help="the evidence grade carried by the recorded evidence item -- and "
-		"by the observation entry itself; required exactly when --evidence is "
-		"given (a trust mark on a source is a decision, never an accident)",
+		"by the observation entry itself; required exactly when --evidence or "
+		"--job-record is given (a trust mark on a source is a decision, never "
+		"an accident)",
 	)
 	parser.add_argument(
 		"--supports",
@@ -287,6 +289,20 @@ def field_date(container: dict, key: str, message: str) -> str:
 	"""One calendar-date string field, or a usage refusal naming `message`."""
 	value = container.get(key)
 	if not isinstance(value, str) or not calendar_date(value):
+		raise RecorderError(f"notebook.py: {message}", 1)
+	return value
+
+
+def field_uint(container: dict, key: str, message: str) -> int | None:
+	"""One optional non-negative integer field, or a usage refusal.
+
+	A JSON `true`/`false` is not an integer even though Python's bool
+	subclasses int -- the manifest's counts refuse it like any other type.
+	"""
+	value = container.get(key)
+	if value is not None and (
+		isinstance(value, bool) or not isinstance(value, int) or value < 0
+	):
 		raise RecorderError(f"notebook.py: {message}", 1)
 	return value
 
@@ -392,24 +408,18 @@ def validate_manifest(artifacts: object, run_name: str) -> dict:
 			"path",
 			"every artifacts.files entry needs a non-empty string 'path'",
 		)
-		size = entry.get("size")
-		if size is not None and (
-			isinstance(size, bool) or not isinstance(size, int) or size < 0
-		):
-			raise RecorderError(
-				"notebook.py: --job-record artifacts file 'size', when present, "
-				"must be a non-negative integer",
-				1,
-			)
-	total = artifacts.get("total_bytes")
-	if total is not None and (
-		isinstance(total, bool) or not isinstance(total, int) or total < 0
-	):
-		raise RecorderError(
-			"notebook.py: --job-record artifacts 'total_bytes', when present, "
-			"must be a non-negative integer",
-			1,
+		field_uint(
+			entry,
+			"size",
+			"--job-record artifacts file 'size', when present, must be a "
+			"non-negative integer",
 		)
+	field_uint(
+		artifacts,
+		"total_bytes",
+		"--job-record artifacts 'total_bytes', when present, must be a "
+		"non-negative integer",
+	)
 	fetched_run = artifacts.get("run_name")
 	if fetched_run is not None and fetched_run != run_name:
 		raise RecorderError(
@@ -636,6 +646,12 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
 		fail(
 			"notebook.py: --grade is required exactly when --evidence or "
 			"--job-record is given",
+			1,
+		)
+	if args.job_record is not None and args.grade == "cross-checked":
+		fail(
+			"notebook.py: --grade cross-checked is not accepted with "
+			"--job-record; a job record is graded asserted or re-executed",
 			1,
 		)
 	if args.supports is not None and args.type != "observation":

@@ -1833,6 +1833,13 @@ test("auditNotebook enforces the typed job-record item shape", (t) => {
 			re: /query/,
 		},
 		{
+			name: "item grade cross-checked",
+			mut: jobItemMut((i) => {
+				i.grade = "cross-checked";
+			}),
+			re: /asserted or re-executed/,
+		},
+		{
 			name: "item is neither shape (job_id and endpoints missing)",
 			mut: jobItemMut((i) => {
 				delete i.job_id;

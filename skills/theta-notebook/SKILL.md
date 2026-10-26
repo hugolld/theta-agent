@@ -207,7 +207,9 @@ and passes it to `--job-record` as JSON (path or `-`):
   address; the snapshot is the assembled record byte-for-byte.
 - `re-executed` claims the machinery recomputed the result, so it is honest
   only once the artifacts were fetched — the recorder refuses it without
-  the manifest. Until then, `asserted`.
+  the manifest. Until then, `asserted`. Those are the record's two grades:
+  `cross-checked` is a retrieval's mark, and the recorder refuses it on a
+  job record.
 
 ## Grades
 

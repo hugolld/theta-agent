@@ -334,6 +334,10 @@ const scanSurfaces = [
 	// The gateway README carries the compute headwords' working vocabulary
 	// (compute gateway, audit line) through the M4 strikes.
 	"gateway/README.md",
+	// connector-scripts.md carries the connector headwords' working
+	// vocabulary, extended by the M4 job-record strike to the evidence-item
+	// and gateway vocabulary.
+	"docs/agents/connector-scripts.md",
 	// dogfood.md carries the Attestation leg headword — the auditor's legs
 	// and their registry are its working vocabulary.
 	"docs/agents/dogfood.md",

@@ -206,9 +206,12 @@ const NOTEBOOK_TYPES = {
 };
 
 // The typed-shape guards the notebook checks share: a plain JSON object
-// (arrays and null are not records), and a non-empty string field.
+// (arrays and null are not records), a non-empty string field, and an
+// optional non-negative integer field (a JSON boolean is not an integer).
 const isPlainObject = (x) => typeof x === "object" && x !== null && !Array.isArray(x);
 const nonEmptyString = (x) => typeof x === "string" && x !== "";
+const optionalNonNegativeInt = (x) =>
+	x === undefined || (typeof x === "number" && Number.isInteger(x) && x >= 0);
 
 // Reads one cited snapshot and derives the evidence fields the recorder
 // derives from it (the recorder parsers' logic, mirrored): the snapshot must
@@ -346,17 +349,11 @@ function jobRecordShape(payload, shapeError) {
 			if (!nonEmptyString(entry.path)) {
 				throw shapeError("every artifacts.files entry needs a non-empty string 'path'");
 			}
-			if (
-				entry.size !== undefined &&
-				(typeof entry.size !== "number" || !Number.isInteger(entry.size) || entry.size < 0)
-			) {
+			if (!optionalNonNegativeInt(entry.size)) {
 				throw shapeError("artifacts file 'size', when present, must be a non-negative integer");
 			}
 		}
-		if (
-			artifacts.total_bytes !== undefined &&
-			(typeof artifacts.total_bytes !== "number" || !Number.isInteger(artifacts.total_bytes) || artifacts.total_bytes < 0)
-		) {
+		if (!optionalNonNegativeInt(artifacts.total_bytes)) {
 			throw shapeError("artifacts 'total_bytes', when present, must be a non-negative integer");
 		}
 		if (artifacts.run_name !== undefined && artifacts.run_name !== payload.run_name) {
@@ -587,6 +584,13 @@ export function auditNotebook(thetaDirArg) {
 			if (!NOTEBOOK_GRADES.has(item.grade)) {
 				throw new Error(
 					`${at} grade: expected one of asserted, cross-checked, re-executed, got ${JSON.stringify(item.grade)}`,
+				);
+			}
+			// The recorder refuses cross-checked on a job record (a retrieval's
+			// mark); a notebook carrying it anyway is not recorder-shaped.
+			if (itemIsJob && item.grade === "cross-checked") {
+				throw new Error(
+					`${at} grade: a job-record item is graded asserted or re-executed, got ${JSON.stringify(item.grade)}`,
 				);
 			}
 			if (item.supports !== undefined) {
