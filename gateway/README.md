@@ -281,8 +281,9 @@ gateway/deploy.sh <login-node-alias> <remote-dir> <cluster-user> <token-file> [p
 
 5. Register the server with pi once, user-level (the default file), so
    the token lives only in the user's own `~/.pi/agent/mcp.json` — never
-   in git (the theta-side strike owns the researcher-facing setup; this
-   is the one-time owner entry, verified against pi 0.99):
+   in git. This command is the researcher-facing setup too; its home in
+   the docs is the root README's "Compute gateway setup" section (verified
+   against pi 0.99):
 
    ```sh
    pi mcp add theta-compute --url http://127.0.0.1:8421/mcp \
