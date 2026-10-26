@@ -80,6 +80,7 @@
 	"self-authored": [
 		"theta-research-loop",
 		"theta-lit-search",
-		"theta-notebook"
+		"theta-notebook",
+		"theta-compute"
 	]
 }

@@ -73,7 +73,7 @@ The evidence item a compute job appends to the project notebook as a method entr
 _Avoid_: run receipt, job receipt
 
 **Submit gate**:
-The permission extension that confirms `submit_job` and `cancel_job` before they reach the compute gateway; read-only gateway tools run ungated. M4 ships the minimal form; M5's gate framework extends it.
+The permission extension that confirms the compute gateway's destructive calls — `submit_job`, `cancel_job`, and `run_alphafold3`, the calls the gateway's own MCP annotations mark destructive — before they reach the gateway; read-only gateway tools run ungated. M4 ships the minimal form; M5's gate framework extends it.
 _Avoid_: approval gate, consent prompt
 
 **Clean-room rig**:

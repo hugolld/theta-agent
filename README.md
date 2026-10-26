@@ -91,6 +91,38 @@ theta
 
 That launches pi with the Theta package preloaded.
 
+## Compute gateway setup
+
+Cluster compute rides the `theta-compute` compute gateway — an MCP server on
+your institution's Slurm login node (see
+[gateway/README.md](gateway/README.md)). Setup is two steps, both one-time;
+the cluster-side deploy of the gateway itself is the owner's, per the
+phase-0 recipe in the gateway README.
+
+1. **Register the server with pi, user-level** — direct exposure, the model
+   calls the gateway's tools themselves; the bearer token lives only in
+   your own `~/.pi/agent/mcp.json`, never in any repo:
+
+   ```sh
+   pi mcp add theta-compute --url http://127.0.0.1:8421/mcp \
+     --header "Authorization=Bearer <token>"
+   ```
+
+2. **Open the port-forward while you work** (phase-0 runs the gateway bound
+   to loopback on the login node; your machine reaches it through the
+   tunnel):
+
+   ```sh
+   ssh -N -L 8421:127.0.0.1:8421 <login-node-alias>
+   ```
+
+With the forward up, a session's compute tasks run through the gateway's
+tools — staging inputs, submitting, polling status, fetching artifacts —
+under the doctrine of the `theta-compute` skill. Destructive calls
+(`submit_job`, `cancel_job`, `run_alphafold3`) prompt you for confirmation
+before they reach the cluster; read-only monitoring runs without prompts.
+If a call cannot connect, the forward is down — restart it and carry on.
+
 ## Vendored skills
 
 The research-loop skill library starts from the K-Dense

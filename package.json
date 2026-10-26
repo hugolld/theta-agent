@@ -52,6 +52,7 @@
 	"devDependencies": {
 		"@types/node": "^26.6.3",
 		"eslint": "^10.11.0",
+		"jiti": "^2.7.0",
 		"typescript": "^6.0.3",
 		"typescript-eslint": "^8.71.0",
 		"yaml": "^2.9.1"

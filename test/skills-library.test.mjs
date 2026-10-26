@@ -320,6 +320,8 @@ const scanSurfaces = [
 	"skills/theta-lit-search/references/arxiv.md",
 	"skills/theta-lit-search/references/semantic-scholar.md",
 	"skills/theta-notebook/SKILL.md",
+	// The gateway skill carries the compute doctrine and its headwords.
+	"skills/theta-compute/SKILL.md",
 	// ADRs that introduce glossary vocabulary are scan surfaces — ADR 0003
 	// carries the M3 provenance headwords, ADR 0004 the M4 compute headwords.
 	// Earlier ADRs stay off the list — ADR 0002 predates the Connector skill
