@@ -3,7 +3,7 @@ name: theta-compute
 description: Theta's compute doctrine - drives the theta-compute gateway (the compute gateway MCP server on the cluster's login node) through the whole Slurm job lifecycle, staging inputs, submitting, polling with discipline, fetching artifacts, and recording every job ID in the project notebook. Use when a research task needs cluster compute, an AlphaFold3 structure prediction, or the status, logs, or artifacts of a job an earlier session started. The model calls the gateway's tools directly; oversized inputs travel out-of-band by scp; destructive calls are confirmed by the submit gate before they reach the cluster.
 license: MIT
 metadata:
-  version: "0.1.0"
+  version: "0.2.0"
   authorship: self-authored
 ---
 
@@ -49,11 +49,16 @@ One run of the loop, in order:
 4. **Fetch** — `fetch_artifacts(run_name)` brings the run directory back
    (whole tree by default, named picks when the manifest is known). Same
    in-band cap; oversized outputs ride `scp` out of the run directory.
-5. **Record** — append the job record to the project notebook
-   (`theta-notebook`): the job ID, the gateway, the template or directives,
-   and the final state. A recorded job ID is durable — any later session can
-   re-fetch its artifacts or cross-check its state without this one's
-   memory.
+5. **Record** — close the run out in the project notebook. Assemble the job
+   record from the answers in hand — job ID, gateway, run name, template
+   (null for a raw submit), argument digest (the sha256 of the job's
+   canonical input), final state, and the artifact manifest when
+   `fetch_artifacts` answered (paths and sizes; strip the contents) — save
+   it as JSON, and append it through `theta-notebook`'s recorder with
+   `--method` and `--job-record`, graded `re-executed` when the artifacts
+   were fetched and `asserted` otherwise. A recorded job ID is durable —
+   any later session can re-fetch its artifacts or cross-check its state
+   without this one's memory.
 
 ## Poll discipline
 
