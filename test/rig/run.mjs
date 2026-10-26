@@ -55,7 +55,7 @@ function run(cmd, args, opts = {}) {
 // seconds to wake it. Wait it out instead of reporting a false failure.
 function docker(...args) {
 	const result = run("docker", args);
-	if (result.status !== 0) fail(`docker ${args[0]} exited ${result.status}`);
+	if (result.status !== 0) fail(`docker ${args[0]} exited ${result.status}\n${result.stderr}`);
 	return result.stdout;
 }
 

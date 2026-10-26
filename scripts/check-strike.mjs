@@ -142,6 +142,14 @@ function main(argv) {
 	// gh pr view needs the branch spelled out when --repo is passed (it
 	// cannot infer "current branch" across an explicit repository).
 	const branch = run("git branch --show-current").trim();
+	// The remote's default branch, without a second gh call; "main" covers
+	// clones where origin/HEAD is unset. A gate run from the default branch
+	// finds no PR by design — the misleading "no PR body" note sent a session
+	// to debug the wrong thing (#72), so the no-PR notes name that cause.
+	const defaultBranch = (
+		run("git symbolic-ref --short refs/remotes/origin/HEAD").trim().replace(/^origin\//, "") ||
+		"main"
+	);
 	const prBody = run(`gh pr view --repo ${repo} ${branch} --json body --jq .body`);
 	const head = run("git rev-parse HEAD").trim();
 	const freshness = evidenceFreshness(prBody, head);
@@ -157,6 +165,11 @@ function main(argv) {
 		console.log(`\nevidence fresh: PR body attests ${head}.`);
 	} else if (prBody) {
 		console.log("\nno evidence attestation in the PR body — freshness check skipped.");
+	} else if (branch === defaultBranch) {
+		console.log(
+			`\nno PR on the default branch (${branch}) — the gate reads the strike's ` +
+				"PR; run it from the strike worktree.",
+		);
 	} else {
 		console.log(
 			"\nno PR body available (no PR, empty body, or detached HEAD) — freshness check skipped.",
@@ -176,6 +189,11 @@ function main(argv) {
 	}
 	if (ci.verdict === "green") {
 		console.log("\nCI green: every PR check passes.");
+	} else if (branch === defaultBranch) {
+		console.log(
+			`\nno PR checks on the default branch (${branch}) — run the gate from the ` +
+				"strike worktree.",
+		);
 	} else {
 		console.log("\nno PR checks available (no PR yet, or gh failed) — CI check skipped.");
 	}
