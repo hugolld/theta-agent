@@ -1705,6 +1705,262 @@ test("auditNotebook binds each entry item to the snapshot it cites", (t) => {
 	}
 });
 
+// The job-record evidence shape (M4 S5, ADR 0004): a method entry whose
+// item is the assembled theta-compute job record, its snapshot the record
+// verbatim. The base mirrors the recorder's committed job-record fixture —
+// the same bytes, so the golden snapshot is a real one.
+const jobRecordBytes = fs.readFileSync("test/fixtures/notebook/job-record.json");
+const jobRecordHash = createHash("sha256").update(jobRecordBytes).digest("hex");
+const jobRecordManifest = JSON.parse(jobRecordBytes).artifacts;
+const baseJobItem = {
+	source: "theta-compute",
+	job_id: "12347",
+	template: "alphafold3",
+	arguments_digest: JSON.parse(jobRecordBytes).arguments_digest,
+	state: "COMPLETED",
+	artifacts: structuredClone(jobRecordManifest),
+	retrieved: "2026-10-25",
+	grade: "re-executed",
+	snapshot: `evidence/${jobRecordHash}.json`,
+};
+const baseJobEntry = {
+	id: "mth-0001",
+	type: "method",
+	date: "2026-10-26",
+	text: "AlphaFold3 fold of hen egg white lysozyme on the cluster",
+	evidence: [structuredClone(baseJobItem)],
+};
+function jobLine(mut = () => {}) {
+	const entry = structuredClone(baseJobEntry);
+	mut(entry);
+	return JSON.stringify(entry);
+}
+function jobItemMut(mut = () => {}) {
+	return (entry) => {
+		const item = structuredClone(baseJobItem);
+		mut(item);
+		entry.evidence[0] = item;
+	};
+}
+
+test("auditNotebook attests a job-record method entry and the two shapes side by side", (t) => {
+	const dir = makeThetaDir(t, {
+		notebookText: `${jobLine()}\n`,
+		snapshots: [[`${jobRecordHash}.json`, jobRecordBytes]],
+	});
+	const report = auditNotebook(dir);
+	assert.equal(report.entries, 1);
+	assert.equal(report.snapshots, 1);
+
+	// One notebook, both evidence shapes: the cache keeps the kinds apart.
+	const mixed = makeThetaDir(t, {
+		notebookText:
+			`${entryLine()}\n` +
+			jobLine((e) => {
+				e.id = "mth-0001";
+			}) +
+			"\n",
+		snapshots: [
+			[`${snapshotHash}.json`, evidenceBytes],
+			[`${jobRecordHash}.json`, jobRecordBytes],
+		],
+	});
+	const mixedReport = auditNotebook(mixed);
+	assert.equal(mixedReport.entries, 2);
+	assert.equal(mixedReport.snapshots, 2);
+
+	// The link rides a job-record item like any other (--supports).
+	const linked = makeThetaDir(t, {
+		notebookText:
+			`${entryLine()}\n` +
+			jobLine((e) => {
+				e.id = "obs-0001";
+				e.type = "observation";
+				e.grade = "re-executed";
+				e.evidence[0].supports = "hyp-0001";
+			}) +
+			"\n",
+		snapshots: [
+			[`${snapshotHash}.json`, evidenceBytes],
+			[`${jobRecordHash}.json`, jobRecordBytes],
+		],
+	});
+	assert.equal(auditNotebook(linked).entries, 2);
+});
+
+test("auditNotebook enforces the typed job-record item shape", (t) => {
+	const cases = [
+		{
+			name: "item job_id not digits",
+			mut: jobItemMut((i) => {
+				i.job_id = "abc47";
+			}),
+			re: /job_id/,
+		},
+		{
+			name: "item template missing",
+			mut: jobItemMut((i) => {
+				delete i.template;
+			}),
+			re: /template/,
+		},
+		{
+			name: "item template not a string or null",
+			mut: jobItemMut((i) => {
+				i.template = 3;
+			}),
+			re: /template/,
+		},
+		{
+			name: "item arguments_digest not a sha256 hex string",
+			mut: jobItemMut((i) => {
+				i.arguments_digest = "z".repeat(64);
+			}),
+			re: /arguments_digest/,
+		},
+		{
+			name: "item state empty",
+			mut: jobItemMut((i) => {
+				i.state = " ";
+			}),
+			re: /state/,
+		},
+		{
+			name: "item carries a query",
+			mut: jobItemMut((i) => {
+				i.query = "CRISPR gene therapy";
+			}),
+			re: /query/,
+		},
+		{
+			name: "item is neither shape (job_id and endpoints missing)",
+			mut: jobItemMut((i) => {
+				delete i.job_id;
+			}),
+			re: /job-record item/,
+		},
+		{
+			name: "item is both shapes (endpoints and job_id)",
+			mut: jobItemMut((i) => {
+				i.endpoints = ["esearch.fcgi"];
+			}),
+			re: /job-record item/,
+		},
+	];
+	for (const { name, mut, re } of cases) {
+		const dir = makeThetaDir(t, {
+			notebookText: `${jobLine(mut)}\n`,
+			snapshots: [[`${jobRecordHash}.json`, jobRecordBytes]],
+		});
+		assert.throws(() => auditNotebook(dir), re, `expected failure: ${name}`);
+	}
+});
+
+test("auditNotebook binds a job-record item to the snapshot it cites", (t) => {
+	const goodRecord = JSON.parse(jobRecordBytes);
+	// A drifted notebook: the snapshot holds `record` (content-addressed by
+	// its own bytes) and the item cites it, carrying `overrides` on the base
+	// item when the drift is on the item's side.
+	const driftDir = (t, record, overrides = {}) => {
+		const bytes = JSON.stringify(record);
+		const hash = createHash("sha256").update(bytes).digest("hex");
+		const item = {
+			...structuredClone(baseJobItem),
+			...overrides,
+			snapshot: `evidence/${hash}.json`,
+		};
+		return makeThetaDir(t, {
+			notebookText: `${JSON.stringify({ ...structuredClone(baseJobEntry), evidence: [item] })}\n`,
+			snapshots: [[`${hash}.json`, bytes]],
+		});
+	};
+	const cases = [
+		{
+			name: "snapshot gateway contradicts the item source",
+			record: { ...goodRecord, gateway: "other-gateway" },
+			re: /source/,
+		},
+		{
+			name: "snapshot job_id contradicts the item",
+			record: { ...goodRecord, job_id: "99999" },
+			re: /job_id/,
+		},
+		{
+			name: "snapshot template contradicts the item",
+			record: { ...goodRecord, template: null },
+			re: /template/,
+		},
+		{
+			name: "snapshot digest contradicts the item",
+			record: { ...goodRecord, arguments_digest: "a".repeat(64) },
+			re: /arguments/,
+		},
+		{
+			name: "snapshot state contradicts the item",
+			record: { ...goodRecord, state: "FAILED" },
+			re: /state/,
+		},
+		{
+			name: "snapshot observed contradicts the item retrieved",
+			record: { ...goodRecord, observed: "2026-10-01" },
+			re: /retrieved/,
+		},
+		{
+			name: "snapshot manifest contradicts the item",
+			record: {
+				...goodRecord,
+				artifacts: { ...goodRecord.artifacts, files: goodRecord.artifacts.files.slice(0, 1) },
+			},
+			re: /artifact manifest/,
+		},
+		{
+			name: "snapshot observed not a calendar date",
+			record: { ...goodRecord, observed: "2026-02-30" },
+			re: /observed/,
+		},
+		{
+			name: "snapshot job_id not digits",
+			record: { ...goodRecord, job_id: "12x47" },
+			re: /job_id/,
+		},
+		{
+			name: "snapshot manifest carries file contents",
+			record: {
+				...goodRecord,
+				artifacts: {
+					...goodRecord.artifacts,
+					files: [{ path: "out/model.cif", size: 48211, content_b64: "TT0kCg==" }],
+				},
+			},
+			re: /content_b64/,
+		},
+		{
+			name: "snapshot manifest empty",
+			record: { ...goodRecord, artifacts: { ...goodRecord.artifacts, files: [] } },
+			re: /artifacts\.files/,
+		},
+		{
+			name: "item grade re-executed without the snapshot's manifest",
+			record: (() => {
+				const r = structuredClone(goodRecord);
+				delete r.artifacts;
+				return r;
+			})(),
+			item: { artifacts: undefined },
+			re: /re-executed/,
+		},
+	];
+	for (const { name, record, item, re } of cases) {
+		assert.throws(() => auditNotebook(driftDir(t, record, item)), re, `expected failure: ${name}`);
+	}
+
+	// The mirror case stays honest: asserted without a manifest passes.
+	const noArtifacts = structuredClone(goodRecord);
+	delete noArtifacts.artifacts;
+	const asserted = driftDir(t, noArtifacts, { artifacts: undefined, grade: "asserted" });
+	assert.equal(auditNotebook(asserted).entries, 1);
+});
+
 // The batch entry set (#39): per-type base entries over the same shared
 // snapshot, assembled into a five-type notebook — the shape the demo run
 // produces. Every type that carries evidence uses the same item; the
@@ -2038,8 +2294,9 @@ test("auditSession attests notebook-written when the recorder ran and the notebo
 
 // Golden fixture session dirs (#38, widened by the #39 batch): committed
 // scenarios under test/fixtures/notebook-audit/ — pass, the all-types
-// notebook (one entry of each type, one resolving link), recorder not run,
-// malformed entry, undated entry — run against the real auditor CLI. The
+// notebook (one entry of each type, one resolving link), the job-record
+// method entry (M4 S5), recorder not run, malformed entry, undated entry —
+// run against the real auditor CLI. The
 // not-run fixture carries a perfectly well-formed notebook: notebook files
 // alone, however clean, attest nothing without the session's executed
 // recorder.
@@ -2084,6 +2341,7 @@ test("golden fixtures: the auditor CLI is green on pass and red on every failure
 	const cases = [
 		{ name: "pass", ok: true, entries: 2, evidence: 1 },
 		{ name: "all-types", ok: true, entries: 5, evidence: 1 },
+		{ name: "job-record", ok: true, entries: 1, evidence: 1 },
 		{ name: "not-run", ok: false, re: /checkout script never executed/ },
 		{ name: "malformed", ok: false, re: /line 2/ },
 		{ name: "undated", ok: false, re: /date/ },
