@@ -75,3 +75,7 @@ _Avoid_: run receipt, job receipt
 **Submit gate**:
 The permission extension that confirms `submit_job` and `cancel_job` before they reach the compute gateway; read-only gateway tools run ungated. M4 ships the minimal form; M5's gate framework extends it.
 _Avoid_: approval gate, consent prompt
+
+**Clean-room rig**:
+The disposable Linux container a dogfood or adversarial session runs in: the checkout is a fresh clone of the pinned HEAD in the container's ephemeral home, the evidence dir mounts in from the host, and the provider key is the one credential it receives. ADR 0005 ships it.
+_Avoid_: dev server, test server

@@ -326,6 +326,9 @@ const scanSurfaces = [
 	// headword and discusses its _Avoid_ terms by name.
 	"docs/adr/0003-provenance-is-a-project-notebook.md",
 	"docs/adr/0004-compute-is-a-native-mcp-server.md",
+	// ADR 0005 carries the clean-room headword; the rig's own prose lives in
+	// dogfood.md's clean-room section, already a scan surface.
+	"docs/adr/0005-dogfood-runs-in-a-clean-room-rig.md",
 	// The gateway README carries the compute headwords' working vocabulary
 	// (compute gateway, audit line) through the M4 strikes.
 	"gateway/README.md",
