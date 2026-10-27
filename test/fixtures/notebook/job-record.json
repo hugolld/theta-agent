@@ -1,0 +1,23 @@
+{
+  "gateway": "theta-compute",
+  "job_id": "12347",
+  "run_name": "af3-lysozyme",
+  "template": "alphafold3",
+  "arguments_digest": "b7fadc2c62709af32f3d165655772cd301c5050db8bff6e9df46579f79e155a1",
+  "state": "COMPLETED",
+  "observed": "2026-10-25",
+  "artifacts": {
+    "run_name": "af3-lysozyme",
+    "total_bytes": 49414,
+    "files": [
+      {
+        "path": "alphafold3_output/model.cif",
+        "size": 48211
+      },
+      {
+        "path": "alphafold3_output/rankings.json",
+        "size": 1203
+      }
+    ]
+  }
+}

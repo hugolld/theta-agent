@@ -11,9 +11,11 @@
 // the container: fresh clone of the pinned HEAD as the session's checkout,
 // evidence dir mounted at /session so the transcript and process files land
 // on the host, the auditor executed in-container where every path it binds
-// is self-consistent. The provider key is the one credential the rig gets —
-// extracted to a temp dir from the host pi config, mounted read-only, copied
-// into the container's ephemeral home, never printed.
+// is self-consistent. `--leg` passes spot-check leg arguments (skill,
+// script, notebook) to that in-container auditor, so the attestation is
+// captured clean-room too. The provider key is the one credential the rig
+// gets — extracted to a temp dir from the host pi config, mounted
+// read-only, copied into the container's ephemeral home, never printed.
 
 import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -68,8 +70,8 @@ function waitForDaemon() {
 	fail("Docker daemon did not answer within 90s — start Docker Desktop");
 }
 
-function parseFlags(argv) {
-	const flags = { timeout: 300, provider: defaultProvider, model: defaultModel };
+export function parseFlags(argv) {
+	const flags = { timeout: 300, provider: defaultProvider, model: defaultModel, legs: [] };
 	const rest = [];
 	for (let i = 0; i < argv.length; i++) {
 		const arg = argv[i];
@@ -87,6 +89,10 @@ function parseFlags(argv) {
 			const value = argv[++i];
 			if (value === undefined) fail("--session-dir needs a value");
 			flags.sessionDir = value;
+		} else if (arg === "--leg") {
+			const value = argv[++i];
+			if (value === undefined) fail("--leg needs a value");
+			flags.legs.push(value);
 		} else {
 			rest.push(arg);
 		}
@@ -149,9 +155,14 @@ function startContainer(providerDir) {
 }
 
 // The auditor binds cwd to the checkout, so run it from /theta and capture
-// the attestation for the evidence dir; printed output is the record.
-function audit() {
-	const attestation = execIn('cd "$HOME/theta" && node scripts/audit-dogfood.mjs /session');
+// the attestation for the evidence dir; printed output is the record. Leg
+// arguments ride shell-quoted — the auditor re-validates each against the
+// checkout, so quoting is the runner's only concern.
+function audit(legs) {
+	const legArgs = legs.map((leg) => `'${leg.replaceAll("'", "'\\''")}'`).join(" ");
+	const attestation = execIn(
+		`cd "$HOME/theta" && node scripts/audit-dogfood.mjs /session ${legArgs}`.trimEnd(),
+	);
 	writeFileSync(path.join(sessionDir, "attestation.txt"), attestation);
 	console.log(attestation);
 }
@@ -159,7 +170,7 @@ function audit() {
 function main() {
 	const [subcommand, ...argv] = process.argv.slice(2);
 	if (subcommand === undefined || subcommand === "help" || subcommand === "--help") {
-		console.log("usage: run.mjs build | run [--provider P] [--model M] [--timeout S] [--session-dir D] <prompt> | shell");
+		console.log("usage: run.mjs build | run [--provider P] [--model M] [--timeout S] [--session-dir D] [--leg ARG]... <prompt> | shell");
 		return;
 	}
 	const { flags, rest } = parseFlags(argv);
@@ -228,7 +239,7 @@ function main() {
 		if (exitStatus === 124) writeFileSync(path.join(sessionDir, "watchdog"), "fired\n");
 		if (exitStatus !== 0) fail(`session exited ${exitStatus} — evidence in ${sessionDir}`);
 
-		audit();
+		audit(flags.legs);
 		console.log(`rig: evidence in ${sessionDir}`);
 	} finally {
 		run("docker", ["rm", "-f", container], { stdio: "ignore" });

@@ -3,7 +3,7 @@ name: theta-research-loop
 description: Walks a research task through Theta's six-stage co-researcher loop — frame, search, hypothesize, design, execute, report — routes each stage into the skill library, and records each stage's output into the project notebook. Use when starting or structuring research. Literature reviews route to literature-review, searches and lookups on PubMed, arXiv, and Semantic Scholar route to theta-lit-search, hypothesis work routes to hypothesis-generation, and recording at any stage routes to theta-notebook, whose recorder appends dated provenance entries to the research project's notebook. Stages without a routed skill yet run inline and gain dedicated skills in later milestones.
 license: MIT
 metadata:
-  version: "0.2.0"
+  version: "0.3.0"
   authorship: self-authored
 ---
 
@@ -27,7 +27,7 @@ dying with the transcript.
 | 2. Search | What is already known? | `literature-review`, `theta-lit-search` | evidence items |
 | 3. Hypothesize | Which candidate explanations survive? | `hypothesis-generation` | hypotheses |
 | 4. Design | What test would discriminate? | — (inline for now) | methods |
-| 5. Execute | What do the data say? | — (inline for now) | observations |
+| 5. Execute | What do the data say? | `theta-compute` (cluster jobs; other execution inline for now) | observations; the compute run's method entry (its evidence item is the job record) |
 | 6. Report | What follows, with what uncertainty? | — (inline for now) | — (reports read what earlier stages recorded) |
 
 Routing and recording rule: at each stage, invoke the routed skill by name
@@ -62,10 +62,17 @@ can pick them up without rework.
    chosen method and the discarded ones — the reason a design lost is
    provenance too; a motivating search rides along as evidence when one
    exists.
-5. **Execute** — run the code and analyses. Record provenance at every step:
-   inputs, versions, commands, outputs. Each result read off an output is an
-   observation; when it backs a recorded hypothesis, link its evidence to that
-   hypothesis.
+5. **Execute** — run the code and analyses. Cluster jobs route to
+   `theta-compute`, whose doctrine walks the whole lifecycle: stage the
+   inputs, submit (the submit gate confirms), poll with discipline, fetch
+   the artifacts, and record — the job record (job ID, gateway, template,
+   argument digest, artifact manifest, final state) rides a method entry
+   through `theta-notebook`, graded `re-executed` when the artifacts were
+   fetched, `asserted` otherwise, and the report names the job ID so a
+   later session can resume it. Record provenance at every step: inputs,
+   versions, commands, outputs. Each result read off an output is an
+   observation; when it backs a recorded hypothesis, link its evidence to
+   that hypothesis.
 6. **Report** — results with uncertainty, limitations, and citations. Separate
    what the data show from what the scientist should decide. Every claim in
    the report traces to a recorded entry; a direction set here is a decision

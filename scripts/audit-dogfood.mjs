@@ -206,16 +206,22 @@ const NOTEBOOK_TYPES = {
 };
 
 // The typed-shape guards the notebook checks share: a plain JSON object
-// (arrays and null are not records), and a non-empty string field.
+// (arrays and null are not records), a non-empty string field, and an
+// optional non-negative integer field (a JSON boolean is not an integer).
 const isPlainObject = (x) => typeof x === "object" && x !== null && !Array.isArray(x);
 const nonEmptyString = (x) => typeof x === "string" && x !== "";
+const optionalNonNegativeInt = (x) =>
+	x === undefined || (typeof x === "number" && Number.isInteger(x) && x >= 0);
 
 // Reads one cited snapshot and derives the evidence fields the recorder
-// derives from it (parse_evidence's logic, mirrored): the snapshot must be
-// a connector `--json` output — typed shape, not presence — and its bytes
-// must hash to the address that names it. Content addressing is what makes
-// the file self-verifying: no digest match, no attestation.
-function auditSnapshot(thetaDir, addr, digest, citedFrom) {
+// derives from it (the recorder parsers' logic, mirrored): the snapshot must
+// have the shape the citing item declares — a connector `--json` output
+// (ADR 0003) or an assembled gateway job record (ADR 0004) — typed shape,
+// not presence — and its bytes must hash to the address that names it.
+// Content addressing is what makes the file self-verifying: no digest
+// match, no attestation. `kind` names the expected shape; the item's own
+// fields pick it (endpoints = connector, job_id = job record).
+function auditSnapshot(thetaDir, addr, digest, citedFrom, kind) {
 	const lexical = path.join(thetaDir, addr);
 	let real;
 	try {
@@ -238,11 +244,24 @@ function auditSnapshot(thetaDir, addr, digest, citedFrom) {
 	} catch (e) {
 		throw new Error(`${addr} (cited on ${citedFrom}) is not valid JSON: ${e.message}`);
 	}
+	const what = kind === "job" ? "gateway job record" : "connector output";
 	const shapeError = (why) =>
-		new Error(`${addr} (cited on ${citedFrom}) is not a connector output: ${why}`);
+		new Error(`${addr} (cited on ${citedFrom}) is not a ${what}: ${why}`);
 	if (!isPlainObject(payload)) {
 		throw shapeError("not a JSON object");
 	}
+	const derived =
+		kind === "job" ? jobRecordShape(payload, shapeError) : connectorShape(payload, shapeError);
+	if (createHash("sha256").update(buf).digest("hex") !== digest) {
+		throw new Error(
+			`${addr} (cited on ${citedFrom}) content does not hash to its own address (sha256 mismatch)`,
+		);
+	}
+	return { kind, ...derived };
+}
+
+// The connector branch of auditSnapshot: parse_evidence's checks, mirrored.
+function connectorShape(payload, shapeError) {
 	if (!nonEmptyString(payload.source)) {
 		throw shapeError("lacks a non-empty string 'source'");
 	}
@@ -272,16 +291,83 @@ function auditSnapshot(thetaDir, addr, digest, citedFrom) {
 	if (payload.query !== null && payload.query !== undefined && typeof payload.query !== "string") {
 		throw shapeError("'query', when present, must be a string");
 	}
-	if (createHash("sha256").update(buf).digest("hex") !== digest) {
-		throw new Error(
-			`${addr} (cited on ${citedFrom}) content does not hash to its own address (sha256 mismatch)`,
-		);
-	}
 	return {
 		source: payload.source,
 		endpoints,
 		query: payload.query ?? null,
 		retrieved: provenance.accessed,
+	};
+}
+
+// The job-record branch of auditSnapshot: parse_job_record's checks,
+// mirrored — the record's identity in full, and an artifact manifest that
+// holds paths and sizes, never the payloads the cluster already holds.
+function jobRecordShape(payload, shapeError) {
+	if (!nonEmptyString(payload.gateway)) {
+		throw shapeError("lacks a non-empty string 'gateway'");
+	}
+	if (typeof payload.job_id !== "string" || !/^\d+$/.test(payload.job_id)) {
+		throw shapeError("'job_id' must be a string of digits");
+	}
+	if (typeof payload.run_name !== "string" || !/^[A-Za-z0-9_-]{1,64}$/.test(payload.run_name)) {
+		throw shapeError("'run_name' must be 1-64 characters of letters, digits, '-' and '_'");
+	}
+	if (!("template" in payload)) {
+		throw shapeError("must carry 'template' (null for a raw submit)");
+	}
+	if (payload.template !== null && !nonEmptyString(payload.template)) {
+		throw shapeError("'template' must be a non-empty name or null (a raw submit)");
+	}
+	if (typeof payload.arguments_digest !== "string" || !/^[0-9a-f]{64}$/.test(payload.arguments_digest)) {
+		throw shapeError("'arguments_digest' must be a 64-character sha256 hex digest");
+	}
+	if (typeof payload.state !== "string" || payload.state.trim() === "") {
+		throw shapeError("lacks a non-empty string 'state'");
+	}
+	if (!isIsoDate(payload.observed)) {
+		throw shapeError("'observed' must be a YYYY-MM-DD calendar date");
+	}
+	let artifacts = null;
+	if (payload.artifacts !== undefined && payload.artifacts !== null) {
+		artifacts = payload.artifacts;
+		if (!isPlainObject(artifacts)) {
+			throw shapeError("'artifacts', when present, must be an object");
+		}
+		if ("content_b64" in artifacts) {
+			throw shapeError("artifacts must not carry file contents ('content_b64') — the record holds the manifest, not the payloads");
+		}
+		if (!Array.isArray(artifacts.files) || artifacts.files.length === 0) {
+			throw shapeError("artifacts.files must be a non-empty list");
+		}
+		for (const entry of artifacts.files) {
+			if (!isPlainObject(entry)) {
+				throw shapeError("every artifacts.files entry must be an object");
+			}
+			if ("content_b64" in entry) {
+				throw shapeError("artifacts must not carry file contents ('content_b64' in a files entry)");
+			}
+			if (!nonEmptyString(entry.path)) {
+				throw shapeError("every artifacts.files entry needs a non-empty string 'path'");
+			}
+			if (!optionalNonNegativeInt(entry.size)) {
+				throw shapeError("artifacts file 'size', when present, must be a non-negative integer");
+			}
+		}
+		if (!optionalNonNegativeInt(artifacts.total_bytes)) {
+			throw shapeError("artifacts 'total_bytes', when present, must be a non-negative integer");
+		}
+		if (artifacts.run_name !== undefined && artifacts.run_name !== payload.run_name) {
+			throw shapeError("artifacts.run_name does not match the record's run_name");
+		}
+	}
+	return {
+		source: payload.gateway,
+		job_id: payload.job_id,
+		template: payload.template,
+		arguments_digest: payload.arguments_digest,
+		state: payload.state,
+		artifacts,
+		retrieved: payload.observed,
 	};
 }
 
@@ -298,14 +384,16 @@ function namesEarlierHypothesis(known, at, field, ref) {
 // Validates the project notebook the recorder writes (ADR 0003): every line
 // of notebook.jsonl parses into a typed, dated entry — one of the five
 // types, ids sequenced per type — whose evidence item cites a snapshot that
-// exists, hashes to its own address, parses as a connector output, and
-// agrees with the item it backs (source, endpoints, query, retrieval date).
-// An observation carries an entry-level grade and may link its evidence to
-// an earlier hypothesis entry (`supports`); a confidence names the earlier
-// hypothesis it judges — references that point nowhere fail. Extra snapshot
-// files are tolerated — the recorder's write order orphans snapshots, never
-// entries. Returns the counts and raw bytes the attestation names; throws
-// on any failure.
+// exists, hashes to its own address, parses as the shape the item declares
+// (a connector output or a gateway job record, ADR 0004), and agrees with
+// the item it backs (source and retrieval date always; endpoints and query
+// for a connector item, job identity and artifact manifest for a job-record
+// item). An observation carries an entry-level grade and may link its
+// evidence to an earlier hypothesis entry (`supports`); a confidence names
+// the earlier hypothesis it judges — references that point nowhere fail.
+// Extra snapshot files are tolerated — the recorder's write order orphans
+// snapshots, never entries. Returns the counts and raw bytes the
+// attestation names; throws on any failure.
 export function auditNotebook(thetaDirArg) {
 	// Canonicalize the directory itself: mount aliases (/var vs /private/var)
 	// would otherwise fail the snapshot containment check below.
@@ -430,24 +518,63 @@ export function auditNotebook(thetaDirArg) {
 			if (!isPlainObject(item)) {
 				throw new Error(`${at}: expected an object, got ${JSON.stringify(item)}`);
 			}
+			// Two evidence shapes (ADR 0003 connector output, ADR 0004 job
+			// record); the item's own fields declare which one it cites, and
+			// an ambiguous item — both markers or neither — is not a shape
+			// the recorder writes.
+			const itemIsConnector = "endpoints" in item;
+			const itemIsJob = "job_id" in item;
+			if (itemIsConnector === itemIsJob) {
+				throw new Error(
+					`${at}: expected a connector item (endpoints) or a job-record item (job_id), got ${JSON.stringify(item)}`,
+				);
+			}
 			if (!nonEmptyString(item.source)) {
 				throw new Error(
 					`${at} source: expected a non-empty string, got ${JSON.stringify(item.source)}`,
 				);
 			}
-			if (
-				!Array.isArray(item.endpoints) ||
-				item.endpoints.length === 0 ||
-				item.endpoints.some((e) => !nonEmptyString(e))
-			) {
-				throw new Error(
-					`${at} endpoints: expected a non-empty list of non-empty strings, got ${JSON.stringify(item.endpoints)}`,
-				);
-			}
-			if (item.query !== null && typeof item.query !== "string") {
-				throw new Error(
-					`${at} query: expected a string or null, got ${JSON.stringify(item.query)}`,
-				);
+			if (itemIsConnector) {
+				if (
+					!Array.isArray(item.endpoints) ||
+					item.endpoints.length === 0 ||
+					item.endpoints.some((e) => !nonEmptyString(e))
+				) {
+					throw new Error(
+						`${at} endpoints: expected a non-empty list of non-empty strings, got ${JSON.stringify(item.endpoints)}`,
+					);
+				}
+				if (item.query !== null && typeof item.query !== "string") {
+					throw new Error(
+						`${at} query: expected a string or null, got ${JSON.stringify(item.query)}`,
+					);
+				}
+			} else {
+				if (typeof item.job_id !== "string" || !/^\d+$/.test(item.job_id)) {
+					throw new Error(
+						`${at} job_id: expected a string of digits, got ${JSON.stringify(item.job_id)}`,
+					);
+				}
+				if (!("template" in item) || (item.template !== null && !nonEmptyString(item.template))) {
+					throw new Error(
+						`${at} template: expected a non-empty name or null, got ${JSON.stringify(item.template)}`,
+					);
+				}
+				if (typeof item.arguments_digest !== "string" || !/^[0-9a-f]{64}$/.test(item.arguments_digest)) {
+					throw new Error(
+						`${at} arguments_digest: expected a 64-character sha256 hex digest, got ${JSON.stringify(item.arguments_digest)}`,
+					);
+				}
+				if (typeof item.state !== "string" || item.state.trim() === "") {
+					throw new Error(
+						`${at} state: expected a non-empty string, got ${JSON.stringify(item.state)}`,
+					);
+				}
+				if (item.query !== undefined) {
+					throw new Error(
+						`${at} query: a job-record item carries no query — the record's arguments ride the snapshot and the digest`,
+					);
+				}
 			}
 			if (!isIsoDate(item.retrieved)) {
 				throw new Error(
@@ -457,6 +584,13 @@ export function auditNotebook(thetaDirArg) {
 			if (!NOTEBOOK_GRADES.has(item.grade)) {
 				throw new Error(
 					`${at} grade: expected one of asserted, cross-checked, re-executed, got ${JSON.stringify(item.grade)}`,
+				);
+			}
+			// The recorder refuses cross-checked on a job record (a retrieval's
+			// mark); a notebook carrying it anyway is not recorder-shaped.
+			if (itemIsJob && item.grade === "cross-checked") {
+				throw new Error(
+					`${at} grade: a job-record item is graded asserted or re-executed, got ${JSON.stringify(item.grade)}`,
 				);
 			}
 			if (item.supports !== undefined) {
@@ -480,25 +614,68 @@ export function auditNotebook(thetaDirArg) {
 					`${at} snapshot: expected an evidence/<sha256>.json address, got ${JSON.stringify(item.snapshot)}`,
 				);
 			}
+			const kind = itemIsJob ? "job" : "connector";
 			let derived = snapshots.get(item.snapshot);
 			if (derived === undefined) {
-				derived = auditSnapshot(thetaDir, item.snapshot, addr[1], where);
+				derived = auditSnapshot(thetaDir, item.snapshot, addr[1], where, kind);
 				snapshots.set(item.snapshot, derived);
+			} else if (derived.kind !== kind) {
+				throw new Error(
+					`${at} snapshot is cited as both a connector output and a job record`,
+				);
 			}
 			if (item.source !== derived.source) {
 				throw new Error(
 					`${at} source ${JSON.stringify(item.source)} does not match its snapshot (${JSON.stringify(derived.source)})`,
 				);
 			}
-			if (JSON.stringify(item.endpoints) !== JSON.stringify(derived.endpoints)) {
-				throw new Error(
-					`${at} endpoints do not match the snapshot's calls (${derived.endpoints.join(", ")})`,
-				);
-			}
-			if (item.query !== derived.query) {
-				throw new Error(
-					`${at} query does not match its snapshot (${JSON.stringify(derived.query)})`,
-				);
+			if (itemIsConnector) {
+				if (JSON.stringify(item.endpoints) !== JSON.stringify(derived.endpoints)) {
+					throw new Error(
+						`${at} endpoints do not match the snapshot's calls (${derived.endpoints.join(", ")})`,
+					);
+				}
+				if (item.query !== derived.query) {
+					throw new Error(
+						`${at} query does not match its snapshot (${JSON.stringify(derived.query)})`,
+					);
+				}
+			} else {
+				if (item.job_id !== derived.job_id) {
+					throw new Error(
+						`${at} job_id does not match its snapshot (${JSON.stringify(derived.job_id)})`,
+					);
+				}
+				if (item.template !== derived.template) {
+					throw new Error(
+						`${at} template does not match its snapshot (${JSON.stringify(derived.template)})`,
+					);
+				}
+				if (item.arguments_digest !== derived.arguments_digest) {
+					throw new Error(
+						`${at} arguments_digest does not match its snapshot (${JSON.stringify(derived.arguments_digest)})`,
+					);
+				}
+				if (item.state !== derived.state) {
+					throw new Error(
+						`${at} state does not match its snapshot (${JSON.stringify(derived.state)})`,
+					);
+				}
+				// The item omits the manifest when none was fetched; the
+				// snapshot's null means the same thing.
+				const itemArtifacts = item.artifacts === undefined ? null : item.artifacts;
+				if (JSON.stringify(itemArtifacts) !== JSON.stringify(derived.artifacts)) {
+					throw new Error(
+						`${at} artifact manifest does not match its snapshot (${JSON.stringify(derived.artifacts)})`,
+					);
+				}
+				// The recorder refuses re-executed without the manifest; a
+				// notebook carrying the claim anyway is not recorder-shaped.
+				if (derived.artifacts === null && item.grade === "re-executed") {
+					throw new Error(
+						`${at} grade re-executed without the snapshot's artifact manifest — fetch the artifacts first or grade asserted`,
+					);
+				}
 			}
 			if (item.retrieved !== derived.retrieved) {
 				throw new Error(

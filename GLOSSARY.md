@@ -41,7 +41,7 @@ One dated append to the project notebook; one of five types — hypothesis, meth
 _Avoid_: provenance record, run receipt
 
 **Evidence item**:
-A recorded source with its retrieval details and content-addressed snapshot; M3 stores the connector's structured output as the snapshot.
+A recorded source with its retrieval details and content-addressed snapshot; the snapshot is the connector's structured output or, since M4, the compute gateway's assembled job record.
 _Avoid_: evidence package, citation record
 
 **Evidence grade**:

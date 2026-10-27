@@ -1,10 +1,10 @@
 ---
 name: theta-notebook
-description: Theta's project notebook recorder - appends dated provenance entries to the research project's .theta/notebook.jsonl in all five types (hypothesis, method, observation, decision, confidence), storing theta-lit-search structured outputs as content-addressed evidence items under .theta/evidence/, graded asserted, cross-checked, or re-executed. A grade rates the source; a confidence entry records the researcher's judgment. An observation can link its evidence to the hypothesis it supports. Use when a session forms a hypothesis worth keeping, chooses or discards a method, reads something off a search result, takes a decision, or updates its confidence, and holds connector output behind it, inside the theta-research-loop or after a standalone literature search. Recording runs only through the bundled recorder script, which validates the connector output, never keeps raw HTTP bodies, and reports its exit-code contract. Bibliography and reference management route to citation-management.
+description: Theta's project notebook recorder - appends dated provenance entries to the research project's .theta/notebook.jsonl in all five types (hypothesis, method, observation, decision, confidence), storing theta-lit-search structured outputs and gateway job records as content-addressed evidence items under .theta/evidence/, graded asserted, cross-checked, or re-executed. A grade rates the source; a confidence entry records the researcher's judgment. Use when a session forms a hypothesis worth keeping, chooses or discards a method, reads something off a search result, takes a decision, updates its confidence, or closes out a compute run, and holds that evidence behind it, inside the theta-research-loop or after a standalone literature search. Recording runs only through the bundled recorder script, which validates the evidence input, never keeps raw HTTP bodies or file payloads, and reports its exit-code contract. Bibliography and reference management route to citation-management.
 allowed-tools: Read Bash
 license: MIT
 metadata:
-  version: "0.2.0"
+  version: "0.3.0"
   authorship: self-authored
 ---
 
@@ -97,9 +97,16 @@ A hypothesis entry, and an observation linked to it, from the same notebook:
   retrieval date, the grade, and the snapshot address. `query` is the search
   term, or null for an identifier lookup (whose identifiers ride in the
   snapshot itself).
-- The snapshot is the connector's `--json` output byte-for-byte — already
-  credential-redacted and already dated by the connector's own code. Raw
-  HTTP bodies are never kept.
+- A **job record** (ADR 0004) is the evidence item of the method entry that
+  records a compute run: the gateway as its `source`, the job ID, the
+  template (null for a raw submit), the argument digest, the final state,
+  and the artifact manifest when the artifacts were fetched. Its `retrieved`
+  is the day the record's state was observed. The recorder accepts the grade
+  `re-executed` only when the manifest is present.
+- The snapshot is the evidence source's structured output byte-for-byte —
+  the connector's `--json` output (already credential-redacted and already
+  dated by the connector's own code) or the assembled job record. Raw HTTP
+  bodies are never kept.
 
 ## When to record
 
@@ -108,7 +115,9 @@ A hypothesis entry, and an observation linked to it, from the same notebook:
 - The design moment: a method is chosen or discarded — record the choice,
   with the search that motivated it as evidence when there is one.
 - The execute moment: reading a result off a search output is an
-  observation; when it backs an existing hypothesis, link the evidence.
+  observation; when it backs an existing hypothesis, link the evidence. A
+  compute run that closes out records its job record as a method entry —
+  the theta-compute doctrine walks the lifecycle.
 - Any point a direction is set or cut: a decision, recorded as its own
   entry so the correction of an earlier entry is a later entry, never a
   rewrite of history.
@@ -148,18 +157,59 @@ python3 <theta-notebook-skill-dir>/scripts/notebook.py \
 python3 <theta-notebook-skill-dir>/scripts/notebook.py --decision "TEXT"
 python3 <theta-notebook-skill-dir>/scripts/notebook.py \
   --confidence "TEXT" --on hyp-0001
+
+# A compute run closes out: the assembled job record rides a method entry
+# (theta-compute's doctrine assembles it from the gateway answers):
+python3 <theta-notebook-skill-dir>/scripts/notebook.py \
+  --method "TEXT" --job-record job-record.json --grade re-executed
 ```
 
 `--evidence` takes the path of a saved `--json` output, or `-` to read it
-from stdin. `--on` and `--supports` must name a hypothesis entry already in
-the notebook; a reference that names no recorded hypothesis is a usage
-error, never an entry.
+from stdin; `--job-record` takes an assembled gateway job record the same
+way. The two are mutually exclusive — one evidence item per call — and
+`--grade` is required exactly when either is given. `--on` and `--supports`
+must name a hypothesis entry already in the notebook; a reference that names
+no recorded hypothesis is a usage error, never an entry.
 
 Requires Python 3.11+ (standard library only). If `python3` is older, run
 `python3.13`, `python3.12`, or `python3.11` — the script names them when the
 gate trips. Default output is the recorded line, then the entry's specifics
 — the evidence item's source and retrieval date with its grade, and the
 snapshot address; `--json` prints the appended entry itself instead.
+
+### The job record's shape
+
+The session assembles the record from the theta-compute answers for one run
+and passes it to `--job-record` as JSON (path or `-`):
+
+```json
+{
+  "gateway": "theta-compute",
+  "job_id": "12347",
+  "run_name": "af3-lysozyme",
+  "template": "alphafold3",
+  "arguments_digest": "<sha256 of the job's canonical input>",
+  "state": "COMPLETED",
+  "observed": "2026-10-25",
+  "artifacts": {"run_name": "af3-lysozyme", "total_bytes": 49414,
+                "files": [{"path": "alphafold3_output/model.cif", "size": 48211}]}
+}
+```
+
+- Required: `gateway`, `job_id` (digits), `run_name`, `template` (null for a
+  raw submit), `arguments_digest` (a 64-hex sha256), `state`, `observed` —
+  the day the state was read, carried through as the item's `retrieved`.
+  `artifacts` is present exactly when `fetch_artifacts` answered, and holds
+  paths and sizes, never file contents: the recorder refuses a manifest
+  that carries `content_b64`. Extra keys (directives, script path) ride in
+  the snapshot.
+- The evidence item carries the job's fields, the grade, and the snapshot
+  address; the snapshot is the assembled record byte-for-byte.
+- `re-executed` claims the machinery recomputed the result, so it is honest
+  only once the artifacts were fetched — the recorder refuses it without
+  the manifest. Until then, `asserted`. Those are the record's two grades:
+  `cross-checked` is a retrieval's mark, and the recorder refuses it on a
+  job record.
 
 ## Grades
 
@@ -172,8 +222,10 @@ evidence item inside any entry), and a confidence entry never carries one.
   grade for one literature snapshot; use it unless another genuinely applies.
 - `cross-checked` — two independent retrievals were actually compared and
   agree (say, the same record from PubMed and from Semantic Scholar).
-- `re-executed` — machinery recomputed the result (M4 job records). A
-  session cannot honestly claim it for a literature snapshot.
+- `re-executed` — machinery recomputed the result: a gateway job whose
+  artifacts were fetched. The recorder refuses it for a job record without
+  the artifact manifest, and a session cannot honestly claim it for a
+  literature snapshot.
 
 `--grade` is required exactly when evidence is recorded — never defaulted,
 never given without evidence: the trust mark on a source is a decision,
@@ -190,7 +242,7 @@ transport to fail):
 | Code | Meaning |
 |---|---|
 | 0 | Success — the entry is appended and named on stdout. |
-| 1 | Usage error — bad arguments, evidence input that is not a valid connector output, or a link naming no recorded hypothesis. |
+| 1 | Usage error — bad arguments, evidence input that is not a valid connector output or gateway job record, or a link naming no recorded hypothesis. |
 | 2 | Notebook failure — the notebook cannot be read (corrupt, or `.theta` is not a directory) or written. |
 
 ## Output discipline
@@ -199,15 +251,17 @@ transport to fail):
   can find all of it under `.theta/`.
 - A failed append is never silently skipped: a non-zero exit reaches the
   user as a failure.
-- The snapshot must be the connector's final structured output — not a
-  hand-composed file, not a raw HTTP body the connector never emitted.
+- The snapshot must be the evidence source's final structured output — not a
+  hand-composed file, not a raw HTTP body the connector never emitted, not a
+  job record padded with file payloads.
 - If an entry turns out wrong, the correction is a later decision entry,
   never a rewrite of history.
 
 ## Boundaries
 
-- The recorder consumes connector output; it never calls a source itself,
-  and the theta-lit-search scripts are untouched by this skill.
+- The recorder consumes connector output and assembled job records; it
+  never calls a source or a gateway itself, and the theta-lit-search scripts
+  are untouched by this skill.
 - One evidence item per call; an entry synthesizing several retrievals is
   recorded per source, cross-checked claims included.
 - `.theta/` belongs to the research project. In the theta-agent repo's own

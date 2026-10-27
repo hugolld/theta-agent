@@ -5,7 +5,7 @@ import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { prepareProviderConfig } from "./rig/run.mjs";
+import { parseFlags, prepareProviderConfig } from "./rig/run.mjs";
 
 const dockerfile = await readFile(fileURLToPath(new URL("./rig/Dockerfile", import.meta.url)), "utf8");
 const runnerPath = fileURLToPath(new URL("./rig/run.mjs", import.meta.url));
@@ -45,6 +45,22 @@ test("runner parses and answers help without a daemon", () => {
 	const help = spawnSync(process.execPath, [runnerPath, "help"]);
 	assert.equal(help.status, 0, help.stderr);
 	assert.match(help.stdout.toString(), /^usage: /);
+});
+
+// Spot-check legs ride --leg, repeatable, and never bleed into the prompt.
+test("leg flags collect into order and leave the prompt in rest", () => {
+	const { flags, rest } = parseFlags([
+		"--leg", "skills/theta-notebook/SKILL.md",
+		"the prompt text",
+		"--leg", "skills/theta-notebook/scripts/notebook.py",
+		"--leg", ".theta",
+	]);
+	assert.deepEqual(flags.legs, [
+		"skills/theta-notebook/SKILL.md",
+		"skills/theta-notebook/scripts/notebook.py",
+		".theta",
+	]);
+	assert.equal(rest.join(" "), "the prompt text");
 });
 
 // The credential path: the prepared config carries the target provider and
