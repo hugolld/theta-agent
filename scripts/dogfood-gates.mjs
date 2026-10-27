@@ -1,9 +1,9 @@
 // Gates the dogfood and strike paths share — the rig runner
-// (test/rig/run.mjs), the auditor (scripts/audit-dogfood.mjs), and the
-// strike teardown (scripts/strike-teardown.mjs) bind evidence to a clean
-// tree, to the package.json manifest as it stood at launch, and spawn their
-// child processes through one environment-inheriting shape. One home, per
-// the shared-helper rule, before the second caller.
+// (test/rig/run.mjs) and the strike teardown (scripts/strike-teardown.mjs)
+// spawn their child processes through one environment-inheriting shape, and
+// the rig runner plus the auditor (scripts/audit-dogfood.mjs) bind evidence
+// to a clean tree and to the package.json manifest as it stood at launch.
+// One home, per the shared-helper rule, before the second caller.
 
 import { execSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync, existsSync } from "node:fs";
+import { mkdtempSync, rmSync, existsSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -136,6 +136,35 @@ test("an unreachable origin refuses before any mutation — the network-flap cla
 	assert.equal(run.status, 1);
 	assert.match(run.stderr, /fetch failed/);
 	assert.equal(existsSync(fx.wt), true, "the worktree still stands");
+	assert.equal(branchExists(fx.main, "feature-x"), true, "the branch still exists");
+});
+
+test("a main checkout not on main refuses before the pull moves it — the stray-pull class", (t) => {
+	const fx = makeFixture(t, { merged: true });
+	// The exact accident two retros recorded: a pull that runs while the
+	// main checkout holds another branch moves that branch instead.
+	const side = spawnSync("git", ["-C", fx.main, "checkout", "--quiet", "-b", "side-quest"], { encoding: "utf8" });
+	assert.equal(side.status, 0, side.stderr);
+	const before = spawnSync("git", ["-C", fx.main, "rev-parse", "HEAD"], { encoding: "utf8" }).stdout;
+	const run = runTeardown(fx.main, "feature-x");
+	assert.equal(run.status, 1);
+	assert.match(run.stderr, /is on side-quest, not main/);
+	assert.equal(existsSync(fx.wt), true, "the worktree still stands");
+	assert.equal(branchExists(fx.main, "feature-x"), true, "the branch still exists");
+	assert.equal(
+		spawnSync("git", ["-C", fx.main, "rev-parse", "HEAD"], { encoding: "utf8" }).stdout,
+		before,
+		"the checked-out side branch did not move",
+	);
+});
+
+test("a dirty worktree refuses with the branch intact", (t) => {
+	const fx = makeFixture(t, { merged: true });
+	writeFileSync(path.join(fx.wt, "uncommitted.txt"), "work in progress\n", "utf8");
+	const run = runTeardown(fx.main, "feature-x");
+	assert.equal(run.status, 1);
+	assert.match(run.stderr, /worktree remove refused/);
+	assert.equal(existsSync(fx.wt), true, "the dirty worktree still stands");
 	assert.equal(branchExists(fx.main, "feature-x"), true, "the branch still exists");
 });
 
