@@ -17,12 +17,11 @@
 // gets — extracted to a temp dir from the host pi config, mounted
 // read-only, copied into the container's ephemeral home, never printed.
 
-import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { gitStatus, manifestSha256 } from "../../scripts/dogfood-gates.mjs";
+import { gitStatus, manifestSha256, run as spawnRun } from "../../scripts/dogfood-gates.mjs";
 
 const rigDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(rigDir, "../..");
@@ -40,15 +39,10 @@ function fail(message) {
 	process.exit(1);
 }
 
-// spawnSync's env option replaces the environment rather than merging, so
-// an opts.env that rode alone would wipe PATH and every spawn after it would
-// die ENOENT. Always inherit, then overlay.
+// The shared spawn shape does the env-inheriting; this wrapper adds the
+// rig's own failure rule — a child that could not start at all ends the run.
 function run(cmd, args, opts = {}) {
-	const result = spawnSync(cmd, args, {
-		encoding: "utf8",
-		...opts,
-		env: { ...process.env, ...opts.env },
-	});
+	const result = spawnRun(cmd, args, opts);
 	if (result.error) fail(`cannot run ${cmd}: ${result.error.message}`);
 	return result;
 }
