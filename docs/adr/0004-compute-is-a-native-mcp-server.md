@@ -13,5 +13,6 @@
 ## Consequences
 
 - The repo gains a gateway subtree (generic code only; institutional facts ride deploy-time env; the npm tarball excludes it) and its first tool-call-pipeline extension code, which M5's gate framework extends.
+- Known limit, recorded at the S6 closeout (spec #56, its r2 roll): the submit gate binds the calls that pass through pi's tool-call pipeline — the surface its `mcp__theta_compute__` prefix names. A session whose MCP registration missed at launch reached the compute gateway outside that layer, driving it with a hand-written client and the token from the user's own MCP registration; neither the audit trail nor the dogfood auditor distinguishes the route. Server-side enforcement still held on every call (bearer auth, command guard, audit line). Bounding client-side gating is M5's subject.
 - ADR 0002's revisit trigger is closed on record here; literature connectors are not reopened by it.
 - The gateway skill ships with setup docs in M4's theta-side strike, and the notebook's recorder gains the job-record path under the connector-script invariants.

@@ -61,6 +61,12 @@ Two mechanical differences from the host recipe, both recorded in the evidence: 
 
 The boundary is deliberate: no SSH keys and no cluster token enter the rig, so gateway live legs stay on the host path (ADR 0004). Adversarial sessions get the same walls with a keyboard: `node test/rig/run.mjs shell`.
 
+## Gateway-bearing sessions
+
+The gateway's tools register at launch only: pi connects its MCP servers when the session starts, never later. Run the preflight before every launch — the port-forward answers (`/mcp` returns 401 without a token), and the forward runs with keepalive flags (`ServerAliveInterval=15 ServerAliveCountMax=4 ExitOnForwardFailure=yes`) so a dead tunnel fails loudly instead of hanging mid-session. A session that starts without the tools improvises: the S6 closeout's r2 roll wrote its own gateway client and drove it with the token from the user's MCP registration, past the submit gate (ADR 0004 records the residual).
+
+Destructive calls need an interactive session: print mode installs a no-op UI whose confirm returns false, so the submit gate refuses every submit there — the refusal is the record, and a cheap probe captures it. The routed prompt runs the whole task in one turn (a mid-session prose answer is a second user record and the auditor refuses the roll), calls only the tools the session has registered, and keeps credentials out of scripts.
+
 ## Ground-truth the evidence
 
 The pi session transcript is the record. Pi advertises the skill library in the session's system records — assert against those records only. Grepping the whole file proves nothing: the user prompt and tool activity can carry a skill name into a session where nothing was advertised.
