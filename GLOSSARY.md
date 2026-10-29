@@ -56,6 +56,10 @@ _Avoid_: spot-check block, inline check
 The MCP server (theta-compute) on the cluster's login node wrapping the Slurm CLI; enforcement — path sandbox, command guard, audit line — stays server-side. M4 ships it.
 _Avoid_: compute daemon, job server
 
+**Command guard**:
+The compute gateway's allow-list over `submit_job` directives — partition, time, mem, ntasks, cpus-per-task, gres — each value one safe token under its ceiling; the client shapes directives only, never commands.
+_Avoid_: directive guard
+
 **Staging root**:
 The one cluster-side directory that holds every run directory; the boundary the gateway's path sandbox enforces and the target the over-cap error names for the out-of-band scp move.
 _Avoid_: staging area, staging directory, staging folder

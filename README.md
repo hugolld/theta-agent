@@ -20,7 +20,7 @@ content-addressed, graded evidence snapshots, recorded inside the research
 loop and after standalone searches per
 [ADR 0003](docs/adr/0003-provenance-is-a-project-notebook.md)), and the
 compute gateway, `theta-compute` — remote Slurm jobs through an MCP gateway
-with bearer auth, a directive guard, and an audit trail
+with bearer auth, a command guard, and an audit trail
 ([ADR 0004](docs/adr/0004-compute-is-a-native-mcp-server.md),
 `gateway/README.md`). The milestones below continue from there.
 

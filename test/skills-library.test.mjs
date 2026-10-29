@@ -314,6 +314,9 @@ test("no Tier-2 infra skills ship", () => {
 const scanSurfaces = [
 	"README.md",
 	"CLAUDE.md",
+	// extensions/theta.ts carries the /theta status strings — milestone prose
+	// that drifted silently outside the scan until the S6 retro joined it.
+	"extensions/theta.ts",
 	"skills/theta-research-loop/SKILL.md",
 	"skills/theta-lit-search/SKILL.md",
 	"skills/theta-lit-search/references/pubmed.md",
