@@ -5,6 +5,10 @@ import os from "node:os";
 import path from "node:path";
 import { execSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
+
+// The pi runtime every synthetic session records — the current floor, so the
+// audit's runtime binding passes. Golden fixtures carry their own copies.
+const recordedPiVersion = "1.4.0\n";
 import {
 	ge,
 	decodeXmlEntities,
@@ -253,7 +257,7 @@ function goldenSession(t, repo, { text, fixtureDir } = {}) {
 		fs.writeFileSync(path.join(dir, "expected-model"), "zai-coding-cn glm-5.3-flash\n");
 		fs.writeFileSync(path.join(dir, "exit-status"), "0");
 		fs.writeFileSync(path.join(dir, "stderr.txt"), "");
-		fs.writeFileSync(path.join(dir, "pi-version"), "1.4.0\n");
+		fs.writeFileSync(path.join(dir, "pi-version"), recordedPiVersion);
 		fs.writeFileSync(path.join(dir, "node-version"), "v26.11.0\n");
 	}
 	fs.writeFileSync(path.join(dir, "pre-head"), repoHead(repo));
@@ -421,7 +425,7 @@ function buildSession(t, repo, overrides = {}) {
 	);
 	fs.writeFileSync(path.join(dir, "exit-status"), overrides.exit ?? "0");
 	fs.writeFileSync(path.join(dir, "stderr.txt"), overrides.stderr ?? "");
-	fs.writeFileSync(path.join(dir, "pi-version"), overrides.piVersion ?? "1.4.0\n");
+	fs.writeFileSync(path.join(dir, "pi-version"), overrides.piVersion ?? recordedPiVersion);
 	fs.writeFileSync(
 		path.join(dir, "node-version"),
 		overrides.nodeVersion ?? "v26.11.0\n",
@@ -1202,7 +1206,7 @@ test("auditSession rejects host aliases under inventory names", (t) => {
 	fs.writeFileSync(path.join(dir, "expected-model"), "zai-coding-cn glm-5.3-flash\n");
 	fs.writeFileSync(path.join(dir, "exit-status"), "0");
 	fs.writeFileSync(path.join(dir, "stderr.txt"), "");
-	fs.writeFileSync(path.join(dir, "pi-version"), "1.4.0\n");
+	fs.writeFileSync(path.join(dir, "pi-version"), recordedPiVersion);
 	fs.writeFileSync(path.join(dir, "node-version"), "v26.11.0\n");
 	fs.writeFileSync(path.join(dir, "pre-head"), repoHead(repo));
 	fs.writeFileSync(path.join(dir, "manifest-sha256"), repoManifestSha(repo));

@@ -1,6 +1,6 @@
 # pi session transcript schema
 
-Reference for the JSONL records pi writes under `~/.pi/agent/sessions/<project>/*.jsonl`, as consumed by `scripts/audit-dogfood.mjs`. Pinned against pi 1.1.0 by `test/dogfood-audit.test.mjs` (golden fixture) and the live runs in PR #13; the custom-tool and `details` shapes below are pinned by the M2 shape-contest runs (`prototype/m2-shape-contest`).
+Reference for the JSONL records pi writes under `~/.pi/agent/sessions/<project>/*.jsonl`, as consumed by `scripts/audit-dogfood.mjs`. Pinned against pi 1.4.0 by `test/dogfood-audit.test.mjs` (golden fixture) and the boot-clean rig run in PR #98 — first pinned by the pi 1.1.0 live runs in PR #13; the custom-tool and `details` shapes below are pinned by the M2 shape-contest runs (`prototype/m2-shape-contest`).
 
 ## Record envelope
 

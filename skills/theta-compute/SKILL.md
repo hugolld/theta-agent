@@ -3,7 +3,7 @@ name: theta-compute
 description: Theta's compute doctrine - drives the theta-compute gateway (the compute gateway MCP server on the cluster's login node) through the whole Slurm job lifecycle, staging inputs, submitting, polling with discipline, fetching artifacts, and recording every job ID in the project notebook. Use when a research task needs cluster compute, an AlphaFold3 structure prediction, or the status, logs, or artifacts of a job an earlier session started. The model calls the gateway's tools directly; oversized inputs travel out-of-band by scp; destructive calls are confirmed by the submit gate before they reach the cluster.
 license: MIT
 metadata:
-  version: "0.2.0"
+  version: "0.3.0"
   authorship: self-authored
 ---
 
@@ -72,8 +72,10 @@ One run of the loop, in order:
 - Never call `cancel_job` without the researcher's explicit request — it is
   a destructive call and the submit gate prompts for it like a submission.
 - Long jobs survive the session: jobs live in Slurm, the session does not.
-  Record the job ID first, then it is safe to close the laptop; a later
-  session resumes from the notebook, polls the same job ID, and fetches.
+  A submitted cluster job is a durable run — it outlives the session that
+  started it. Record the job ID first, then it is safe to close the laptop;
+  a later session resumes from the notebook, polls the same job ID, and
+  fetches.
 
 ## The submit gate
 
