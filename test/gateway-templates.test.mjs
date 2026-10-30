@@ -226,6 +226,37 @@ test("while the submit capability is off, run_alphafold3 holds like submit_job",
 	});
 });
 
+test("run_alphafold3 spends the same submit ceiling as submit_job", { skip: skipReason }, async (t) => {
+	const gateway = await startGateway(t, {
+		env: { ...withTemplates, THETA_COMPUTE_SUBMIT_CEILING: "1" },
+	});
+
+	const fold = await gateway.callTool("run_alphafold3", { run_name: "af3-demo", fold_input: foldInput });
+	assert.equal(fold.isError, false, "the typed submit spends the budget of one");
+
+	// The budget is spent by either tool: the generic submit throttles,
+	// and so does the typed one after it.
+	const throttled = await gateway.callTool("submit_job", { run_name: "demo", directives: { partition: "cpu" } });
+	assert.equal(throttled.isError, true, "the generic submit faces the same budget");
+	assert.match(toolText(throttled), /the submit ceiling is reached/);
+	assert.match(toolText(throttled), /1 submit\(s\)/);
+
+	const throttledToo = await gateway.callTool("run_alphafold3", { run_name: "af3-demo-2", fold_input: foldInput });
+	assert.equal(throttledToo.isError, true, "the typed tool throttles like the generic one");
+	assert.match(toolText(throttledToo), /the submit ceiling is reached/);
+
+	const audit = await readAudit(gateway.auditLog);
+	assert.deepEqual(
+		audit.map((line) => [line.tool, line.decision]),
+		[
+			["run_alphafold3", "ALLOW"],
+			["submit_job", "THROTTLE"],
+			["run_alphafold3", "THROTTLE"],
+		],
+	);
+	assert.equal(audit[1].submit_count, 1);
+});
+
 test("run_alphafold3 refuses malformed fold input at the guard", { skip: skipReason }, async (t) => {
 	const gateway = await startGateway(t, { env: withTemplates });
 	const attacks = [

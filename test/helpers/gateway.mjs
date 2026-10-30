@@ -24,6 +24,15 @@ export const HELD_REASON =
 	"the enable is out-of-band: the deploy env (theta-compute.env), see gateway/README.md; " +
 	"report the hold to the researcher and do not retry";
 
+// The throttled refusal's words — _throttled_message in server.py with
+// principal, observed count, ceiling, and window all concrete (#94),
+// asserted verbatim both on the wire and on the audit line.
+export const throttledReason = (user, observed, ceiling, windowSeconds) =>
+	`the submit ceiling is reached — principal ${user} has ${observed} submit(s) in the rolling ` +
+	`${windowSeconds}-second window (ceiling ${ceiling}); the ceiling is deploy-time env ` +
+	"(theta-compute.env on the cluster), see gateway/README.md; wait for the window to roll, " +
+	"report the throttle to the researcher, and do not retry in this session";
+
 // The gateway runs from its locked uv environment (gateway/uv.lock). With
 // no uv on PATH (unusual), skip rather than fail: CI installs uv.
 const uvProbe = spawnSync("uv", ["--version"]);

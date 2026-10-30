@@ -84,6 +84,10 @@ _Avoid_: approval gate, consent prompt
 The compute gateway's deploy-time hold on job creation — `on` by default; while `off`, `submit_job` and `run_alphafold3` answer a hard refusal (a HOLD audit line) and `cancel_job` with the read-only tools stay in service. The state rides the deploy env (`theta-compute.env` on the cluster), so restarts keep it by construction. ADR 0006 ships it.
 _Avoid_: kill switch, maintenance mode, feature flag
 
+**Submit ceiling**:
+The compute gateway's per-principal rolling bound on job creation — the deploy env names how many submits (`submit_job`, `run_alphafold3`) one principal may spend per rolling window (20 an hour by default); the count derives from the audit log itself, and past the bound the call answers a throttled refusal (a THROTTLE audit line) naming principal, count, and window. M5 ships it.
+_Avoid_: quota, spend cap
+
 **Clean-room rig**:
 The disposable Linux container a dogfood or adversarial session runs in: the checkout is a fresh clone of the pinned HEAD in the container's ephemeral home, the evidence dir mounts in from the host, and the provider key is the one credential it receives. ADR 0005 ships it.
 _Avoid_: dev server, test server

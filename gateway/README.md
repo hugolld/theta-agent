@@ -9,7 +9,9 @@ only: every institutional fact (the token, the user name, the audit
 location, the ceilings) rides deploy-time env, and the npm tarball does
 not ship it. A deploy-time submit capability (ADR 0006) is the outer
 bound around job creation: while it is off, the job-creating tools answer
-a hard refusal no client can talk its way past.
+a hard refusal no client can talk its way past. Inside it, a per-principal
+submit ceiling (#94) bounds runaway submits: past the ceiling the same
+tools answer a throttled refusal the audit log itself derived.
 
 ## Layout
 
@@ -50,6 +52,7 @@ an SSH port-forward, below).
 | `THETA_COMPUTE_TOKEN` | — (required) | the bearer token; the server refuses to start without one |
 | `THETA_COMPUTE_USER` | the OS user | the principal the token belongs to; rides every audit line and the job-name prefix |
 | `THETA_COMPUTE_SUBMIT_CAPABILITY` | `on` | `on`/`off` — while `off`, `submit_job` and `run_alphafold3` answer a hard refusal (a HOLD audit line); `cancel_job` and the read-only tools stay in service (ADR 0006) |
+| `THETA_COMPUTE_SUBMIT_CEILING` | 20 | the per-principal submit ceiling: submits (`submit_job`, `run_alphafold3`) one principal may spend per rolling window before the gateway throttles (a THROTTLE audit line, spec #94); the window is a code constant (3600 s), not env |
 | `THETA_COMPUTE_AUDIT_LOG` | `./theta-compute-audit.jsonl` | audit JSONL path |
 | `THETA_COMPUTE_AUDIT_MAX_BYTES` | 10485760 | rotation ceiling in bytes |
 | `THETA_COMPUTE_SLURM_TIMEOUT` | 30 | per-command Slurm timeout in seconds |
@@ -141,6 +144,46 @@ echo 'THETA_COMPUTE_SUBMIT_CAPABILITY=off' > theta-compute.env   # the hold
 # then restart with the phase-0 start command (step 3), which sources the file
 ```
 
+## The submit ceiling
+
+Inside the capability, a rolling per-principal bound on job creation
+(spec #94 — ADR 0006's throttle instance): `submit_job` and
+`run_alphafold3` may spend at most `THETA_COMPUTE_SUBMIT_CEILING`
+submits per rolling 3600-second window. Past it the call answers a
+throttled refusal — pre-dispatch like the hold, before the guard — and
+the refusal names the principal, the observed count, and the window.
+`cancel_job` and the read-only tools neither spend nor face the ceiling:
+monitoring and remediation stay frictionless under a throttle exactly as
+under a hold.
+
+The count is the audit log's own record, read at call time: the
+principal's `ALLOW` lines for the two job-creating tools whose `ts`
+falls inside the window. That makes the trail the ceiling's only state —
+a restart keeps the count by construction, because it never lived in the
+process — and it picks the honest accounting on purpose: a submit Slurm
+then refused still counts (the call spent the boundary's dispatch, and a
+loop of failing submits is still a loop), while DENY, HOLD, and THROTTLE
+lines never count (nothing ran). The window's memory is the trail the
+deploy keeps: the current audit file plus its one rotated generation.
+
+Layering keeps one call, one line: the capability is checked first, the
+ceiling next, the guard last — a call that would fail several answers
+the outermost line, so a hold outranks the ceiling and the ceiling
+outranks a guard refusal. Two residuals are on record: the ceiling
+observes counts, it is not a semaphore — two submits racing the same
+instant can both pass — and a wiped audit log is a reset budget, one
+more reason `audit/` is deploy state, never rsynced over.
+
+The ceiling is one or greater — a zero ceiling is the capability's job,
+not the throttle's — and rides the same channel as the capability:
+
+```sh
+ssh <login-node-alias>
+cd <remote-dir>
+echo 'THETA_COMPUTE_SUBMIT_CEILING=2' >> theta-compute.env  # a deliberately low test ceiling
+# delete the line to restore the default (20); then restart (step 3), which sources the file
+```
+
 ## The guard: sandbox, allow-list, ceilings
 
 - **Path sandbox.** Every path the tools touch resolves under the
@@ -230,16 +273,25 @@ And a held submit, its own kind (the mutating-only field rides it):
 {"args_sha256":"sha256:9a1f…","decision":"HOLD","job_id":null,"reason":"the submit capability is off — job-creating calls (submit_job, run_alphafold3) are held; the enable is out-of-band: the deploy env (theta-compute.env), see gateway/README.md; report the hold to the researcher and do not retry","submit_capability":"off","tool":"submit_job","ts":"2026-10-30T09:15:42Z","user":"cluster-user"}
 ```
 
+And a throttled submit — the ceiling's own kind, carrying the count and
+the window it was taken over (the mutating-only field rides it too):
+
+```json
+{"args_sha256":"sha256:3d07…","decision":"THROTTLE","job_id":null,"reason":"the submit ceiling is reached — principal cluster-user has 3 submit(s) in the rolling 3600-second window (ceiling 3); the ceiling is deploy-time env (theta-compute.env on the cluster), see gateway/README.md; wait for the window to roll, report the throttle to the researcher, and do not retry in this session","submit_capability":"on","submit_count":3,"submit_window_seconds":3600,"tool":"submit_job","ts":"2026-10-30T10:41:07Z","user":"cluster-user"}
+```
+
 | Field | Meaning |
 | --- | --- |
 | `ts` | UTC ISO-8601 instant of the decision, second resolution |
 | `user` | the authenticated principal the token belongs to |
 | `tool` | tool name |
 | `args_sha256` | `sha256:<hex>` over the canonical JSON of the argument object (sorted keys, no whitespace) — the digest, never the arguments |
-| `decision` | `ALLOW` — the guard let the call through; `DENY` — the guard refused before any subprocess ran; `HOLD` — the submit capability was off, so a job-creating call never reached the guard or a tool (ADR 0006) |
+| `decision` | `ALLOW` — the guard let the call through; `DENY` — the guard refused before any subprocess ran; `HOLD` — the submit capability was off, so a job-creating call never reached the guard or a tool (ADR 0006); `THROTTLE` — the principal reached the submit ceiling, so a job-creating call never reached the guard or a tool (spec #94) |
 | `job_id` | the call's job-id argument when the tool takes one; else the id a successful `submit_job` minted; on a DENY it is the rejected value verbatim when it was a string (the digest always covers the full arguments) |
 | `submit_capability` | `"on"`/`"off"` on lines for mutating tools (`stage_files`, `submit_job`, `cancel_job`, `run_alphafold3`) — the capability the call observed, on every decision; absent on read-only lines |
-| `reason` | null on success; a DENY names the refusal; an ALLOW that failed names the failure; a HOLD names the hold |
+| `submit_count` | on a THROTTLE line: the submits the log held for the principal inside the window when the call arrived; absent from every other line |
+| `submit_window_seconds` | on a THROTTLE line: the rolling window, in seconds, the count was taken over; absent from every other line |
+| `reason` | null on success; a DENY names the refusal; an ALLOW that failed names the failure; a HOLD names the hold; a THROTTLE names the principal, the count, and the window |
 
 A call without a valid token is answered HTTP 401 by the transport and is
 not a tool call — it leaves no audit line. Rotation keeps one prior
@@ -254,8 +306,9 @@ call to run first stay ALLOW with the refusal as the reason: cancelling a
 job whose name lacks the ownership prefix (squeue had to answer first),
 a fetch past the cap (the run directory had to be read), a symlink in the
 fetched tree. The audit trail holds both; the distinction is honest about
-what had run. The capability is checked before the guard: a call that
-would fail both answers HOLD — one call, one line, and the outer bound is
+what had run. The capability is checked first, the ceiling next, the
+guard last: a call that would fail several answers the outermost line —
+HOLD over THROTTLE over DENY — one call, one line, and the outer bound is
 the one that answered.
 
 ## Offline tests
@@ -279,8 +332,13 @@ the submit capability: the held path (a HOLD line, nothing written,
 nothing run — even when the guard would also refuse), cancel and the
 read-only tools in service during a hold, the observed state on mutating
 lines, the restart that keeps holding, and the boot refusal on a value
-that is neither on nor off. It runs with the repo
-suite: `npm test`.
+that is neither on nor off. They drive the submit ceiling the same way:
+under, at, and over the budget; the count surviving a restart because it
+is the audit log's, not the process's; another principal's submits and
+an expired window's not counting; the hold outranking the ceiling; the
+boot refusal on a ceiling below one; and `run_alphafold3` spending the
+same budget as `submit_job` (in `gateway-templates.test.mjs`). It runs
+with the repo suite: `npm test`.
 
 ## Phase-0 deploy recipe (owner process + SSH forward)
 
@@ -319,10 +377,11 @@ gateway/deploy.sh <login-node-alias> <remote-dir> <cluster-user> <token-file> [p
 3. Start it there, bound to loopback, with the deploy env in place
    (`THETA_COMPUTE_TEMPLATES` names the on-cluster template registry
    directory when the typed tool is in service). The start sources
-   `theta-compute.env` when present — the cluster-side deploy state, the
-   submit capability today — and a file that fails to source aborts the
-   start rather than silently dropping its state; the start line's own
-   assignments win where both name a variable:
+   `theta-compute.env` when present — the cluster-side deploy state: the
+   submit capability, and the ceiling when the deploy sets one — and a
+   file that fails to source aborts the start rather than silently
+   dropping its state; the start line's own assignments win where both
+   name a variable:
 
    ```sh
    if [ -f theta-compute.env ]; then set -a; . ./theta-compute.env || exit 1; set +a; fi

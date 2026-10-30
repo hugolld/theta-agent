@@ -5,9 +5,10 @@ no institutional fact lives in git (ADR 0004): the bearer token, the user
 name it belongs to, the audit log's location and rotation ceiling, the
 Slurm timeout, the bind address, the staging root, the template directory
 the typed tools render from, the in-band transfer cap, the directive
-ceilings (which partitions a raw job may touch, how long, how big), and
-the submit capability — the out-of-band hold on job creation (ADR 0006)
-— all ride env.
+ceilings (which partitions a raw job may touch, how long, how big), the
+submit capability — the out-of-band hold on job creation (ADR 0006) —
+and the per-principal submit ceiling, the rolling bound on job creation
+(spec #94) — all ride env.
 """
 
 from __future__ import annotations
@@ -38,6 +39,17 @@ DEFAULT_MAX_MEM_MB = 65536
 DEFAULT_MAX_NTASKS = 16
 DEFAULT_MAX_CPUS_PER_TASK = 16
 DEFAULT_MAX_GPUS = 1
+#: The per-principal rolling submit ceiling (spec #94): how many submits
+#: (submit_job and run_alphafold3) one principal may spend per rolling
+#: window before the gateway throttles. Generous for real research — one
+#: AF3 fold an hour is already heavy spending — while a runaway loop hits
+#: it in seconds; incidents stay the capability's to hold.
+DEFAULT_SUBMIT_CEILING = 20
+#: The ceiling's window, in seconds. A code constant, not env: the
+#: ceiling is the deploy's dial, the window is the shape of the bound —
+#: and the count derives from the audit log, whose rotation is what
+#: bounds the window's memory.
+SUBMIT_WINDOW_SECONDS = 3600
 
 #: Partition names as the env may list them: plain scheduler names.
 _PARTITION_NAME = re.compile(r"[A-Za-z0-9_.-]+")
@@ -57,6 +69,12 @@ class Config:
 	#: while off, job-creating calls hold (ADR 0006). The state lives in
 	#: the deploy env, so every restart of the same deploy keeps it.
 	submit_capability: SubmitCapability
+	#: The per-principal rolling submit ceiling (spec #94): past this many
+	#: submits in the window, the job-creating tools answer a throttled
+	#: refusal. The count is derived from the audit log at call time — no
+	#: state but the trail. One or greater: a ceiling of zero is the
+	#: capability's job, not the throttle's.
+	submit_ceiling: int
 	audit_log: Path
 	audit_max_bytes: int
 	slurm_timeout_seconds: float
@@ -97,6 +115,7 @@ def load_config(env: dict[str, str] | None = None) -> Config:
 
 	user = source.get("THETA_COMPUTE_USER") or getpass.getuser()
 	capability = _submit_capability(source)
+	ceiling = _positive_int(source, "THETA_COMPUTE_SUBMIT_CEILING", DEFAULT_SUBMIT_CEILING)
 
 	audit_raw = source.get("THETA_COMPUTE_AUDIT_LOG") or DEFAULT_AUDIT_NAME
 	audit_log = Path(audit_raw).expanduser()
@@ -119,6 +138,7 @@ def load_config(env: dict[str, str] | None = None) -> Config:
 		token=token,
 		user=user,
 		submit_capability=capability,
+		submit_ceiling=ceiling,
 		audit_log=audit_log,
 		audit_max_bytes=max_bytes,
 		slurm_timeout_seconds=timeout,
