@@ -114,6 +114,7 @@ function main() {
 		if (removed.status !== 0) {
 			fail(
 				"worktree remove refused — a dirty worktree, a locked one, or the main working tree itself; resolve it by hand; nothing else changed\n" +
+				"A lock reason naming a live session is the harness holding its own worktree: exit the worktree through the harness's own tool, then rerun — never force a removal past a live session\n" +
 				removed.stderr,
 			);
 		}
