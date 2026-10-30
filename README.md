@@ -80,7 +80,7 @@ node bin/theta.mjs --dev
 `node bin/theta.mjs --dev` launches pi with this checkout preloaded;
 from a checkout you can also name another directory with
 `$THETA_DEV_ROOT` (theta never loads an arbitrary current directory
-this way). Theta targets pi ≥ 0.99; if the launcher reports
+this way). Theta targets pi ≥ 1.4.0; if the launcher reports
 `pi not found`, install pi with the command above and retry.
 
 Once theta-agent ≥ 0.4.0 is on the registry (0.3.0 and earlier predate

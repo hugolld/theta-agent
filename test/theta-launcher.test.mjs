@@ -70,7 +70,7 @@ function normalizeArg(arg) {
 }
 
 test('launch seam: runs pi -e <pkgRoot> and passes remaining args through untouched', { skip: skipOnWindows }, (t) => {
-	const binDir = makeStubPiDir('pi 0.99.2');
+	const binDir = makeStubPiDir('pi 1.4.2');
 	t.after(() => rmSync(binDir, { recursive: true, force: true }));
 	const record = join(binDir, 'record.txt');
 
@@ -91,7 +91,7 @@ function makeDevCheckout() {
 }
 
 test('launch seam: --dev from the launcher\'s own checkout uses the cwd as the -e source', { skip: skipOnWindows }, (t) => {
-	const binDir = makeStubPiDir('pi 0.99.2');
+	const binDir = makeStubPiDir('pi 1.4.2');
 	t.after(() => rmSync(binDir, { recursive: true, force: true }));
 	const record = join(binDir, 'record.txt');
 
@@ -103,7 +103,7 @@ test('launch seam: --dev from the launcher\'s own checkout uses the cwd as the -
 });
 
 test('launch seam: --dev in a directory matching $THETA_DEV_ROOT is allowed', { skip: skipOnWindows }, (t) => {
-	const binDir = makeStubPiDir('pi 0.99.2');
+	const binDir = makeStubPiDir('pi 1.4.2');
 	t.after(() => rmSync(binDir, { recursive: true, force: true }));
 	const record = join(binDir, 'record.txt');
 	const devCwd = makeDevCheckout();
@@ -116,7 +116,7 @@ test('launch seam: --dev in a directory matching $THETA_DEV_ROOT is allowed', { 
 });
 
 test('launch seam: exits with the exit code of the spawned pi', { skip: skipOnWindows }, (t) => {
-	const binDir = makeStubPiDir('pi 0.99.2', 3);
+	const binDir = makeStubPiDir('pi 1.4.2', 3);
 	t.after(() => rmSync(binDir, { recursive: true, force: true }));
 
 	const result = runTheta([], { pathDir: binDir });
@@ -162,8 +162,8 @@ test('ENOENT seam: a non-executable pi on PATH reports the spawn error, not "not
 	assert.doesNotMatch(result.stderr, /pi not found/);
 });
 
-test('version-guard seam: pi below 0.99.0 warns on stderr but still launches', { skip: skipOnWindows }, (t) => {
-	const binDir = makeStubPiDir('pi 0.98.4');
+test('version-guard seam: pi below 1.4.0 warns on stderr but still launches', { skip: skipOnWindows }, (t) => {
+	const binDir = makeStubPiDir('pi 1.3.4');
 	t.after(() => rmSync(binDir, { recursive: true, force: true }));
 	const record = join(binDir, 'record.txt');
 
@@ -171,12 +171,12 @@ test('version-guard seam: pi below 0.99.0 warns on stderr but still launches', {
 
 	assert.equal(result.status, 0, `stderr: ${result.stderr}`);
 	assert.match(result.stderr, /warning/i);
-	assert.match(result.stderr, /0\.99/);
+	assert.match(result.stderr, /1\.4\.0/);
 	assert.deepEqual(recordedArgs(record).map(normalizeArg), ['-e', root, 'task'].map(normalizeArg));
 });
 
-test('version-guard seam: pi at or above 0.99.0 launches with no warning', { skip: skipOnWindows }, (t) => {
-	const binDir = makeStubPiDir('pi 0.99.2');
+test('version-guard seam: pi at or above 1.4.0 launches with no warning', { skip: skipOnWindows }, (t) => {
+	const binDir = makeStubPiDir('pi 1.4.2');
 	t.after(() => rmSync(binDir, { recursive: true, force: true }));
 	const record = join(binDir, 'record.txt');
 
@@ -187,8 +187,8 @@ test('version-guard seam: pi at or above 0.99.0 launches with no warning', { ski
 	assert.deepEqual(recordedArgs(record).map(normalizeArg), ['-e', root, 'task'].map(normalizeArg));
 });
 
-test('version-guard seam: a 0.99.0 prerelease (e.g. 0.99.0-rc.1) warns — SemVer places it below 0.99.0', { skip: skipOnWindows }, (t) => {
-	const binDir = makeStubPiDir('pi 0.99.0-rc.1');
+test('version-guard seam: a 1.4.0 prerelease (e.g. 1.4.0-rc.1) warns — SemVer places it below 1.4.0', { skip: skipOnWindows }, (t) => {
+	const binDir = makeStubPiDir('pi 1.4.0-rc.1');
 	t.after(() => rmSync(binDir, { recursive: true, force: true }));
 	const record = join(binDir, 'record.txt');
 
@@ -196,11 +196,11 @@ test('version-guard seam: a 0.99.0 prerelease (e.g. 0.99.0-rc.1) warns — SemVe
 
 	assert.equal(result.status, 0, `stderr: ${result.stderr}`);
 	assert.match(result.stderr, /warning/i);
-	assert.match(result.stderr, /0\.99\.0-rc\.1/);
+	assert.match(result.stderr, /1\.4\.0-rc\.1/);
 });
 
 test('management-command seam: pi management commands run without the -e preload', { skip: skipOnWindows }, (t) => {
-	const binDir = makeStubPiDir('pi 0.99.2');
+	const binDir = makeStubPiDir('pi 1.4.2');
 	t.after(() => rmSync(binDir, { recursive: true, force: true }));
 	const record = join(binDir, 'record.txt');
 
@@ -211,7 +211,7 @@ test('management-command seam: pi management commands run without the -e preload
 });
 
 test('management-command seam: every documented pi management command is passed through', { skip: skipOnWindows }, (t) => {
-	const binDir = makeStubPiDir('pi 0.99.2');
+	const binDir = makeStubPiDir('pi 1.4.2');
 	t.after(() => rmSync(binDir, { recursive: true, force: true }));
 
 	for (const command of ['install', 'remove', 'uninstall', 'update', 'list', 'config', 'auth', 'mcp']) {
@@ -223,7 +223,7 @@ test('management-command seam: every documented pi management command is passed 
 });
 
 test('management-command seam: --dev before a management command still drops --dev and passes the command through', { skip: skipOnWindows }, (t) => {
-	const binDir = makeStubPiDir('pi 0.99.2');
+	const binDir = makeStubPiDir('pi 1.4.2');
 	t.after(() => rmSync(binDir, { recursive: true, force: true }));
 	const record = join(binDir, 'record.txt');
 
@@ -239,7 +239,7 @@ test('signal seam: pi dying by signal exits 128 + signal number', { skip: skipOn
 	// A stub pi that kills itself with SIGTERM (signal 15) on launch.
 	writeFileSync(
 		join(binDir, 'pi'),
-		['#!/bin/sh', 'if [ "$1" = "--version" ]; then echo "pi 0.99.2"; exit 0; fi', 'kill -TERM $$'].join('\n'),
+		['#!/bin/sh', 'if [ "$1" = "--version" ]; then echo "pi 1.4.2"; exit 0; fi', 'kill -TERM $$'].join('\n'),
 		{ mode: 0o755 },
 	);
 	chmodSync(join(binDir, 'pi'), 0o755);
@@ -261,7 +261,7 @@ test('signal seam: SIGSEGV death exits 139 and SIGKILL death exits 137 (platform
 			join(binDir, 'pi'),
 			[
 				'#!/bin/sh',
-				'if [ "$1" = "--version" ]; then echo "pi 0.99.2"; exit 0; fi',
+				'if [ "$1" = "--version" ]; then echo "pi 1.4.2"; exit 0; fi',
 				`kill -${sigName} $$`,
 			].join('\n'),
 			{ mode: 0o755 },
@@ -286,7 +286,7 @@ test('signal-forwarding seam: SIGTERM aimed at theta is forwarded to pi, which e
 		join(binDir, 'pi'),
 		[
 			'#!/bin/sh',
-			'if [ "$1" = "--version" ]; then echo "pi 0.99.2"; exit 0; fi',
+			'if [ "$1" = "--version" ]; then echo "pi 1.4.2"; exit 0; fi',
 			'/usr/bin/touch "$READY_FLAG"',
 			'trap "echo TERM-handled > \"$DEATH_REPORT\"; exit 143" TERM',
 			'while [ ! -f "$DEATH_REPORT" ]; do /bin/sleep 0.05; done',
@@ -332,7 +332,7 @@ function closeOf(child) {
 }
 
 test('--dev validation seam: --dev in a foreign directory is rejected even when its manifest spoofs the theta-agent name', { skip: skipOnWindows }, (t) => {
-	const binDir = makeStubPiDir('pi 0.99.2');
+	const binDir = makeStubPiDir('pi 1.4.2');
 	t.after(() => rmSync(binDir, { recursive: true, force: true }));
 	const foreignDir = mkdtempSync(join(tmpdir(), 'theta-test-spoof-'));
 	t.after(() => rmSync(foreignDir, { recursive: true, force: true }));
@@ -351,7 +351,7 @@ test('--dev validation seam: --dev in a foreign directory is rejected even when 
 });
 
 test('--dev validation seam: --dev in an unrelated directory without THETA_DEV_ROOT fails with a clear error', { skip: skipOnWindows }, (t) => {
-	const binDir = makeStubPiDir('pi 0.99.2');
+	const binDir = makeStubPiDir('pi 1.4.2');
 	t.after(() => rmSync(binDir, { recursive: true, force: true }));
 	const emptyDir = makeEmptyDir();
 	t.after(() => rmSync(emptyDir, { recursive: true, force: true }));
@@ -363,7 +363,7 @@ test('--dev validation seam: --dev in an unrelated directory without THETA_DEV_R
 });
 
 test('--dev validation seam: THETA_DEV_ROOT pointing elsewhere does not unlock the current directory', { skip: skipOnWindows }, (t) => {
-	const binDir = makeStubPiDir('pi 0.99.2');
+	const binDir = makeStubPiDir('pi 1.4.2');
 	t.after(() => rmSync(binDir, { recursive: true, force: true }));
 	const elsewhere = makeDevCheckout();
 	t.after(() => rmSync(elsewhere, { recursive: true, force: true }));
@@ -386,7 +386,7 @@ test('launch-failure seam: pi disappearing between probe and launch reports the 
 	// /bin/rm is absolute because PATH contains only this stub dir.
 	writeFileSync(
 		join(binDir, 'pi'),
-		['#!/bin/sh', 'if [ "$1" = "--version" ]; then echo "pi 0.99.2"; /bin/rm -f "$0"; exit 0; fi', 'exit 0'].join('\n'),
+		['#!/bin/sh', 'if [ "$1" = "--version" ]; then echo "pi 1.4.2"; /bin/rm -f "$0"; exit 0; fi', 'exit 0'].join('\n'),
 		{ mode: 0o755 },
 	);
 	chmodSync(join(binDir, 'pi'), 0o755);

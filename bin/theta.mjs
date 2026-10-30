@@ -88,8 +88,8 @@ if (probe.error) {
 	process.exit(1);
 }
 
-// Warn (but continue) when pi is older than Theta's target version (0.99.0).
-// SemVer precedence: a prerelease like 0.99.0-rc.1 sorts below the 0.99.0 release.
+// Warn (but continue) when pi is older than Theta's target version (1.4.0).
+// SemVer precedence: a prerelease like 1.4.0-rc.1 sorts below the 1.4.0 release.
 const versionMatch = /(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?/.exec(probe.stdout);
 if (versionMatch) {
 	const major = Number(versionMatch[1]);
@@ -97,10 +97,11 @@ if (versionMatch) {
 	const patch = Number(versionMatch[3]);
 	const hasPrerelease = versionMatch[4] !== undefined;
 	const belowTarget =
-		major === 0 && (minor < 99 || (minor === 99 && patch === 0 && hasPrerelease));
+		major < 1 ||
+		(major === 1 && (minor < 4 || (minor === 4 && patch === 0 && hasPrerelease)));
 	if (belowTarget) {
 		console.warn(
-			`warning: found pi ${versionMatch[0]}, but Theta targets pi >= 0.99 — continuing; some features may misbehave`,
+			`warning: found pi ${versionMatch[0]}, but Theta targets pi >= 1.4.0 — continuing; some features may misbehave`,
 		);
 	}
 }

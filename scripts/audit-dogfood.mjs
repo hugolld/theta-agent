@@ -28,7 +28,7 @@ export function ge(a, b) {
 			pre: m[4] === undefined ? null : m[4].split("."),
 		};
 	};
-	// Floors may be written short ("0.99", "22"); pad them to full SemVer.
+	// Floors may be written short ("1.4", "22.19"); pad them to full SemVer.
 	const norm = (v) =>
 		/^\d+$/.test(v) ? `${v}.0.0` : /^\d+\.\d+$/.test(v) ? `${v}.0` : v;
 	const pa = parse(norm(a));
@@ -1817,11 +1817,11 @@ export function auditSession(dir, rootArg, legs = []) {
 			"missing process-evidence files (exit-status, stderr.txt, pi-version, node-version, prompt.txt)",
 		);
 	}
-	if (!ge(piVersion, "0.99")) {
-		throw new Error(`pi ${piVersion} is below the supported 0.99 floor`);
+	if (!ge(piVersion, "1.4.0")) {
+		throw new Error(`pi ${piVersion} is below the supported 1.4.0 floor`);
 	}
-	if (!ge(nodeVersion, "22")) {
-		throw new Error(`node ${nodeVersion} is below the supported 22 floor`);
+	if (!ge(nodeVersion, "22.19.0")) {
+		throw new Error(`node ${nodeVersion} is below the supported 22.19.0 floor`);
 	}
 	if (bootExit !== "0" || bootErr !== 0) {
 		throw new Error(`boot not clean: exit ${bootExit}, stderr ${bootErr} bytes`);
