@@ -23,7 +23,7 @@ from __future__ import annotations
 import sys
 from contextvars import ContextVar
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
 from fastmcp import FastMCP
 from fastmcp.exceptions import ToolError
@@ -33,7 +33,7 @@ from fastmcp.tools.base import ToolAnnotations
 
 from . import staging
 from . import templates as template_registry
-from .audit import AuditLog, Decision
+from .audit import AuditLog, Decision, SubmitCapability
 from .auth import StaticBearerToken
 from .config import Config, ConfigError, load_config
 from .guard import (
@@ -93,7 +93,7 @@ class AuditMiddleware(Middleware):
 	"""One audit JSONL line per tool call: ALLOW dispatched, DENY refused,
 	HOLD held at the submit capability."""
 
-	def __init__(self, audit: AuditLog, limits: GuardLimits, submit_capability: Literal["on", "off"]) -> None:
+	def __init__(self, audit: AuditLog, limits: GuardLimits, submit_capability: SubmitCapability) -> None:
 		self._audit = audit
 		self._limits = limits
 		self._submit_capability = submit_capability

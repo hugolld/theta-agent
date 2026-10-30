@@ -325,7 +325,7 @@ gateway/deploy.sh <login-node-alias> <remote-dir> <cluster-user> <token-file> [p
    assignments win where both name a variable:
 
    ```sh
-   if [ -f theta-compute.env ]; then set -a; . ./theta-compute.env; set +a; fi
+   if [ -f theta-compute.env ]; then set -a; . ./theta-compute.env || exit 1; set +a; fi
    THETA_COMPUTE_TOKEN=<token> THETA_COMPUTE_USER=<cluster-user> \
      THETA_COMPUTE_AUDIT_LOG=audit/audit.jsonl \
      THETA_COMPUTE_TEMPLATES=<templates-dir> \

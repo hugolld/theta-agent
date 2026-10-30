@@ -45,6 +45,11 @@ CANONICAL_SEPARATORS = (",", ":")
 
 Decision = Literal["ALLOW", "DENY", "HOLD"]
 
+#: The submit capability's two states — one name for the words the env
+#: var, the audit line, and the refusal all share (ADR 0006). A leaf type
+#: beside Decision: guard and config both sit above this module.
+SubmitCapability = Literal["on", "off"]
+
 
 def canonical_json(value: Any) -> str:
 	"""Serialize for hashing: sorted keys, no whitespace."""
@@ -69,7 +74,7 @@ class AuditEntry:
 	reason: str | None
 	#: The observed submit capability on mutating-tool lines; None omits
 	#: the key entirely — read-only lines never carry it.
-	submit_capability: Literal["on", "off"] | None = None
+	submit_capability: SubmitCapability | None = None
 
 	def to_json(self) -> str:
 		line = {
@@ -102,7 +107,7 @@ class AuditLog:
 		decision: Decision,
 		job_id: str | None,
 		reason: str | None,
-		submit_capability: Literal["on", "off"] | None = None,
+		submit_capability: SubmitCapability | None = None,
 	) -> None:
 		"""Append one line, rotating first when the ceiling demands it."""
 		entry = AuditEntry(

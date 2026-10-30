@@ -17,8 +17,8 @@ import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
 
+from .audit import SubmitCapability
 from .guard import GuardLimits, GuardRefusal, parse_walltime
 
 #: Defaults are local-run friendly; the cluster deploy overrides them in env
@@ -56,7 +56,7 @@ class Config:
 	#: The deploy-time submit capability: "on" (the default) or "off" —
 	#: while off, job-creating calls hold (ADR 0006). The state lives in
 	#: the deploy env, so every restart of the same deploy keeps it.
-	submit_capability: Literal["on", "off"]
+	submit_capability: SubmitCapability
 	audit_log: Path
 	audit_max_bytes: int
 	slurm_timeout_seconds: float
@@ -138,7 +138,7 @@ def load_config(env: dict[str, str] | None = None) -> Config:
 	)
 
 
-def _submit_capability(env: dict[str, str]) -> Literal["on", "off"]:
+def _submit_capability(env: dict[str, str]) -> SubmitCapability:
 	# Boolean-until-off: unset means on; only an explicit "off" holds.
 	raw = env.get("THETA_COMPUTE_SUBMIT_CAPABILITY")
 	if raw is None or raw.strip() == "":
