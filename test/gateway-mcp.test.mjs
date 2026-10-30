@@ -753,6 +753,23 @@ test("submits outside the rolling window do not count", { skip: skipReason }, as
 	assert.equal(audit.at(-1).submit_count, 2, "the count is this window's submits only");
 });
 
+test("a count already over the ceiling still throttles — the deploy lowered the ceiling mid-window", { skip: skipReason }, async (t) => {
+	const auditLog = await sharedAuditLog(t);
+	// Five in-window submits against a ceiling of two: the next call must
+	// answer the throttle with the honest observed count, past the ceiling.
+	await writeFile(auditLog, `${Array.from({ length: 5 }, () => submitLine()).join("\n")}\n`);
+
+	const gateway = await startGateway(t, {
+		env: { THETA_COMPUTE_SUBMIT_CEILING: "2", THETA_COMPUTE_AUDIT_LOG: auditLog },
+	});
+	const throttled = await gateway.callTool("submit_job", { run_name: "demo", directives: { partition: "cpu" } });
+	assert.equal(throttled.isError, true);
+	assert.match(toolText(throttled), /5 submit\(s\)/, "the refusal names the observed count, past the ceiling");
+	const audit = await readAudit(auditLog);
+	assert.equal(audit.at(-1).decision, "THROTTLE");
+	assert.equal(audit.at(-1).submit_count, 5);
+});
+
 test("a call past the ceiling under a hold answers the hold — one call, one line", { skip: skipReason }, async (t) => {
 	const auditLog = await sharedAuditLog(t);
 	// The budget is already spent and the capability is off: both bounds
@@ -782,6 +799,27 @@ test("a call past the ceiling under a hold answers the hold — one call, one li
 		submit_capability: "off",
 	});
 	assert.equal("submit_count" in audit[2], false, "the hold line carries no ceiling fields");
+});
+
+test("a throttled call the guard would also refuse answers the throttle, not the guard", { skip: skipReason }, async (t) => {
+	const auditLog = await sharedAuditLog(t);
+	await writeFile(auditLog, `${submitLine()}\n`);
+	const gateway = await startGateway(t, {
+		env: { THETA_COMPUTE_SUBMIT_CEILING: "1", THETA_COMPUTE_AUDIT_LOG: auditLog },
+	});
+
+	// Both bounds fail this call — the budget is spent and the partition is
+	// outside the allow-list — and the ceiling, the outer one, answers.
+	const throttled = await gateway.callTool("submit_job", {
+		run_name: "demo",
+		directives: { partition: "gpu" },
+	});
+	assert.equal(throttled.isError, true);
+	assert.match(toolText(throttled), /the submit ceiling is reached/);
+	assert.equal(await exists(path.join(gateway.stagingRoot, "demo")), false, "nothing written");
+	assert.deepEqual(await readArgv(gateway.argvLog), [], "nothing ran");
+	const audit = await readAudit(auditLog);
+	assert.equal(audit.at(-1).decision, "THROTTLE", "the ceiling outranks the guard refusal");
 });
 
 test("a submit ceiling below one refuses to boot", { skip: skipReason }, async (t) => {
