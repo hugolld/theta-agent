@@ -13,7 +13,7 @@ Current state: 0.4.0 — M4 is shipped. The M1 base ships the `theta` launcher (
 - Host-provided packages (`@earendil-works/pi-coding-agent`, `@earendil-works/pi-ai`, `@earendil-works/pi-agent-core`, `@earendil-works/pi-tui`, `typebox`) go in `peerDependencies` with `"*"` ranges — never `dependencies`, never bundled.
 - Keep the `pi-package` keyword (gallery eligibility) and the explicit `pi` manifest (`extensions`, `skills`) in `package.json`. Manifest fields are arrays of strings — pi silently drops bare-string fields (guarded by `test/manifest.test.mjs`).
 - Never install `pi-mcp-adapter` — an installed adapter replaces pi's built-in MCP support (native since pi 0.99).
-- Target pi ≥ 0.99 and Node ≥ 22. Package loading uses `pi -e <source>`; local-path sources load without copying, so a repo checkout works exactly like the installed package.
+- Target pi ≥ 1.4.0 and Node ≥ 22.19.0. Package loading uses `pi -e <source>`; local-path sources load without copying, so a repo checkout works exactly like the installed package.
 - The pi extension API is read from the installed package, not the web — the paths below sit under the pi install root (`$(npm root -g)/@earendil-works/pi-coding-agent/`): `docs/extensions.md` (events, the tool-call pipeline, UI modes), `docs/mcp.md` (tool naming and exposure — MCP tool names are sanitized to `[A-Za-z0-9_]`, so a server hyphen registers as an underscore), and `dist/core/extensions/types.d.ts` for the exact event and context shapes.
 
 ## Conventions

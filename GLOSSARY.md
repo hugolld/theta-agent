@@ -83,3 +83,11 @@ _Avoid_: approval gate, consent prompt
 **Clean-room rig**:
 The disposable Linux container a dogfood or adversarial session runs in: the checkout is a fresh clone of the pinned HEAD in the container's ephemeral home, the evidence dir mounts in from the host, and the provider key is the one credential it receives. ADR 0005 ships it.
 _Avoid_: dev server, test server
+
+**Codemode**:
+pi's built-in tool for scripted tool use (shipped 0.99.0): the model writes a JavaScript script, pi runs it in a QuickJS sandbox, and the script calls pi's other tools — bash and MCP tools included — as async functions, with only the script's output reaching the model. Nested calls still cross the tool-call pipeline (`parentToolCallId` links the layers), so permission gates see them exactly like direct calls; a session whose MCP server exposure includes it runs the tool auto-activated.
+_Avoid_: code mode, sandbox mode
+
+**Durable run**:
+A run that outlives its process — turns committed to storage before they are shown, an interrupted run resumed from storage after a crash. The pi coding agent has durable session files but no durable runs (a run dies with its process; resume is transcript replay in a new process); true durable runs live only in the separate experimental pi-durable harness, a watch item under the floor-review cadence — M7's session/run broker stays Theta-built, and long-horizon durability rides theta-compute (cluster jobs outlive the laptop).
+_Avoid_: persistent session, background run

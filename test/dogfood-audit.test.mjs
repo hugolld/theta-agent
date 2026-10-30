@@ -5,6 +5,10 @@ import os from "node:os";
 import path from "node:path";
 import { execSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
+
+// The pi runtime every synthetic session records — the current floor, so the
+// audit's runtime binding passes. Golden fixtures carry their own copies.
+const recordedPiVersion = "1.4.0\n";
 import {
 	ge,
 	decodeXmlEntities,
@@ -23,23 +27,23 @@ import {
 } from "../scripts/audit-dogfood.mjs";
 
 test("ge enforces the pi and node version floors", () => {
-	assert.equal(ge("0.99.2", "0.99"), true);
-	assert.equal(ge("1.1.0", "0.99"), true);
-	assert.equal(ge("26.11.0", "22"), true);
-	assert.equal(ge("22", "22"), true);
-	assert.equal(ge("0.98", "0.99"), false);
-	assert.equal(ge("21.9.9", "22"), false);
+	assert.equal(ge("1.4.2", "1.4"), true);
+	assert.equal(ge("2.1.0", "1.4"), true);
+	assert.equal(ge("26.11.0", "22.19"), true);
+	assert.equal(ge("22.19", "22.19"), true);
+	assert.equal(ge("1.3", "1.4"), false);
+	assert.equal(ge("22.18.9", "22.19"), false);
 });
 
 test("ge follows SemVer prerelease precedence", () => {
-	assert.equal(ge("1.0.0-rc.1", "0.99"), true);
-	assert.equal(ge("0.99.1-beta", "0.99"), true);
-	assert.equal(ge("0.99.0", "0.99.0-rc.1"), true);
+	assert.equal(ge("2.0.0-rc.1", "1.4"), true);
+	assert.equal(ge("1.4.1-beta", "1.4"), true);
+	assert.equal(ge("1.4.0", "1.4.0-rc.1"), true);
 	assert.equal(ge("1.0.0-alpha", "1.0.0"), false);
 	assert.equal(ge("1.0.0-alpha.1", "1.0.0-alpha.beta"), false);
 	assert.equal(ge("1.0.0-alpha.beta", "1.0.0-alpha.1"), true);
 	assert.equal(ge("1.0.0-alpha.1", "1.0.0-alpha"), true);
-	assert.equal(ge("1.1.0+build", "0.99"), true);
+	assert.equal(ge("2.1.0+build", "1.4"), true);
 });
 
 test("ge compares large numeric prerelease identifiers losslessly", () => {
@@ -53,23 +57,23 @@ test("ge compares large numeric core components losslessly", () => {
 });
 
 test("ge fails closed on malformed versions", () => {
-	assert.equal(ge("0.99.", "0.99"), false);
-	assert.equal(ge("0.99.0-beta", "0.99"), false);
-	assert.equal(ge("not-a-version", "0.99"), false);
-	assert.equal(ge("01.0.0", "0.99"), false);
-	assert.equal(ge("1.0.0-alpha..beta", "0.99"), false);
-	assert.equal(ge("1.0.0-01", "0.99"), false);
+	assert.equal(ge("1.4.", "1.4"), false);
+	assert.equal(ge("1.4.0-beta", "1.4"), false);
+	assert.equal(ge("not-a-version", "1.4"), false);
+	assert.equal(ge("01.0.0", "1.4"), false);
+	assert.equal(ge("1.0.0-alpha..beta", "1.4"), false);
+	assert.equal(ge("1.0.0-01", "1.4"), false);
 });
 
 test("ge accepts alphanumeric prerelease identifiers that start with zero", () => {
-	assert.equal(ge("1.0.0-0rc", "0.99"), true);
-	assert.equal(ge("1.0.0-0-rc", "0.99"), true);
-	assert.equal(ge("1.0.0+build.1", "0.99"), true);
+	assert.equal(ge("2.0.0-0rc", "1.4"), true);
+	assert.equal(ge("2.0.0-0-rc", "1.4"), true);
+	assert.equal(ge("2.0.0+build.1", "1.4"), true);
 });
 
 test("ge fails closed on malformed build metadata", () => {
-	assert.equal(ge("1.0.0+.", "0.99"), false);
-	assert.equal(ge("1.0.0+build..1", "0.99"), false);
+	assert.equal(ge("1.0.0+.", "1.4"), false);
+	assert.equal(ge("1.0.0+build..1", "1.4"), false);
 });
 
 test("decodeXmlEntities decodes pi's entity set", () => {
@@ -253,7 +257,7 @@ function goldenSession(t, repo, { text, fixtureDir } = {}) {
 		fs.writeFileSync(path.join(dir, "expected-model"), "zai-coding-cn glm-5.3-flash\n");
 		fs.writeFileSync(path.join(dir, "exit-status"), "0");
 		fs.writeFileSync(path.join(dir, "stderr.txt"), "");
-		fs.writeFileSync(path.join(dir, "pi-version"), "1.1.0\n");
+		fs.writeFileSync(path.join(dir, "pi-version"), recordedPiVersion);
 		fs.writeFileSync(path.join(dir, "node-version"), "v26.11.0\n");
 	}
 	fs.writeFileSync(path.join(dir, "pre-head"), repoHead(repo));
@@ -421,7 +425,7 @@ function buildSession(t, repo, overrides = {}) {
 	);
 	fs.writeFileSync(path.join(dir, "exit-status"), overrides.exit ?? "0");
 	fs.writeFileSync(path.join(dir, "stderr.txt"), overrides.stderr ?? "");
-	fs.writeFileSync(path.join(dir, "pi-version"), overrides.piVersion ?? "1.1.0\n");
+	fs.writeFileSync(path.join(dir, "pi-version"), overrides.piVersion ?? recordedPiVersion);
 	fs.writeFileSync(
 		path.join(dir, "node-version"),
 		overrides.nodeVersion ?? "v26.11.0\n",
@@ -1105,10 +1109,10 @@ test("auditSession fails on corrupt, mismatched, or stale evidence", (t) => {
 		/session cwd mismatch/,
 	);
 
-	const belowFloor = buildSession(t, repo, { piVersion: "0.98.0\n" });
+	const belowFloor = buildSession(t, repo, { piVersion: "1.3.0\n" });
 	assert.throws(
 		() => auditIn(repo, () => auditSession(belowFloor, repo)),
-		/below the supported 0\.99 floor/,
+		/below the supported 1\.4\.0 floor/,
 	);
 
 	const lengthCapped = buildSession(t, repo, {
@@ -1202,7 +1206,7 @@ test("auditSession rejects host aliases under inventory names", (t) => {
 	fs.writeFileSync(path.join(dir, "expected-model"), "zai-coding-cn glm-5.3-flash\n");
 	fs.writeFileSync(path.join(dir, "exit-status"), "0");
 	fs.writeFileSync(path.join(dir, "stderr.txt"), "");
-	fs.writeFileSync(path.join(dir, "pi-version"), "1.1.0\n");
+	fs.writeFileSync(path.join(dir, "pi-version"), recordedPiVersion);
 	fs.writeFileSync(path.join(dir, "node-version"), "v26.11.0\n");
 	fs.writeFileSync(path.join(dir, "pre-head"), repoHead(repo));
 	fs.writeFileSync(path.join(dir, "manifest-sha256"), repoManifestSha(repo));
