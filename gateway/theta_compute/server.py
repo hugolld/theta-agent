@@ -11,6 +11,11 @@ refusals that need a call to run first (cancelling a job the prefix says
 is not this user's) happen inside the tool and record as an allowed call
 that failed. The tools themselves stay thin — argument guard, wrapper
 call, structured answer.
+
+The submit capability is the outer bound around all of it (ADR 0006):
+while it is off, the job-creating tools answer a hard refusal before the
+guard runs, recorded as a HOLD line — the server-held hold that stands
+even when a client bypasses the theta-side confirm gate.
 """
 
 from __future__ import annotations
@@ -28,7 +33,7 @@ from fastmcp.tools.base import ToolAnnotations
 
 from . import staging
 from . import templates as template_registry
-from .audit import AuditLog, Decision
+from .audit import AuditLog, Decision, SubmitCapability
 from .auth import StaticBearerToken
 from .config import Config, ConfigError, load_config
 from .guard import (
@@ -51,6 +56,27 @@ from .slurm import submit_job as slurm_submit
 #: The argument name whose value rides the audit line's job_id field.
 JOB_ID_ARGUMENT = "job_id"
 
+#: The tools that create cluster jobs — the ones the submit capability
+#: holds while it is off (ADR 0006). cancel_job deliberately stays
+#: available during a hold: it remediates a runaway, it starts nothing.
+JOB_CREATING_TOOLS = frozenset({"submit_job", "run_alphafold3"})
+
+#: The tools whose audit lines carry the observed submit capability, on
+#: every decision — the mutating surface. Read-only lines omit the field.
+#: The boundary tests hold both sets against tools/list's hints, so a new
+#: tool cannot drift past them.
+MUTATING_TOOLS = frozenset({"stage_files", "submit_job", "cancel_job", "run_alphafold3"})
+
+#: The hold's words. The audit line's reason and the tool error carry the
+#: same text, so the far side and the trail say one thing — and the far
+#: side learns the remediation channel from the refusal alone.
+SUBMIT_HELD_MESSAGE = (
+	"the submit capability is off — job-creating calls (submit_job, "
+	"run_alphafold3) are held; the enable is out-of-band: the deploy env "
+	"(theta-compute.env), see gateway/README.md; report the hold to the "
+	"researcher and do not retry"
+)
+
 #: The job id a submit_job mints mid-call. No argument carried it, but the
 #: institutional trail must tie the submission to its job — the middleware
 #: reads this when it records the line.
@@ -64,11 +90,13 @@ def _boundary_error(error: Exception) -> ToolError:
 
 
 class AuditMiddleware(Middleware):
-	"""One audit JSONL line per tool call: ALLOW dispatched, DENY refused."""
+	"""One audit JSONL line per tool call: ALLOW dispatched, DENY refused,
+	HOLD held at the submit capability."""
 
-	def __init__(self, audit: AuditLog, limits: GuardLimits) -> None:
+	def __init__(self, audit: AuditLog, limits: GuardLimits, submit_capability: SubmitCapability) -> None:
 		self._audit = audit
 		self._limits = limits
+		self._submit_capability = submit_capability
 
 	async def on_call_tool(
 		self,
@@ -96,7 +124,17 @@ class AuditMiddleware(Middleware):
 				# a job id — the trail ties the submission to its job.
 				job_id=job_id if job_id is not None else _minted_job_id.get(),
 				reason=reason,
+				# The observed capability rides every mutating-tool line,
+				# whatever the decision; read-only lines omit the field.
+				submit_capability=self._submit_capability if tool in MUTATING_TOOLS else None,
 			)
+
+		# The capability is the outer bound: a held call is refused before
+		# the guard, any tool code, or a subprocess — and its own line kind
+		# makes held submits countable like denials (ADR 0006).
+		if tool in JOB_CREATING_TOOLS and self._submit_capability != "on":
+			record("HOLD", SUBMIT_HELD_MESSAGE)
+			raise ToolError(SUBMIT_HELD_MESSAGE)
 
 		# The guard runs before dispatch: a refusal is a policy decision
 		# (DENY) and never reaches a subprocess or a file.
@@ -133,9 +171,15 @@ def build_app(config: Config, template_specs: dict[str, template_registry.Templa
 			"The Theta compute gateway: staged Slurm runs. Stage input files, "
 			"submit a guarded job, watch it, fetch its artifacts — every call "
 			"is authenticated and audited; see gateway/README.md."
+			+ (
+				""
+				if config.submit_capability == "on"
+				else " The submit capability is off: submit_job and run_alphafold3 "
+				"answer a hard refusal until the deploy env re-enables them."
+			)
 		),
 		auth=StaticBearerToken(config.token, config.user),
-		middleware=[AuditMiddleware(audit, config.guard_limits())],
+		middleware=[AuditMiddleware(audit, config.guard_limits(), config.submit_capability)],
 	)
 
 	@app.tool(annotations=ToolAnnotations(read_only_hint=True, open_world_hint=False))

@@ -4,9 +4,10 @@ Nothing is configurable from the client — the tool surface is fixed — and
 no institutional fact lives in git (ADR 0004): the bearer token, the user
 name it belongs to, the audit log's location and rotation ceiling, the
 Slurm timeout, the bind address, the staging root, the template directory
-the typed tools render from, the in-band transfer cap, and the directive
-ceilings (which partitions a raw job may touch, how long, how big) all
-ride env.
+the typed tools render from, the in-band transfer cap, the directive
+ceilings (which partitions a raw job may touch, how long, how big), and
+the submit capability — the out-of-band hold on job creation (ADR 0006)
+— all ride env.
 """
 
 from __future__ import annotations
@@ -17,6 +18,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
+from .audit import SubmitCapability
 from .guard import GuardLimits, GuardRefusal, parse_walltime
 
 #: Defaults are local-run friendly; the cluster deploy overrides them in env
@@ -51,6 +53,10 @@ class Config:
 
 	token: str
 	user: str
+	#: The deploy-time submit capability: "on" (the default) or "off" —
+	#: while off, job-creating calls hold (ADR 0006). The state lives in
+	#: the deploy env, so every restart of the same deploy keeps it.
+	submit_capability: SubmitCapability
 	audit_log: Path
 	audit_max_bytes: int
 	slurm_timeout_seconds: float
@@ -90,6 +96,7 @@ def load_config(env: dict[str, str] | None = None) -> Config:
 		raise ConfigError("THETA_COMPUTE_TOKEN is not set — the gateway refuses to run unauthenticated")
 
 	user = source.get("THETA_COMPUTE_USER") or getpass.getuser()
+	capability = _submit_capability(source)
 
 	audit_raw = source.get("THETA_COMPUTE_AUDIT_LOG") or DEFAULT_AUDIT_NAME
 	audit_log = Path(audit_raw).expanduser()
@@ -111,6 +118,7 @@ def load_config(env: dict[str, str] | None = None) -> Config:
 	return Config(
 		token=token,
 		user=user,
+		submit_capability=capability,
 		audit_log=audit_log,
 		audit_max_bytes=max_bytes,
 		slurm_timeout_seconds=timeout,
@@ -128,6 +136,17 @@ def load_config(env: dict[str, str] | None = None) -> Config:
 		# entirely (the typed AF3 tool still owns the GPUs it fixes).
 		max_gpus=_int_in_range(source, "THETA_COMPUTE_MAX_GPUS", DEFAULT_MAX_GPUS, 0, None),
 	)
+
+
+def _submit_capability(env: dict[str, str]) -> SubmitCapability:
+	# Boolean-until-off: unset means on; only an explicit "off" holds.
+	raw = env.get("THETA_COMPUTE_SUBMIT_CAPABILITY")
+	if raw is None or raw.strip() == "":
+		return "on"
+	value = raw.strip().lower()
+	if value not in ("on", "off"):
+		raise ConfigError(f"THETA_COMPUTE_SUBMIT_CAPABILITY={raw!r} is not 'on' or 'off'")
+	return value
 
 
 def _partitions(env: dict[str, str], name: str, default: tuple[str, ...]) -> tuple[str, ...]:

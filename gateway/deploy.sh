@@ -15,7 +15,11 @@
 # venv), adapt the remote lock copy for an older uv, restart the gateway
 # bound to loopback, and wait for the 401 that means listening-and-
 # authenticating. The pkill pattern brackets one letter so this script's
-# own remote shell can never match it.
+# own remote shell can never match it. The restart sources the remote
+# theta-compute.env when present (the cluster-side deploy state, never
+# rsynced over) and aborts when it fails to source — a broken state file
+# must never silently re-enable submits. Where the file and the start
+# line both name a variable, the start line's own assignment wins.
 set -eu
 
 alias_name=${1:-}
@@ -42,8 +46,11 @@ remote="export PATH=\"\$HOME/.local/bin:\$PATH\"; cd '$remote_dir'"
 
 echo "rsync gateway/ -> $alias_name:$remote_dir"
 # .nfs* are NFS silly-renames of files a live process still holds open —
-# not ours to delete; they clear when the process exits.
+# not ours to delete; they clear when the process exits. theta-compute.env
+# is the cluster-side deploy state (the submit capability); rsync never
+# touches it, so a redeploy keeps the configured state.
 rsync -a --delete --exclude .venv --exclude __pycache__ --exclude audit --exclude '.nfs*' \
+	--exclude theta-compute.env \
 	"$repo_root/gateway/" "$alias_name:$remote_dir/"
 
 # The remote uv may be older than the one that wrote uv.lock; one unlocked
@@ -55,7 +62,12 @@ ssh "$alias_name" "$remote && uv run python -c 'import theta_compute.server'"
 # still matching both the uv wrapper and the python it runs.
 ssh "$alias_name" "pkill -f '(python|uv run).*theta[_]compute'" || true
 sleep 1
-ssh "$alias_name" "read -r token; export PATH=\"\$HOME/.local/bin:\$PATH\"; cd '$remote_dir' && \
+# The sourcing runs synchronously — a broken theta-compute.env must fail
+# this ssh (and with set -eu, the deploy) instead of sinking into the
+# background start.
+ssh "$alias_name" "read -r token; export PATH=\"\$HOME/.local/bin:\$PATH\"
+	cd '$remote_dir' || exit 1
+	if [ -f theta-compute.env ]; then set -a; . ./theta-compute.env || exit 1; set +a; fi
 	THETA_COMPUTE_TOKEN=\$token THETA_COMPUTE_USER='$cluster_user' \
 	THETA_COMPUTE_AUDIT_LOG=audit/audit.jsonl THETA_COMPUTE_PORT='$port' \
 	$templates_env\

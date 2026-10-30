@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 
 import {
+	HELD_REASON,
 	assertAuditLine,
 	argumentDigest,
 	canonicalJson,
@@ -194,6 +195,34 @@ test("run_alphafold3 stages the validated input, renders free variables only, an
 		decision: "ALLOW",
 		job_id: "777001",
 		reason: null,
+		submit_capability: "on",
+	});
+});
+
+test("while the submit capability is off, run_alphafold3 holds like submit_job", { skip: skipReason }, async (t) => {
+	const gateway = await startGateway(t, {
+		env: { ...withTemplates, THETA_COMPUTE_SUBMIT_CAPABILITY: "off" },
+	});
+	const args = { run_name: "af3-demo", fold_input: foldInput };
+
+	const held = await gateway.callTool("run_alphafold3", args);
+	assert.equal(held.isError, true);
+	assert.match(toolText(held), /the submit capability is off/);
+
+	// The hold is pre-dispatch: nothing staged, nothing submitted.
+	assert.equal(await exists(path.join(gateway.stagingRoot, "af3-demo")), false, "no run directory written");
+	assert.deepEqual(await readArgv(gateway.argvLog), []);
+
+	const audit = await readAudit(gateway.auditLog);
+	assert.equal(audit.length, 1);
+	assertAuditLine(audit[0], {
+		user: "test-user",
+		tool: "run_alphafold3",
+		args_sha256: argumentDigest(args),
+		decision: "HOLD",
+		job_id: null,
+		reason: HELD_REASON,
+		submit_capability: "off",
 	});
 });
 

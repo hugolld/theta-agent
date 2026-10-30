@@ -334,6 +334,8 @@ const scanSurfaces = [
 	// ADR 0005 carries the clean-room headword; the rig's own prose lives in
 	// dogfood.md's clean-room section, already a scan surface.
 	"docs/adr/0005-dogfood-runs-in-a-clean-room-rig.md",
+	// ADR 0006 carries the submit-capability headword (M5's safety gates).
+	"docs/adr/0006-a-server-held-capability-bounds-submits.md",
 	// The gateway README carries the compute headwords' working vocabulary
 	// (compute gateway, audit line) through the M4 strikes.
 	"gateway/README.md",

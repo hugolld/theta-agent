@@ -80,6 +80,10 @@ _Avoid_: run receipt, job receipt
 The permission extension that confirms the compute gateway's destructive calls — `submit_job`, `cancel_job`, and `run_alphafold3`, the calls the gateway's own MCP annotations mark destructive — before they reach the gateway; read-only gateway tools run ungated. M4 ships the minimal form; M5's gate framework extends it.
 _Avoid_: approval gate, consent prompt
 
+**Submit capability**:
+The compute gateway's deploy-time hold on job creation — `on` by default; while `off`, `submit_job` and `run_alphafold3` answer a hard refusal (a HOLD audit line) and `cancel_job` with the read-only tools stay in service. The state rides the deploy env (`theta-compute.env` on the cluster), so restarts keep it by construction. ADR 0006 ships it.
+_Avoid_: kill switch, maintenance mode, feature flag
+
 **Clean-room rig**:
 The disposable Linux container a dogfood or adversarial session runs in: the checkout is a fresh clone of the pinned HEAD in the container's ephemeral home, the evidence dir mounts in from the host, and the provider key is the one credential it receives. ADR 0005 ships it.
 _Avoid_: dev server, test server
