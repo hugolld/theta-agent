@@ -17,6 +17,13 @@ export const gatewayDir = fileURLToPath(new URL("../../gateway", import.meta.url
 const stubBin = fileURLToPath(new URL("../fixtures/gateway/bin", import.meta.url));
 export const TOKEN = "test-token-4f2a";
 
+// The hold refusal's words — SUBMIT_HELD_MESSAGE in server.py, asserted
+// verbatim both on the wire and on the audit line (#93).
+export const HELD_REASON =
+	"the submit capability is off — job-creating calls (submit_job, run_alphafold3) are held; " +
+	"the enable is out-of-band: the deploy env (theta-compute.env), see gateway/README.md; " +
+	"report the hold to the researcher and do not retry";
+
 // The gateway runs from its locked uv environment (gateway/uv.lock). With
 // no uv on PATH (unusual), skip rather than fail: CI installs uv.
 const uvProbe = spawnSync("uv", ["--version"]);

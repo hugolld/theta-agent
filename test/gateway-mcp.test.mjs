@@ -6,6 +6,7 @@ import { test } from "node:test";
 
 import {
 	CLIENT_INFO,
+	HELD_REASON,
 	PROTOCOL_VERSION,
 	assertAuditLine,
 	argumentDigest,
@@ -17,6 +18,7 @@ import {
 	rpc,
 	skipReason,
 	startGateway,
+	startGatewayExit,
 	toolText,
 	unb64,
 } from "./helpers/gateway.mjs";
@@ -318,6 +320,7 @@ test("stage_files lands validated files in the run directory", { skip: skipReaso
 		decision: "ALLOW",
 		job_id: null,
 		reason: null,
+		submit_capability: "on",
 	});
 });
 
@@ -425,6 +428,7 @@ test("submit_job renders the guarded script and submits the file path", { skip: 
 		decision: "ALLOW",
 		job_id: "777001",
 		reason: null,
+		submit_capability: "on",
 	});
 });
 
@@ -484,6 +488,158 @@ test("a zero-GPU deployment removes gres from the raw path", { skip: skipReason 
 
 	const audit = await readAudit(gateway.auditLog);
 	assert.deepEqual(audit.map((line) => line.decision), ["DENY", "ALLOW"]);
+});
+
+test("while the submit capability is off, job-creating calls hold with their own line and nothing runs", { skip: skipReason }, async (t) => {
+	const gateway = await startGateway(t, { env: { THETA_COMPUTE_SUBMIT_CAPABILITY: "off" } });
+
+	// The held tool stays listed: the hold is a call-time refusal, not a
+	// vanishing surface.
+	const listed = await gateway.request("tools/list", {});
+	assert.ok(listed.tools.some((tool) => tool.name === "submit_job"), "submit_job stays advertised");
+
+	const args = { run_name: "demo", directives: { partition: "cpu" } };
+	const held = await gateway.callTool("submit_job", args);
+	assert.equal(held.isError, true);
+	const text = toolText(held);
+	assert.match(text, /the submit capability is off/, "the refusal names the hold");
+	assert.match(text, /out-of-band/, "the refusal names the enable channel");
+
+	// The hold is pre-dispatch: no run directory, no subprocess.
+	assert.equal(await exists(path.join(gateway.stagingRoot, "demo")), false, "no run directory written");
+	assert.deepEqual(await readArgv(gateway.argvLog), []);
+
+	const audit = await readAudit(gateway.auditLog);
+	assert.equal(audit.length, 1);
+	assertAuditLine(audit[0], {
+		user: "test-user",
+		tool: "submit_job",
+		args_sha256: argumentDigest(args),
+		decision: "HOLD",
+		job_id: null,
+		reason: HELD_REASON,
+		submit_capability: "off",
+	});
+
+	// The capability is the outer bound: a call the guard would also
+	// refuse answers the hold — one call, one line, the outer one wins.
+	const alsoBad = await gateway.callTool("submit_job", { run_name: "demo", directives: { partition: "gpu" } });
+	assert.equal(alsoBad.isError, true);
+	assert.match(toolText(alsoBad), /the submit capability is off/);
+	const auditAfter = await readAudit(gateway.auditLog);
+	assert.equal(auditAfter.length, 2);
+	assert.equal(auditAfter[1].decision, "HOLD", "the hold outranks the guard refusal");
+});
+
+test("during a hold, cancel and the read-only tools stay in service", { skip: skipReason }, async (t) => {
+	const gateway = await startGateway(t, { env: { THETA_COMPUTE_SUBMIT_CAPABILITY: "off" } });
+
+	const status = await gateway.callTool("job_status", { job_id: "424242" });
+	assert.equal(status.isError, false);
+
+	const cancel = await gateway.callTool("cancel_job", { job_id: "424343" });
+	assert.equal(cancel.isError, false);
+	assert.deepEqual(cancel.structuredContent, {
+		found: true,
+		canceled: true,
+		job_id: "424343",
+		job_name: "theta-test-user-demo",
+	});
+
+	// scancel ran: cancelling remediates a runaway, so it stays available.
+	const calls = await readArgvCalls(gateway.argvLog);
+	assert.deepEqual(
+		calls.filter((call) => call.program === "scancel").map((call) => call.args),
+		[["424343"]],
+	);
+
+	const audit = await readAudit(gateway.auditLog);
+	assert.equal(audit.length, 2);
+	// The read-only line omits the capability field; the cancel line —
+	// mutating — carries the observed off state on its ALLOW.
+	assert.equal("submit_capability" in audit[0], false, "job_status carries no capability field");
+	assert.equal(audit[1].tool, "cancel_job");
+	assert.equal(audit[1].decision, "ALLOW");
+	assert.equal(audit[1].submit_capability, "off", "the cancel ALLOW observes the hold");
+});
+
+test("the off state is the deploy env's, not the process's: a restart still holds", { skip: skipReason }, async (t) => {
+	const off = { THETA_COMPUTE_SUBMIT_CAPABILITY: "off" };
+	const first = await startGateway(t, { env: off });
+	const heldOnce = await first.callTool("submit_job", { run_name: "demo", directives: {} });
+	assert.equal(heldOnce.isError, true);
+
+	// A second process from the same env holds too — the state survives
+	// the restart by construction because it never lived in memory.
+	const second = await startGateway(t, { env: off });
+	const heldTwice = await second.callTool("submit_job", { run_name: "demo", directives: {} });
+	assert.equal(heldTwice.isError, true);
+	assert.match(toolText(heldTwice), /the submit capability is off/);
+	assert.equal((await readAudit(second.auditLog))[0].decision, "HOLD");
+});
+
+test("an explicit on submits like the default and the line observes it", { skip: skipReason }, async (t) => {
+	const gateway = await startGateway(t, { env: { THETA_COMPUTE_SUBMIT_CAPABILITY: "on" } });
+	const args = { run_name: "demo", directives: { partition: "cpu" } };
+
+	const result = await gateway.callTool("submit_job", args);
+	assert.equal(result.isError, false);
+	assert.equal(result.structuredContent.job_id, "777001");
+
+	const audit = await readAudit(gateway.auditLog);
+	assert.equal(audit.length, 1);
+	assertAuditLine(audit[0], {
+		user: "test-user",
+		tool: "submit_job",
+		args_sha256: argumentDigest(args),
+		decision: "ALLOW",
+		job_id: "777001",
+		reason: null,
+		submit_capability: "on",
+	});
+});
+
+test("a submit capability that is neither on nor off refuses to boot", { skip: skipReason }, async (t) => {
+	const { code, stderr } = await startGatewayExit(t, {
+		env: { THETA_COMPUTE_SUBMIT_CAPABILITY: "banana" },
+	});
+	assert.equal(code, 1);
+	assert.match(stderr, /THETA_COMPUTE_SUBMIT_CAPABILITY='banana' is not 'on' or 'off'/);
+});
+
+test("the middleware's mutating and job-creating sets track tools/list's hints", { skip: skipReason }, async (t) => {
+	const gateway = await startGateway(t);
+
+	// The Python sets cannot read the annotations at call time (the
+	// middleware context carries no app reference), so this test is the
+	// coupling that keeps them from drifting: every listed non-read-only
+	// tool is in MUTATING_TOOLS, and the hold set holds the job creators.
+	const source = await readFile(new URL("../gateway/theta_compute/server.py", import.meta.url), "utf8");
+	const setOf = (name) => {
+		const found = source.match(new RegExp(`${name} = frozenset\\(\\{([^}]*)\\}\\)`));
+		assert.ok(found, `${name} is a frozenset literal in server.py`);
+		return new Set([...found[1].matchAll(/"([^"]+)"/g)].map((match) => match[1]));
+	};
+	const mutating = setOf("MUTATING_TOOLS");
+	const jobCreating = setOf("JOB_CREATING_TOOLS");
+
+	const result = await gateway.request("tools/list", {});
+	for (const tool of result.tools) {
+		const mutatingListed = tool.annotations?.readOnlyHint !== true;
+		assert.equal(
+			mutating.has(tool.name),
+			mutatingListed,
+			`${tool.name}: ${mutatingListed ? "carries" : "omits"} submit_capability per its read-only hint`,
+		);
+	}
+	// The hold set is the job creators only: cancel remediates, staging
+	// spends nothing.
+	assert.equal(jobCreating.has("submit_job"), true);
+	assert.equal(jobCreating.has("run_alphafold3"), true);
+	assert.equal(jobCreating.has("cancel_job"), false);
+	for (const name of jobCreating) {
+		assert.ok(mutating.has(name), `${name} creates jobs but is not in the mutating set`);
+	}
 });
 
 test("job_logs tails the run directory's own log files", { skip: skipReason }, async (t) => {
@@ -574,6 +730,12 @@ test("cancel_job cancels owned jobs and refuses what is not owned", { skip: skip
 			["ALLOW", "666001", "tool error: scancel exited 1: scancel: error: Invalid job id specified"],
 			["DENY", "42;rm", "invalid job id '42;rm': a v1 job id is digits only"],
 		],
+	);
+	// Cancel is a mutating tool: every one of its lines, whatever the
+	// decision, carries the observed submit capability.
+	assert.ok(
+		audit.every((line) => line.submit_capability === "on"),
+		"cancel lines carry the observed capability",
 	);
 });
 

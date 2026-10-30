@@ -14,8 +14,14 @@ sync):
 	             acceptance (a Slurm-side failure, a routing error)
 	             "DENY" — the guard refused before any subprocess ran;
 	             reason names the refusal
+	             "HOLD" — the submit capability was off; a job-creating
+	             call never reached the guard, a tool, or a subprocess;
+	             reason names the hold (ADR 0006)
 	job_id       the call's job-id argument when the tool takes one, else
 	             null; on a DENY it is the rejected value verbatim
+	submit_capability  "on"/"off" on lines for mutating tools — the
+	             capability observed when the call arrived, on every
+	             decision; absent on read-only lines
 	reason       see decision
 
 The file rotates by size: when appending would push the current file past
@@ -37,7 +43,7 @@ from typing import Any, Literal
 #: keys and no whitespace, so the same arguments always hash the same.
 CANONICAL_SEPARATORS = (",", ":")
 
-Decision = Literal["ALLOW", "DENY"]
+Decision = Literal["ALLOW", "DENY", "HOLD"]
 
 
 def canonical_json(value: Any) -> str:
@@ -61,19 +67,23 @@ class AuditEntry:
 	decision: Decision
 	job_id: str | None
 	reason: str | None
+	#: The observed submit capability on mutating-tool lines; None omits
+	#: the key entirely — read-only lines never carry it.
+	submit_capability: Literal["on", "off"] | None = None
 
 	def to_json(self) -> str:
-		return canonical_json(
-			{
-				"ts": self.ts,
-				"user": self.user,
-				"tool": self.tool,
-				"args_sha256": self.args_sha256,
-				"decision": self.decision,
-				"job_id": self.job_id,
-				"reason": self.reason,
-			}
-		)
+		line = {
+			"ts": self.ts,
+			"user": self.user,
+			"tool": self.tool,
+			"args_sha256": self.args_sha256,
+			"decision": self.decision,
+			"job_id": self.job_id,
+			"reason": self.reason,
+		}
+		if self.submit_capability is not None:
+			line["submit_capability"] = self.submit_capability
+		return canonical_json(line)
 
 
 class AuditLog:
@@ -92,6 +102,7 @@ class AuditLog:
 		decision: Decision,
 		job_id: str | None,
 		reason: str | None,
+		submit_capability: Literal["on", "off"] | None = None,
 	) -> None:
 		"""Append one line, rotating first when the ceiling demands it."""
 		entry = AuditEntry(
@@ -102,6 +113,7 @@ class AuditLog:
 			decision=decision,
 			job_id=job_id,
 			reason=reason,
+			submit_capability=submit_capability,
 		)
 		line = entry.to_json() + "\n"
 		self._rotate_if_needed(len(line))
