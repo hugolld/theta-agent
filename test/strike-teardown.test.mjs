@@ -179,6 +179,19 @@ test("a branch with no worktree still deletes (the retry-after-partial-failure p
 	assert.equal(branchExists(fx.main, "feature-x"), false);
 });
 
+test("a branch absent locally whose remote is unmerged still refuses", (t) => {
+	const fx = makeFixture(t, { merged: false });
+	// The harness worktree-exit removed branch and worktree, but the PR
+	// never merged: the same guard as the present-branch case, named for
+	// the absent shape.
+	spawnSync("git", ["-C", fx.main, "push", "--quiet", "origin", "feature-x"]);
+	spawnSync("git", ["-C", fx.main, "worktree", "remove", fx.wt]);
+	spawnSync("git", ["-C", fx.main, "branch", "-D", "feature-x"]);
+	const run = runTeardown(fx.main, "feature-x");
+	assert.equal(run.status, 1);
+	assert.match(run.stderr, /no local branch feature-x and origin\/feature-x is not merged/);
+});
+
 test("an already-torn-down branch answers success, not the failure-costumed refusal", (t) => {
 	const fx = makeFixture(t, { merged: true });
 	// The harness's worktree exit removed the worktree and its branch

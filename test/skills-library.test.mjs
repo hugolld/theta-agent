@@ -398,9 +398,10 @@ function glossaryAvoidTerms(markdown) {
 // failure message is the check's UI — the term alone sent the S1 fixer
 // grepping, and the first grep missed docs/agents entirely.
 function avoidOffenders(surfaceText, glossaryText) {
+	const terms = glossaryAvoidTerms(glossaryText);
 	const offenders = [];
 	for (const [surface, text] of surfaceText) {
-		for (const term of glossaryAvoidTerms(glossaryText)) {
+		for (const term of terms) {
 			const pattern = wordPattern(term, true);
 			for (const [index, line] of text.split(/\r?\n/).entries()) {
 				if (pattern.test(line)) offenders.push(`${surface}:${index + 1} — ${term}`);
