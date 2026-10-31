@@ -55,7 +55,7 @@ Default five-role vocabulary (each label string equals its role name). See `docs
 
 ### Domain docs
 
-Single-context: root `GLOSSARY.md` + `docs/adr/`. See `docs/agents/domain.md`. Glossary edits are suite-enforced: `_Avoid_` terms are banned from self-authored prose and every headword word must appear in it — the scan list lives in `test/skills-library.test.mjs`, and self-authored prose (docs and skill text, not script comments) that carries glossary vocabulary joins that list in the same strike that lands it (S1's gateway README caught a banned term the moment it joined).
+Single-context: root `GLOSSARY.md` + `docs/adr/`. See `docs/agents/domain.md`. Glossary edits are suite-enforced: `_Avoid_` terms are banned from self-authored prose and every headword word must appear in it — the scan list lives in `test/skills-library.test.mjs` and verifies itself: self-authored prose (docs, skill text, and the extension sources' user-facing strings, not script comments) that carries glossary vocabulary joins that list in the same strike that lands it, and a file carrying a headword while off the list fails the converse test by name (S1's gateway README caught a banned term the moment it joined; S2's schema doc rode through two reviews until the check existed).
 
 ### Connector scripts
 

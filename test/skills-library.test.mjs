@@ -376,6 +376,18 @@ function wordPattern(core, hyphenGuarded) {
 	return new RegExp(`${start}${escaped}s?${end}`, "i");
 }
 
+// The glossary's headwords, one parse shared by both directions of the
+// discipline: usage (every headword describes language the docs use) and
+// coverage (every prose file carrying a headword is a scan surface).
+function glossaryHeadwords(markdown) {
+	const headwords = [];
+	for (const line of markdown.split(/\r?\n/)) {
+		const match = /^\*\*(.+)\*\*:$/.exec(line.trim());
+		if (match) headwords.push(match[1]);
+	}
+	return headwords;
+}
+
 function glossaryAvoidTerms(markdown) {
 	const terms = [];
 	for (const line of markdown.split(/\r?\n/)) {
@@ -448,10 +460,8 @@ test("an avoid-term failure names the surface and the line", () => {
 
 test("every glossary headword describes language the docs use", () => {
 	const unused = [];
-	for (const line of glossary.split(/\r?\n/)) {
-		const match = /^\*\*(.+)\*\*:$/.exec(line.trim());
-		if (!match) continue;
-		for (const word of match[1].toLowerCase().split(/\s+/)) {
+	for (const headword of glossaryHeadwords(glossary)) {
+		for (const word of headword.toLowerCase().split(/\s+/)) {
 			const stem = word.replace(/s$/, "");
 			if (!wordPattern(stem, false).test(scanText)) unused.push(word);
 		}
@@ -486,10 +496,21 @@ const PROSE_EXCEPTIONS = new Set([
 const proseFiles = await (async () => {
 	const root = new URL("../", import.meta.url);
 	const files = [];
+	// Environment trees are not self-authored prose — the dogfood runs
+	// leave .venv* and __pycache__ inside skill trees, and gateway/ carries
+	// its own virtualenv; skipping them is the walk's own rule, not a
+	// per-call workaround (the ban's first run caught a fastmcp README).
+	const skipDir = (name) =>
+		name === ".git" || name === "node_modules" || name === "__pycache__" ||
+		name === "audit" || name.startsWith(".venv");
 	const addTree = async (dir, keep) => {
-		for (const entry of await readdir(dir, { withFileTypes: true })) {
+		// sorted like treeDigest: the walk's order is the failure message's
+		const entries = (await readdir(dir, { withFileTypes: true })).sort((a, b) =>
+			a.name < b.name ? -1 : a.name > b.name ? 1 : 0,
+		);
+		for (const entry of entries) {
 			if (entry.isDirectory()) {
-				await addTree(new URL(`${entry.name}/`, dir), keep);
+				if (!skipDir(entry.name)) await addTree(new URL(`${entry.name}/`, dir), keep);
 			} else if (keep(entry.name)) {
 				files.push(decodeURIComponent(new URL(entry.name, dir).href.slice(root.href.length)));
 			}
@@ -497,16 +518,15 @@ const proseFiles = await (async () => {
 	};
 	await addTree(new URL("../docs/", import.meta.url), (n) => n.endsWith(".md"));
 	await addTree(new URL("../extensions/", import.meta.url), (n) => n.endsWith(".ts"));
-	await addTree(new URL("../gateway/", import.meta.url), (n) => n === "README.md");
-	for (const skill of expected["self-authored"]) {
+	for (const skill of expectedSelfAuthored) {
 		await addTree(new URL(`../skills/${skill}/`, import.meta.url), (n) => n.endsWith(".md"));
 	}
-	files.push("README.md", "CLAUDE.md");
+	files.push("gateway/README.md", "README.md", "CLAUDE.md");
 	return files;
 })();
 
 test("self-authored prose carrying glossary vocabulary is a scan surface", async () => {
-	const headwords = [...glossary.matchAll(/^\*\*(.+)\*\*:$/gm)].map((m) => m[1]);
+	const headwords = glossaryHeadwords(glossary);
 	const listed = new Set(scanSurfaces);
 	const missing = [];
 	for (const file of proseFiles) {
@@ -519,5 +539,24 @@ test("self-authored prose carrying glossary vocabulary is a scan surface", async
 		missing,
 		[],
 		`prose files carrying glossary headwords but not scan surfaces (join the list or argue the exception): ${missing.join("; ")}`,
+	);
+});
+
+// The ban reads the whole walk, not only the list: a file carrying an
+// _Avoid_ term while using no headword phrase (the coverage test's blind
+// side) is still self-authored prose, and the rule bans the term there.
+test("the _Avoid_ ban covers every walked prose file", async () => {
+	const offenders = avoidOffenders(scanSurfaceText, glossary);
+	const listed = new Set(scanSurfaces);
+	for (const file of proseFiles) {
+		if (PROSE_EXCEPTIONS.has(file) || listed.has(file)) continue; // argued / already scanned
+		const text = await readFile(new URL(`../${file}`, import.meta.url), "utf8");
+		offenders.push(...avoidOffenders([[file, text]], glossary));
+	}
+	offenders.sort();
+	assert.deepEqual(
+		offenders,
+		[],
+		`_Avoid_ terms found in self-authored files: ${offenders.join("; ")}`,
 	);
 });
