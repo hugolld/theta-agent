@@ -325,10 +325,11 @@ const scanSurfaces = [
 	"skills/theta-notebook/SKILL.md",
 	// The gateway skill carries the compute doctrine and its headwords.
 	"skills/theta-compute/SKILL.md",
-	// ADRs that introduce glossary vocabulary are scan surfaces — ADR 0003
-	// carries the M3 provenance headwords, ADR 0004 the M4 compute headwords.
-	// Earlier ADRs stay off the list — ADR 0002 predates the Connector skill
-	// headword and discusses its _Avoid_ terms by name.
+	// ADRs that introduce glossary vocabulary are scan surfaces — ADR 0001
+	// the M1 vendoring headwords, ADR 0003 the M3 provenance headwords,
+	// ADR 0004 the M4 compute headwords. ADR 0002 is the one argued
+	// exception, in PROSE_EXCEPTIONS below the converse test.
+	"docs/adr/0001-vendor-k-dense-skills-verbatim.md",
 	"docs/adr/0003-provenance-is-a-project-notebook.md",
 	"docs/adr/0004-compute-is-a-native-mcp-server.md",
 	// ADR 0005 carries the clean-room headword; the rig's own prose lives in
@@ -349,6 +350,9 @@ const scanSurfaces = [
 	// pi-transcript-schema.md carries the Codemode headword's working
 	// vocabulary since the M5 S2 nestedCalls strike.
 	"docs/agents/pi-transcript-schema.md",
+	// resync.md carries the vendoring headwords' working vocabulary
+	// (Vendored skill, Provenance header, Re-sync).
+	"docs/agents/resync.md",
 	// extensions/submit-gate.ts carries the Submit gate headword's working
 	// vocabulary — the confirm dialog's title and the refusal/drift reasons.
 	"extensions/submit-gate.ts",
@@ -456,5 +460,64 @@ test("every glossary headword describes language the docs use", () => {
 		unused,
 		[],
 		`glossary headword words with no usage in self-authored docs: ${unused.join(", ")}`,
+	);
+});
+
+// The list verifies itself (the S2 retro, #105): prose that carries
+// glossary vocabulary joins the scan in the same strike that lands it.
+// The rule lived as CLAUDE.md prose since the S1 retro and the omission
+// struck anyway — gateway/README.md first, pi-transcript-schema.md next —
+// and both times a review round caught what no check did. This is the
+// converse direction: every self-authored prose file that uses a headword
+// PHRASE must be a scan surface. The walk is prose only — markdown docs,
+// the extension sources (their user-facing strings are the theta.ts
+// precedent), and the self-authored skill trees; vendored trees stay
+// upstream voice, test files are the rule's own enforcers, and
+// GLOSSARY.md is the vocabulary itself. A deliberate exception argues
+// for its place here, beside the list that names it.
+const PROSE_EXCEPTIONS = new Set([
+	// ADR 0002 predates the Connector skill headword, and its title argues
+	// the ban by naming the retired term itself — an ADR may quote what it
+	// retires, so it stays off the avoid-term scan while the converse test
+	// above knows its name. (This comment names no ban: this file is a scan
+	// surface, and the fixture discipline holds here too.)
+	"docs/adr/0002-connectors-are-skills-not-registered-tools.md",
+]);
+const proseFiles = await (async () => {
+	const root = new URL("../", import.meta.url);
+	const files = [];
+	const addTree = async (dir, keep) => {
+		for (const entry of await readdir(dir, { withFileTypes: true })) {
+			if (entry.isDirectory()) {
+				await addTree(new URL(`${entry.name}/`, dir), keep);
+			} else if (keep(entry.name)) {
+				files.push(decodeURIComponent(new URL(entry.name, dir).href.slice(root.href.length)));
+			}
+		}
+	};
+	await addTree(new URL("../docs/", import.meta.url), (n) => n.endsWith(".md"));
+	await addTree(new URL("../extensions/", import.meta.url), (n) => n.endsWith(".ts"));
+	await addTree(new URL("../gateway/", import.meta.url), (n) => n === "README.md");
+	for (const skill of expected["self-authored"]) {
+		await addTree(new URL(`../skills/${skill}/`, import.meta.url), (n) => n.endsWith(".md"));
+	}
+	files.push("README.md", "CLAUDE.md");
+	return files;
+})();
+
+test("self-authored prose carrying glossary vocabulary is a scan surface", async () => {
+	const headwords = [...glossary.matchAll(/^\*\*(.+)\*\*:$/gm)].map((m) => m[1]);
+	const listed = new Set(scanSurfaces);
+	const missing = [];
+	for (const file of proseFiles) {
+		if (listed.has(file) || PROSE_EXCEPTIONS.has(file)) continue;
+		const text = await readFile(new URL(`../${file}`, import.meta.url), "utf8");
+		const carried = headwords.filter((h) => wordPattern(h, false).test(text));
+		if (carried.length > 0) missing.push(`${file} — ${carried.join(", ")}`);
+	}
+	assert.deepEqual(
+		missing,
+		[],
+		`prose files carrying glossary headwords but not scan surfaces (join the list or argue the exception): ${missing.join("; ")}`,
 	);
 });
