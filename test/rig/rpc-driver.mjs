@@ -20,6 +20,7 @@
 import { spawn } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { drainJsonl } from "./rpc-jsonl.mjs";
 
 // A bare invocation prints usage and exits 0, the runner's own help shape —
 // node --test executes every file under test/ as a test file, and this file
@@ -32,6 +33,12 @@ if (argv.length === 0) {
 const [checkout, sessionDir, prompt, gateAnswer = "allow"] = argv;
 if (!checkout || !sessionDir || !prompt) {
 	console.error("usage: rpc-driver.mjs <checkout> <sessionDir> <prompt> [allow|deny]");
+	process.exit(2);
+}
+// The verdict is exact words only: a typo'd answer must refuse to run, not
+// silently mean allow on a real submit.
+if (gateAnswer !== "allow" && gateAnswer !== "deny") {
+	console.error(`gate answer must be allow or deny, not ${JSON.stringify(gateAnswer)}`);
 	process.exit(2);
 }
 const provider = process.env.RIG_PROVIDER ?? "zai-coding-cn";
@@ -63,6 +70,7 @@ const child = spawn(
 );
 const events = [];
 let settled = false;
+let finished = false;
 let lastText = "";
 const stderrChunks = [];
 child.stderr.on("data", (chunk) => stderrChunks.push(chunk));
@@ -87,6 +95,7 @@ function send(record) {
 }
 
 function finish(code) {
+	finished = true;
 	clearTimeout(deadline);
 	writeFileSync(path.join(sessionDir, "raw-rpc-events.jsonl"), events.map((e) => JSON.stringify(e)).join("\n") + "\n");
 	writeFileSync(path.join(sessionDir, "stdout.txt"), lastText);
@@ -102,22 +111,10 @@ function finish(code) {
 child.stdout.setEncoding("utf8");
 let buffer = "";
 child.stdout.on("data", (chunk) => {
-	// Split on LF only — U+2028/2029 are valid inside JSON strings.
-	buffer += chunk;
-	let index;
-	while ((index = buffer.indexOf("\n")) !== -1) {
-		const line = buffer.slice(0, index).replace(/\r$/, "");
-		buffer = buffer.slice(index + 1);
-		if (line === "") continue;
-		let record;
-		try {
-			record = JSON.parse(line);
-		} catch {
-			continue;
-		}
+	buffer = drainJsonl(buffer, chunk, (record) => {
 		events.push(record);
 		handle(record);
-	}
+	});
 });
 
 function handle(record) {
@@ -147,8 +144,14 @@ function handle(record) {
 }
 
 child.on("exit", (code) => {
+	// pi dying after settle but before its final-text answer would
+	// otherwise idle into the outer watchdog and be recorded as a
+	// timeout; call it what it is — an unfinished capture.
 	if (!settled) {
 		console.error(`pi exited ${code} before settling`);
+		finish(1);
+	} else if (!finished) {
+		console.error(`pi exited ${code} after settling without answering the final-text request`);
 		finish(1);
 	}
 });

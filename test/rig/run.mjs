@@ -162,14 +162,25 @@ export function prepareGatewayConfig(providerDir, configPath = path.join(process
 		JSON.stringify({ mcpServers: { "theta-compute": admitted } }, null, "\t") + "\n",
 		{ mode: 0o600 },
 	);
+	// The Authorization header rides this 0600 env file into the container
+	// (`docker exec --env-file`) so the token never appears in a process's
+	// argv — same discipline as the mounted configs, one channel further.
+	writeFileSync(
+		path.join(providerDir, "agent/gateway.env"),
+		`GATEWAY_AUTH=${entry.headers.Authorization}\n`,
+		{ mode: 0o600 },
+	);
 	return admitted;
 }
 
 function execIn(command, opts = {}) {
 	const env = Object.entries(opts.env ?? {}).flatMap(([key, value]) => ["-e", `${key}=${value}`]);
+	// A secret rides the env-file, never an argv element: docker reads the
+	// 0600 file host-side, and the process table never sees its value.
+	const envFile = opts.envFile ? ["--env-file", opts.envFile] : [];
 	const result = run(
 		"docker",
-		["exec", ...env, ...(opts.tty ? ["-it"] : []), container, "bash", "-c", command],
+		["exec", ...envFile, ...env, ...(opts.tty ? ["-it"] : []), container, "bash", "-c", command],
 		opts,
 	);
 	if (result.status !== 0) {
@@ -220,6 +231,7 @@ export function gatewayPreflightScript() {
 		".then(([anon,auth])=>{",
 		'  if(anon!==401){console.error("gateway preflight: "+u+" answered HTTP "+anon+" without a token, expected 401 — is the host-side forward up?");process.exit(1)}',
 		'  if(auth===401){console.error("gateway preflight: the admitted token was refused, 401 — re-register before the run");process.exit(1)}',
+		'  if(auth>=500){console.error("gateway preflight: an authorized request answered HTTP "+auth+" — the gateway is unhealthy");process.exit(1)}',
 		'  console.log("gateway preflight ok: "+u+" answers 401 without a token and the admitted token is accepted")',
 		"})",
 		'.catch(e=>{console.error("gateway preflight failed: "+(e.cause?.code??e.message)+" — is the host-side forward up?");process.exit(1)})',
@@ -229,19 +241,20 @@ export function gatewayPreflightScript() {
 // The gateway-bearing preflight, run from inside the container against the
 // admitted URL: without the token the endpoint must answer 401 (forward up,
 // server listening), and with the Authorization header it must answer
-// anything but 401 (the admitted token still opens the door). A session
-// launched past a failed preflight starts without the gateway's tools and
-// improvises around the submit gate — so this gate fails the run first.
-// The bash the container runs is only `node -e "$RIG_PREFLIGHT"`; the
-// script's content is expanded verbatim and never re-parsed, so it carries
-// no shell-quoting surface at all.
-function preflightGateway(admitted) {
+// neither 401 (the admitted token still opens the door) nor a 5xx (the
+// gateway is in no state to serve a session). A session launched past a
+// failed preflight starts without the gateway's tools and improvises
+// around the submit gate — so this gate fails the run first. The bash the
+// container runs is only `node -e "$RIG_PREFLIGHT"`; the script's content
+// is expanded verbatim and never re-parsed, so it carries no shell-quoting
+// surface at all, and the token arrives through the 0600 env file.
+function preflightGateway(admitted, providerDir) {
 	execIn('node -e "$RIG_PREFLIGHT"', {
 		env: {
 			GATEWAY_URL: admitted.url,
-			GATEWAY_AUTH: admitted.headers.Authorization,
 			RIG_PREFLIGHT: gatewayPreflightScript(),
 		},
+		envFile: path.join(providerDir, "agent/gateway.env"),
 	});
 }
 
@@ -307,7 +320,7 @@ function main() {
 		}
 
 		startContainer(providerDir, flags.gateway);
-		if (gatewayEntry) preflightGateway(gatewayEntry);
+		if (gatewayEntry) preflightGateway(gatewayEntry, providerDir);
 
 		if (subcommand === "shell") {
 			run("docker", ["exec", "-it", container, "bash"], { stdio: "inherit" });
@@ -324,11 +337,12 @@ function main() {
 		// it. Print mode answers no confirms (the no-op UI denies them); the
 		// `--rpc` leg runs the driver instead, which answers the submit
 		// gate's confirm headlessly — evidence tooling, never a user path.
+		const sessionPrefix = `cd "$HOME/theta" && timeout --signal=TERM --kill-after=15 ${flags.timeout} `;
 		const sessionCommand = flags.rpc
-			? `cd "$HOME/theta" && timeout --signal=TERM --kill-after=15 ${flags.timeout} ` +
+			? sessionPrefix +
 				`node test/rig/rpc-driver.mjs "$HOME/theta" /session "$RIG_PROMPT" allow ` +
 				`2> /session/driver-stderr.txt`
-			: `cd "$HOME/theta" && timeout --signal=TERM --kill-after=15 ${flags.timeout} ` +
+			: sessionPrefix +
 				`node bin/theta.mjs --dev --provider ${flags.provider} --model ${flags.model} ` +
 				`--session-dir /session --print "$RIG_PROMPT" < /dev/null 2> /session/stderr.txt`;
 		const sessionEnv = { RIG_PROMPT: rest.join(" ") };

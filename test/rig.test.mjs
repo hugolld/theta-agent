@@ -173,41 +173,42 @@ test("--rpc without --gateway refuses without a daemon", () => {
 
 // A stub checkout whose bin/theta.mjs speaks just enough of the RPC
 // extension-UI protocol: it asks one confirm, echoes the answer it received
-// to a record file, then settles. The driver under test is the real one.
-const STUB_THETA = [
-	"import { writeFileSync } from 'node:fs';",
-	"// The driver spawns its child with a minimal explicit env, so the stub",
-	"// records beside its own file — node resolves the entry through the",
-	"// bin/ symlink to this file's real location.",
-	"const recordUrl = new URL('./record.json', import.meta.url);",
-	"const answers = [];",
-	"let buffer = '';",
-	"process.stdin.setEncoding('utf8');",
-	"process.stdin.on('data', (chunk) => {",
-	"	buffer += chunk;",
-	"	let i;",
-	"	while ((i = buffer.indexOf('\\n')) !== -1) {",
-	"		const line = buffer.slice(0, i);",
-	"		buffer = buffer.slice(i + 1);",
-	"		if (line === '') continue;",
-	"		let rec; try { rec = JSON.parse(line); } catch { continue; }",
-	"		if (rec.type === 'prompt') {",
-	"			process.stdout.write(JSON.stringify({ type: 'extension_ui_request', id: 'conf-1', method: 'confirm' }) + '\\n');",
-	"		} else if (rec.type === 'extension_ui_response') {",
-	"			answers.push(rec);",
-	"			writeFileSync(recordUrl, JSON.stringify(answers) + '\\n');",
-	"			process.stdout.write(JSON.stringify({ type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: 'done' } }) + '\\n');",
-	"			process.stdout.write(JSON.stringify({ type: 'agent_settled' }) + '\\n');",
-	"		} else if (rec.id === 'final') {",
-	"			process.stdout.write(JSON.stringify({ type: 'response', command: 'get_last_assistant_text', success: true, data: 'done' }) + '\\n');",
-	"		}",
-	"	}",
-	"});",
-].join("\n");
+// to a record file, then settles. The driver under test is the real one,
+// and the stub reads its stdin through the driver's own exported drainJsonl
+// — the wire format has one reader, not two copies of the same loop.
+const stubTheta = (jsonlHelperUrl) =>
+	[
+		"import { writeFileSync } from 'node:fs';",
+		`import { drainJsonl } from ${JSON.stringify(jsonlHelperUrl)};`,
+		"// The driver spawns its child with a minimal explicit env, so the stub",
+		"// records beside its own file — node resolves the entry through the",
+		"// bin/ symlink to this file's real location.",
+		"const recordUrl = new URL('./record.json', import.meta.url);",
+		"const answers = [];",
+		"let buffer = '';",
+		"process.stdin.setEncoding('utf8');",
+		"process.stdin.on('data', (chunk) => {",
+		"	buffer = drainJsonl(buffer, chunk, (rec) => {",
+		"		if (rec.type === 'prompt') {",
+		"			process.stdout.write(JSON.stringify({ type: 'extension_ui_request', id: 'conf-1', method: 'confirm' }) + '\\n');",
+		"		} else if (rec.type === 'extension_ui_response') {",
+		"			answers.push(rec);",
+		"			writeFileSync(recordUrl, JSON.stringify(answers) + '\\n');",
+		"			process.stdout.write(JSON.stringify({ type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: 'done' } }) + '\\n');",
+		"			process.stdout.write(JSON.stringify({ type: 'agent_settled' }) + '\\n');",
+		"		} else if (rec.id === 'final') {",
+		"			process.stdout.write(JSON.stringify({ type: 'response', command: 'get_last_assistant_text', success: true, data: 'done' }) + '\\n');",
+		"		}",
+		"	});",
+		"});",
+	].join("\n");
 
 async function stubCheckout() {
 	const dir = await mkdtemp(path.join(tmpdir(), "rig-drv-"));
-	await writeFile(path.join(dir, "theta.mjs"), STUB_THETA);
+	await writeFile(
+		path.join(dir, "theta.mjs"),
+		stubTheta(pathToFileURL(path.join(path.dirname(driverPath), "rpc-jsonl.mjs")).href),
+	);
 	await writeFile(path.join(dir, "record.json"), "");
 	// The driver spawns `node bin/theta.mjs` — a bin/ symlink to the stub.
 	await mkdir(path.join(dir, "bin"));
@@ -256,6 +257,21 @@ test("rpc driver can refuse instead: the deny answer cancels the confirm", async
 	const answered = JSON.parse(await readFile(recordPath, "utf8"));
 	assert.equal(answered[0].cancelled, true);
 	assert.equal(answered[0].confirmed, undefined);
+});
+
+// A typo'd verdict must refuse to run — never silently mean allow against
+// a real submit.
+test("rpc driver refuses a gate answer that is neither allow nor deny", async (t) => {
+	const checkout = await stubCheckout();
+	const sessionDir = await mkdtemp(path.join(tmpdir(), "rig-drvsess-"));
+	t.after(() => Promise.all([rm(checkout, { recursive: true, force: true }), rm(sessionDir, { recursive: true, force: true })]));
+
+	const run = spawnSync(process.execPath, [driverPath, checkout, sessionDir, "a gated prompt", "alow"], {
+		encoding: "utf8",
+	});
+	assert.equal(run.status, 2);
+	assert.match(run.stderr, /allow or deny/);
+	await assert.rejects(readFile(path.join(sessionDir, "raw-rpc-events.jsonl")));
 });
 
 // The live leg builds the image and boots it. It needs Docker and network;
