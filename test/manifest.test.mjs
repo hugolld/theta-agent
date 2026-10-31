@@ -84,3 +84,23 @@ test("the pin pattern rejects run-time resolves", () => {
 	assert.ok(!PINNED.test("ruff@latest"));
 	assert.ok(!PINNED.test("@scope/tool"));
 });
+
+// The version a bump ships must reach every prose surface that names it;
+// README's other, intentional old-version mentions ("0.4.0 predates the M5
+// safety gates") are excluded by anchoring each assertion to its surface's
+// own wording. The M5 closeout swept all three by hand — this makes the
+// next bump's forgotten surface a red test instead of a review find.
+test("the version names its three prose surfaces", async () => {
+	const surfaces = [
+		["README.md", `**Very early development (${manifest.version}).**`],
+		["extensions/theta.ts", `* Status: ${manifest.version}.`],
+		["CLAUDE.md", `Current state: ${manifest.version} —`],
+	];
+	for (const [file, phrase] of surfaces) {
+		const text = await readFile(new URL(`../${file}`, import.meta.url), "utf8");
+		assert.ok(
+			text.includes(phrase),
+			`${file} does not carry "${phrase}" — a version bump missed this surface`,
+		);
+	}
+});
