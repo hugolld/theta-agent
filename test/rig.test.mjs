@@ -5,7 +5,7 @@ import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { parseFlags, prepareProviderConfig, prepareGatewayConfig } from "./rig/run.mjs";
+import { parseFlags, prepareProviderConfig, prepareGatewayConfig, gatewayPreflightScript } from "./rig/run.mjs";
 
 const dockerfile = await readFile(fileURLToPath(new URL("./rig/Dockerfile", import.meta.url)), "utf8");
 const runnerPath = fileURLToPath(new URL("./rig/run.mjs", import.meta.url));
@@ -107,6 +107,23 @@ test("gateway config prep admits one rewritten registration, 0600", async (t) =>
 	assert.equal(parsed.mcpServers["theta-compute"].url, "http://host.docker.internal:8421/mcp");
 	const mode = (await stat(path.join(providerDir, "agent/mcp.json"))).mode & 0o777;
 	assert.equal(mode, 0o600);
+});
+
+// The preflight script rides an env var into the container, so its content
+// never has a shell-quoting surface (the first assembly closed its bash
+// quote as a JS delimiter and the in-container bash saw it unmatched). The
+// offline floor: the shipped script parses, and with nothing behind the URL
+// it fails loudly through its catch, not with a syntax error.
+test("gateway preflight script parses and fails loudly with no server", () => {
+	const script = gatewayPreflightScript();
+	assert.equal(script.includes("—"), true, "the messages keep their em dashes verbatim");
+	const probe = spawnSync(process.execPath, ["-e", script], {
+		encoding: "utf8",
+		env: { ...process.env, GATEWAY_URL: "http://127.0.0.1:1/mcp", GATEWAY_AUTH: "Bearer none" },
+	});
+	assert.equal(probe.status, 1, `expected exit 1, got ${probe.status}\nstdout: ${probe.stdout}\nstderr: ${probe.stderr}`);
+	assert.match(probe.stderr, /gateway preflight failed/);
+	assert.doesNotMatch(probe.stderr, /SyntaxError/, "the shipped script must parse as-is");
 });
 
 // The admission refusals run in a child process: the runner's fail() exits,

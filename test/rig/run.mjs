@@ -210,22 +210,39 @@ function startContainer(providerDir, withGateway) {
 	if (withGateway) execIn("cp /pi-ro/agent/mcp.json ~/.pi/agent/mcp.json && chmod 600 ~/.pi/agent/mcp.json");
 }
 
+// The probe script itself, exported for the offline test: it must parse and
+// fail loudly with no server behind the URL. It rides an env var into the
+// container — never the bash command line — so no shell ever parses it.
+export function gatewayPreflightScript() {
+	return [
+		"const u=process.env.GATEWAY_URL,h=process.env.GATEWAY_AUTH;",
+		"Promise.all([fetch(u).then(r=>r.status),fetch(u,{headers:{Authorization:h}}).then(r=>r.status)])",
+		".then(([anon,auth])=>{",
+		'  if(anon!==401){console.error("gateway preflight: "+u+" answered HTTP "+anon+" without a token, expected 401 — is the host-side forward up?");process.exit(1)}',
+		'  if(auth===401){console.error("gateway preflight: the admitted token was refused, 401 — re-register before the run");process.exit(1)}',
+		'  console.log("gateway preflight ok: "+u+" answers 401 without a token and the admitted token is accepted")',
+		"})",
+		'.catch(e=>{console.error("gateway preflight failed: "+(e.cause?.code??e.message)+" — is the host-side forward up?");process.exit(1)})',
+	].join("\n");
+}
+
 // The gateway-bearing preflight, run from inside the container against the
 // admitted URL: without the token the endpoint must answer 401 (forward up,
 // server listening), and with the Authorization header it must answer
 // anything but 401 (the admitted token still opens the door). A session
 // launched past a failed preflight starts without the gateway's tools and
 // improvises around the submit gate — so this gate fails the run first.
+// The bash the container runs is only `node -e "$RIG_PREFLIGHT"`; the
+// script's content is expanded verbatim and never re-parsed, so it carries
+// no shell-quoting surface at all.
 function preflightGateway(admitted) {
-	execIn(
-		"node -e 'const u=process.env.GATEWAY_URL,h=process.env.GATEWAY_AUTH;" +
-			"Promise.all([fetch(u).then(r=>r.status),fetch(u,{headers:{Authorization:h}}).then(r=>r.status)])" +
-			'.then(([anon,auth])=>{if(anon!==401){console.error("gateway preflight: "+u+" answered HTTP "+anon+" without a token, expected 401 — is the host-side forward up?");process.exit(1)}' +
-			'if(auth===401){console.error("gateway preflight: the admitted token was refused, 401 — re-register before the run");process.exit(1)}' +
-			'console.log("gateway preflight ok: "+u+" answers 401 without a token and the admitted token is accepted")})' +
-			'.catch(e=>{console.error("gateway preflight failed: "+(e.cause?.code??e.message)+" — is the host-side forward up?");process.exit(1)})',
-		{ env: { GATEWAY_URL: admitted.url, GATEWAY_AUTH: admitted.headers.Authorization } },
-	);
+	execIn('node -e "$RIG_PREFLIGHT"', {
+		env: {
+			GATEWAY_URL: admitted.url,
+			GATEWAY_AUTH: admitted.headers.Authorization,
+			RIG_PREFLIGHT: gatewayPreflightScript(),
+		},
+	});
 }
 
 // The auditor binds cwd to the checkout, so run it from /theta and capture
