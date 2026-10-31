@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, readFile, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -20,6 +20,7 @@ import {
 	startGateway,
 	startGatewayExit,
 	toolText,
+	throttledReason,
 	unb64,
 } from "./helpers/gateway.mjs";
 
@@ -605,6 +606,247 @@ test("a submit capability that is neither on nor off refuses to boot", { skip: s
 	});
 	assert.equal(code, 1);
 	assert.match(stderr, /THETA_COMPUTE_SUBMIT_CAPABILITY='banana' is not 'on' or 'off'/);
+});
+
+// One ALLOW submit line in the byte shape the gateway itself writes — for
+// pre-seeding a caller-owned audit log: the ceiling derives from the log,
+// so lines on disk before any call count like lived ones (#94).
+const submitLine = ({ user = "test-user", tool = "submit_job", ageSeconds = 0 } = {}) =>
+	JSON.stringify({
+		ts: new Date(Date.now() - ageSeconds * 1000).toISOString().replace(/\.\d+Z$/, "Z"),
+		user,
+		tool,
+		args_sha256: `sha256:${"0".repeat(64)}`,
+		decision: "ALLOW",
+		job_id: "777001",
+		reason: null,
+	});
+
+// A scratch audit log the test owns, shared with the gateway via the
+// THETA_COMPUTE_AUDIT_LOG env override — the ceiling tests' seam for
+// lines that predate the process.
+const sharedAuditLog = async (t) => {
+	const scratch = await mkdtemp(path.join(tmpdir(), "theta-ceiling-"));
+	const auditLog = path.join(scratch, "audit.jsonl");
+	t.after(() => rm(scratch, { recursive: true, force: true }));
+	return auditLog;
+};
+
+test("past the submit ceiling the next job-creating call throttles with its own line", { skip: skipReason }, async (t) => {
+	const gateway = await startGateway(t, { env: { THETA_COMPUTE_SUBMIT_CEILING: "3" } });
+
+	// Under and at the ceiling: three submits spend the budget.
+	for (let i = 0; i < 3; i += 1) {
+		const result = await gateway.callTool("submit_job", {
+			run_name: `run-${i}`,
+			directives: { partition: "cpu" },
+		});
+		assert.equal(result.isError, false, `submit ${i + 1} of 3: allowed`);
+	}
+
+	// Over: the fourth answers the throttle.
+	const args = { run_name: "run-3", directives: { partition: "cpu" } };
+	const throttled = await gateway.callTool("submit_job", args);
+	assert.equal(throttled.isError, true);
+	const text = toolText(throttled);
+	assert.match(text, /the submit ceiling is reached/);
+	assert.match(text, /principal test-user/, "the refusal names the principal");
+	assert.match(text, /3 submit\(s\)/, "the refusal names the observed count");
+	assert.match(text, /3600-second window/, "the refusal names the window");
+	assert.equal(text, throttledReason("test-user", 3, 3, 3600), "the refusal's words are the message's");
+
+	// The throttle is pre-dispatch: no fourth sbatch, nothing written.
+	const calls = await readArgvCalls(gateway.argvLog);
+	assert.deepEqual(calls.map((call) => call.program), ["sbatch", "sbatch", "sbatch"]);
+	assert.equal(
+		await exists(path.join(gateway.stagingRoot, "run-3")),
+		false,
+		"nothing written for the throttled call",
+	);
+
+	// Cancel and the read-only tools neither spend nor face the ceiling.
+	const status = await gateway.callTool("job_status", { job_id: "424242" });
+	assert.equal(status.isError, false, "read-only tools stay in service past the ceiling");
+	const cancel = await gateway.callTool("cancel_job", { job_id: "424343" });
+	assert.equal(cancel.isError, false, "cancel stays in service past the ceiling");
+
+	const audit = await readAudit(gateway.auditLog);
+	assert.deepEqual(audit.map((line) => line.decision), [
+		"ALLOW",
+		"ALLOW",
+		"ALLOW",
+		"THROTTLE",
+		"ALLOW",
+		"ALLOW",
+	]);
+	assertAuditLine(audit[3], {
+		user: "test-user",
+		tool: "submit_job",
+		args_sha256: argumentDigest(args),
+		decision: "THROTTLE",
+		job_id: null,
+		reason: throttledReason("test-user", 3, 3, 3600),
+		submit_capability: "on",
+		submit_count: 3,
+		submit_window_seconds: 3600,
+	});
+});
+
+test("the ceiling's count is the audit log's: a restart still throttles", { skip: skipReason }, async (t) => {
+	const auditLog = await sharedAuditLog(t);
+	const env = { THETA_COMPUTE_SUBMIT_CEILING: "2", THETA_COMPUTE_AUDIT_LOG: auditLog };
+
+	const first = await startGateway(t, { env });
+	for (let i = 0; i < 2; i += 1) {
+		const result = await first.callTool("submit_job", { run_name: `run-${i}`, directives: {} });
+		assert.equal(result.isError, false);
+	}
+
+	// A second process from the same deploy: the two ALLOW lines on disk
+	// are the count — no submit state lived in the first process.
+	const second = await startGateway(t, { env });
+	const throttled = await second.callTool("submit_job", { run_name: "run-2", directives: {} });
+	assert.equal(throttled.isError, true);
+	assert.match(toolText(throttled), /the submit ceiling is reached/);
+	const audit = await readAudit(auditLog);
+	assert.deepEqual(audit.map((line) => line.decision), ["ALLOW", "ALLOW", "THROTTLE"]);
+	assert.equal(audit[2].submit_count, 2);
+});
+
+test("the derived count is per-principal: another user's submits do not spend this budget", { skip: skipReason }, async (t) => {
+	const auditLog = await sharedAuditLog(t);
+	// Five in-window submits by another principal: none of them count.
+	await writeFile(auditLog, `${Array.from({ length: 5 }, () => submitLine({ user: "someone-else" })).join("\n")}\n`);
+
+	const gateway = await startGateway(t, {
+		env: { THETA_COMPUTE_SUBMIT_CEILING: "2", THETA_COMPUTE_AUDIT_LOG: auditLog },
+	});
+	for (let i = 0; i < 2; i += 1) {
+		const result = await gateway.callTool("submit_job", { run_name: `own-${i}`, directives: {} });
+		assert.equal(result.isError, false, `own submit ${i + 1}: another principal spent nothing of this budget`);
+	}
+	const throttled = await gateway.callTool("submit_job", { run_name: "own-2", directives: {} });
+	assert.equal(throttled.isError, true);
+	const audit = await readAudit(auditLog);
+	const throttleLine = audit.at(-1);
+	assert.equal(throttleLine.decision, "THROTTLE");
+	assert.equal(throttleLine.user, "test-user");
+	assert.equal(throttleLine.submit_count, 2, "only this principal's submits counted");
+});
+
+test("submits outside the rolling window do not count", { skip: skipReason }, async (t) => {
+	const auditLog = await sharedAuditLog(t);
+	// Two submits two hours old: outside the 3600-second window.
+	await writeFile(auditLog, `${[submitLine({ ageSeconds: 7200 }), submitLine({ ageSeconds: 7200 })].join("\n")}\n`);
+
+	const gateway = await startGateway(t, {
+		env: { THETA_COMPUTE_SUBMIT_CEILING: "2", THETA_COMPUTE_AUDIT_LOG: auditLog },
+	});
+	// The budget is intact: the window's own submits spend it fresh.
+	for (let i = 0; i < 2; i += 1) {
+		const result = await gateway.callTool("submit_job", { run_name: `fresh-${i}`, directives: {} });
+		assert.equal(result.isError, false, `fresh submit ${i + 1}: the old submits did not count`);
+	}
+	const throttled = await gateway.callTool("submit_job", { run_name: "fresh-2", directives: {} });
+	assert.equal(throttled.isError, true);
+	const audit = await readAudit(auditLog);
+	assert.equal(audit.at(-1).submit_count, 2, "the count is this window's submits only");
+});
+
+test("cancel and the read-only tools spend nothing of the submit budget", { skip: skipReason }, async (t) => {
+	const gateway = await startGateway(t, { env: { THETA_COMPUTE_SUBMIT_CEILING: "1" } });
+
+	// Monitoring and remediation run first, against a budget of one.
+	const status = await gateway.callTool("job_status", { job_id: "424242" });
+	assert.equal(status.isError, false, "read-only tools stay in service");
+	const cancel = await gateway.callTool("cancel_job", { job_id: "424343" });
+	assert.equal(cancel.isError, false, "cancel stays in service");
+
+	// The budget is still unspent: the first submit passes, the second throttles.
+	const allowed = await gateway.callTool("submit_job", { run_name: "after-chores", directives: {} });
+	assert.equal(allowed.isError, false, "cancel and the read-only calls spent nothing");
+	const throttled = await gateway.callTool("submit_job", { run_name: "run-1", directives: {} });
+	assert.equal(throttled.isError, true);
+	assert.match(toolText(throttled), /1 submit\(s\)/, "the refusal holds the submit alone");
+
+	const audit = await readAudit(gateway.auditLog);
+	assert.deepEqual(audit.map((line) => line.decision), ["ALLOW", "ALLOW", "ALLOW", "THROTTLE"]);
+	assert.equal(audit.at(-1).submit_count, 1, "only the submit counted toward the ceiling");
+});
+
+test("a count already over the ceiling still throttles — the deploy lowered the ceiling mid-window", { skip: skipReason }, async (t) => {
+	const auditLog = await sharedAuditLog(t);
+	// Five in-window submits against a ceiling of two: the next call must
+	// answer the throttle with the honest observed count, past the ceiling.
+	await writeFile(auditLog, `${Array.from({ length: 5 }, () => submitLine()).join("\n")}\n`);
+
+	const gateway = await startGateway(t, {
+		env: { THETA_COMPUTE_SUBMIT_CEILING: "2", THETA_COMPUTE_AUDIT_LOG: auditLog },
+	});
+	const throttled = await gateway.callTool("submit_job", { run_name: "demo", directives: { partition: "cpu" } });
+	assert.equal(throttled.isError, true);
+	assert.match(toolText(throttled), /5 submit\(s\)/, "the refusal names the observed count, past the ceiling");
+	const audit = await readAudit(auditLog);
+	assert.equal(audit.at(-1).decision, "THROTTLE");
+	assert.equal(audit.at(-1).submit_count, 5);
+});
+
+test("a call past the ceiling under a hold answers the hold — one call, one line", { skip: skipReason }, async (t) => {
+	const auditLog = await sharedAuditLog(t);
+	// The budget is already spent and the capability is off: both bounds
+	// fail this call, and the capability — the outer one — answers.
+	await writeFile(auditLog, `${[submitLine(), submitLine()].join("\n")}\n`);
+	const gateway = await startGateway(t, {
+		env: {
+			THETA_COMPUTE_SUBMIT_CAPABILITY: "off",
+			THETA_COMPUTE_SUBMIT_CEILING: "2",
+			THETA_COMPUTE_AUDIT_LOG: auditLog,
+		},
+	});
+
+	const held = await gateway.callTool("submit_job", { run_name: "demo", directives: {} });
+	assert.equal(held.isError, true);
+	assert.match(toolText(held), /the submit capability is off/, "the hold answered, not the throttle");
+
+	const audit = await readAudit(auditLog);
+	assert.equal(audit.length, 3, "one line for the call");
+	assertAuditLine(audit[2], {
+		user: "test-user",
+		tool: "submit_job",
+		args_sha256: argumentDigest({ run_name: "demo", directives: {} }),
+		decision: "HOLD",
+		job_id: null,
+		reason: HELD_REASON,
+		submit_capability: "off",
+	});
+	assert.equal("submit_count" in audit[2], false, "the hold line carries no ceiling fields");
+});
+
+test("a throttled call the guard would also refuse answers the throttle, not the guard", { skip: skipReason }, async (t) => {
+	const auditLog = await sharedAuditLog(t);
+	await writeFile(auditLog, `${submitLine()}\n`);
+	const gateway = await startGateway(t, {
+		env: { THETA_COMPUTE_SUBMIT_CEILING: "1", THETA_COMPUTE_AUDIT_LOG: auditLog },
+	});
+
+	// Both bounds fail this call — the budget is spent and the partition is
+	// outside the allow-list — and the ceiling, the outer one, answers.
+	const throttled = await gateway.callTool("submit_job", {
+		run_name: "demo",
+		directives: { partition: "gpu" },
+	});
+	assert.equal(throttled.isError, true);
+	assert.match(toolText(throttled), /the submit ceiling is reached/);
+	assert.equal(await exists(path.join(gateway.stagingRoot, "demo")), false, "nothing written");
+	assert.deepEqual(await readArgv(gateway.argvLog), [], "nothing ran");
+	const audit = await readAudit(auditLog);
+	assert.equal(audit.at(-1).decision, "THROTTLE", "the ceiling outranks the guard refusal");
+});
+
+test("a submit ceiling below one refuses to boot", { skip: skipReason }, async (t) => {
+	const { code, stderr } = await startGatewayExit(t, { env: { THETA_COMPUTE_SUBMIT_CEILING: "0" } });
+	assert.equal(code, 1);
+	assert.match(stderr, /THETA_COMPUTE_SUBMIT_CEILING='0' must be 1 or greater/);
 });
 
 test("the middleware's mutating and job-creating sets track tools/list's hints", { skip: skipReason }, async (t) => {

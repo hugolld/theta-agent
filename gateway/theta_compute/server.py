@@ -15,7 +15,10 @@ call, structured answer.
 The submit capability is the outer bound around all of it (ADR 0006):
 while it is off, the job-creating tools answer a hard refusal before the
 guard runs, recorded as a HOLD line — the server-held hold that stands
-even when a client bypasses the theta-side confirm gate.
+even when a client bypasses the theta-side confirm gate. Inside it, the
+per-principal submit ceiling (spec #94) throttles a runaway loop past
+its rolling budget — the count derived from the audit log itself,
+recorded as a THROTTLE line.
 """
 
 from __future__ import annotations
@@ -35,7 +38,7 @@ from . import staging
 from . import templates as template_registry
 from .audit import AuditLog, Decision, SubmitCapability
 from .auth import StaticBearerToken
-from .config import Config, ConfigError, load_config
+from .config import SUBMIT_WINDOW_SECONDS, Config, ConfigError, load_config
 from .guard import (
 	DEFAULT_TAIL_LINES,
 	GuardLimits,
@@ -77,6 +80,20 @@ SUBMIT_HELD_MESSAGE = (
 	"researcher and do not retry"
 )
 
+
+def _throttled_message(user: str, observed: int, ceiling: int, window_seconds: int) -> str:
+	"""The throttle's words, shaped like the hold's: the audit line's
+	reason and the tool error carry the same text, and the refusal names
+	the principal, the observed count, and the window — the three spec
+	#94 demands — plus the ceiling and the channel it rides."""
+	return (
+		f"the submit ceiling is reached — principal {user} has {observed} submit(s) "
+		f"in the rolling {window_seconds}-second window (ceiling {ceiling}); the "
+		"ceiling is deploy-time env (theta-compute.env on the cluster), see "
+		"gateway/README.md; wait for the window to roll, report the throttle to "
+		"the researcher, and do not retry in this session"
+	)
+
 #: The job id a submit_job mints mid-call. No argument carried it, but the
 #: institutional trail must tie the submission to its job — the middleware
 #: reads this when it records the line.
@@ -91,12 +108,19 @@ def _boundary_error(error: Exception) -> ToolError:
 
 class AuditMiddleware(Middleware):
 	"""One audit JSONL line per tool call: ALLOW dispatched, DENY refused,
-	HOLD held at the submit capability."""
+	HOLD held at the submit capability, THROTTLE past the submit ceiling."""
 
-	def __init__(self, audit: AuditLog, limits: GuardLimits, submit_capability: SubmitCapability) -> None:
+	def __init__(
+		self,
+		audit: AuditLog,
+		limits: GuardLimits,
+		submit_capability: SubmitCapability,
+		submit_ceiling: int,
+	) -> None:
 		self._audit = audit
 		self._limits = limits
 		self._submit_capability = submit_capability
+		self._submit_ceiling = submit_ceiling
 
 	async def on_call_tool(
 		self,
@@ -116,7 +140,12 @@ class AuditMiddleware(Middleware):
 			raise RuntimeError("tool call reached the middleware unauthenticated")
 		user = token.client_id
 
-		def record(decision: Decision, reason: str | None) -> None:
+		def record(
+			decision: Decision,
+			reason: str | None,
+			submit_count: int | None = None,
+			submit_window_seconds: int | None = None,
+		) -> None:
 			self._audit.record(
 				user=user, tool=tool, arguments=arguments,
 				decision=decision,
@@ -127,6 +156,9 @@ class AuditMiddleware(Middleware):
 				# The observed capability rides every mutating-tool line,
 				# whatever the decision; read-only lines omit the field.
 				submit_capability=self._submit_capability if tool in MUTATING_TOOLS else None,
+				# The ceiling's count and window ride only THROTTLE lines.
+				submit_count=submit_count,
+				submit_window_seconds=submit_window_seconds,
 			)
 
 		# The capability is the outer bound: a held call is refused before
@@ -135,6 +167,21 @@ class AuditMiddleware(Middleware):
 		if tool in JOB_CREATING_TOOLS and self._submit_capability != "on":
 			record("HOLD", SUBMIT_HELD_MESSAGE)
 			raise ToolError(SUBMIT_HELD_MESSAGE)
+
+		# The submit ceiling sits inside the capability and outside the
+		# guard: a principal past its rolling budget is refused before the
+		# guard, any tool code, or a subprocess, and the count is the audit
+		# log's own record — no state but the trail (spec #94). When a hold
+		# and the ceiling both fail a call, the hold above has already
+		# answered: one call, one line, the outer bound wins (ADR 0006).
+		if tool in JOB_CREATING_TOOLS:
+			observed = self._audit.count_recent_submits(
+				user=user, tools=JOB_CREATING_TOOLS, window_seconds=SUBMIT_WINDOW_SECONDS
+			)
+			if observed >= self._submit_ceiling:
+				reason = _throttled_message(user, observed, self._submit_ceiling, SUBMIT_WINDOW_SECONDS)
+				record("THROTTLE", reason, submit_count=observed, submit_window_seconds=SUBMIT_WINDOW_SECONDS)
+				raise ToolError(reason)
 
 		# The guard runs before dispatch: a refusal is a policy decision
 		# (DENY) and never reaches a subprocess or a file.
@@ -179,7 +226,7 @@ def build_app(config: Config, template_specs: dict[str, template_registry.Templa
 			)
 		),
 		auth=StaticBearerToken(config.token, config.user),
-		middleware=[AuditMiddleware(audit, config.guard_limits(), config.submit_capability)],
+		middleware=[AuditMiddleware(audit, config.guard_limits(), config.submit_capability, config.submit_ceiling)],
 	)
 
 	@app.tool(annotations=ToolAnnotations(read_only_hint=True, open_world_hint=False))
