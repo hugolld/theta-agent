@@ -13,9 +13,15 @@
 // on the host, the auditor executed in-container where every path it binds
 // is self-consistent. `--leg` passes spot-check leg arguments (skill,
 // script, notebook) to that in-container auditor, so the attestation is
-// captured clean-room too. The provider key is the one credential the rig
-// gets — extracted to a temp dir from the host pi config, mounted
-// read-only, copied into the container's ephemeral home, never printed.
+// captured clean-room too. Two credentials, and only these, enter the rig:
+// the provider key always, and — on a `--gateway` leg — the gateway token,
+// each extracted to a temp dir from the host pi config, mounted read-only,
+// copied into the container's ephemeral home, never printed. The cluster
+// SSH key never enters: the gateway is reached through the host-side
+// port-forward, which the preflight verifies from inside the container
+// before the session launches. `--rpc` runs the confirm-answering driver
+// (test/rig/rpc-driver.mjs) instead of `--print`, so a gated submit can
+// cross the submit gate in a headless run.
 
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -65,7 +71,7 @@ function waitForDaemon() {
 }
 
 export function parseFlags(argv) {
-	const flags = { timeout: 300, provider: defaultProvider, model: defaultModel, legs: [] };
+	const flags = { timeout: 300, provider: defaultProvider, model: defaultModel, legs: [], gateway: false, rpc: false };
 	const rest = [];
 	for (let i = 0; i < argv.length; i++) {
 		const arg = argv[i];
@@ -73,6 +79,8 @@ export function parseFlags(argv) {
 			const value = argv[++i];
 			if (value === undefined) fail(`${arg} needs a value`);
 			flags[arg.slice(2)] = value;
+		} else if (arg === "--gateway" || arg === "--rpc") {
+			flags[arg.slice(2)] = true;
 		} else if (arg === "--timeout") {
 			const value = argv[++i];
 			if (value === undefined || !/^\d+$/.test(value) || Number(value) < 1) {
@@ -115,6 +123,48 @@ export function prepareProviderConfig(provider, configPath = path.join(process.e
 	return dir;
 }
 
+// The second credential a rig leg can admit (spec #96): the theta-compute
+// registration from the host pi config. The URL's host is rewritten from
+// loopback to host.docker.internal — the container reaches the host-side
+// forward through Docker's host alias, never through its own 127.0.0.1 —
+// and the entry lands beside the provider config in the same 0600 temp
+// dir. The cluster SSH key is not admitted: the forward stays host-side,
+// so the token is the only cluster-adjacent credential the rig ever holds.
+export function prepareGatewayConfig(providerDir, configPath = path.join(process.env.HOME, ".pi/agent/mcp.json")) {
+	let hostConfig;
+	try {
+		hostConfig = JSON.parse(readFileSync(configPath, "utf8"));
+	} catch {
+		fail("cannot read ~/.pi/agent/mcp.json — no MCP registration on this host");
+	}
+	const entry = hostConfig?.mcpServers?.["theta-compute"];
+	if (!entry || typeof entry !== "object") fail("no theta-compute registration in ~/.pi/agent/mcp.json");
+	if (typeof entry.url !== "string" || typeof entry.headers?.Authorization !== "string") {
+		fail("the theta-compute registration needs a url and an Authorization header (the pi mcp add shape)");
+	}
+	let url;
+	try {
+		url = new URL(entry.url);
+	} catch {
+		fail(`the theta-compute url does not parse: ${entry.url}`);
+	}
+	// Only a loopback registration is admitted: the rig reaches the gateway
+	// through the host-side forward, and any other host in the URL would
+	// point the container at a network the forward never crosses.
+	if (!["127.0.0.1", "localhost", "[::1]"].includes(url.hostname)) {
+		fail(`the theta-compute url must name the host-side forward at loopback, not ${url.hostname}`);
+	}
+	url.hostname = "host.docker.internal";
+	const admitted = { ...entry, url: url.toString() };
+	mkdirSync(path.join(providerDir, "agent"), { recursive: true });
+	writeFileSync(
+		path.join(providerDir, "agent/mcp.json"),
+		JSON.stringify({ mcpServers: { "theta-compute": admitted } }, null, "\t") + "\n",
+		{ mode: 0o600 },
+	);
+	return admitted;
+}
+
 function execIn(command, opts = {}) {
 	const env = Object.entries(opts.env ?? {}).flatMap(([key, value]) => ["-e", `${key}=${value}`]);
 	const result = run(
@@ -139,13 +189,43 @@ function stageCloneSource() {
 	return dir;
 }
 
-function startContainer(providerDir) {
+// Docker Desktop resolves the host alias for the container built-in; a
+// native-Linux daemon needs the explicit host-gateway mapping (and its
+// forward bound to the bridge gateway — the Linux variant dogfood.md
+// documents). The flag would override Desktop's own alias with the bridge
+// IP, so it is added only where the alias does not resolve already.
+function dockerHostNeedsAddHost() {
+	const os = run("docker", ["info", "--format", "{{.OperatingSystem}}"]).stdout.trim();
+	return !/Docker Desktop/i.test(os);
+}
+
+function startContainer(providerDir, withGateway) {
 	docker("rm", "-f", container); // a leftover from a killed run
 	const mounts = ["-v", `${sourceDir}:/pkg-src:ro`, "-v", `${providerDir}:/pi-ro:ro`];
 	if (sessionDir) mounts.push("-v", `${sessionDir}:/session`);
-	docker("run", "-d", "--name", container, ...mounts, image, "sleep", "infinity");
+	const addHost = withGateway && dockerHostNeedsAddHost() ? ["--add-host=host.docker.internal:host-gateway"] : [];
+	docker("run", "-d", "--name", container, ...addHost, ...mounts, image, "sleep", "infinity");
 	execIn(`git clone --quiet /pkg-src "$HOME/theta" && git -C "$HOME/theta" checkout --quiet --detach ${headSha}`);
 	execIn("mkdir -p ~/.pi/agent && cp /pi-ro/agent/models.json ~/.pi/agent/models.json && chmod 600 ~/.pi/agent/models.json");
+	if (withGateway) execIn("cp /pi-ro/agent/mcp.json ~/.pi/agent/mcp.json && chmod 600 ~/.pi/agent/mcp.json");
+}
+
+// The gateway-bearing preflight, run from inside the container against the
+// admitted URL: without the token the endpoint must answer 401 (forward up,
+// server listening), and with the Authorization header it must answer
+// anything but 401 (the admitted token still opens the door). A session
+// launched past a failed preflight starts without the gateway's tools and
+// improvises around the submit gate — so this gate fails the run first.
+function preflightGateway(admitted) {
+	execIn(
+		"node -e 'const u=process.env.GATEWAY_URL,h=process.env.GATEWAY_AUTH;" +
+			"Promise.all([fetch(u).then(r=>r.status),fetch(u,{headers:{Authorization:h}}).then(r=>r.status)])" +
+			'.then(([anon,auth])=>{if(anon!==401){console.error("gateway preflight: "+u+" answered HTTP "+anon+" without a token, expected 401 — is the host-side forward up?");process.exit(1)}' +
+			'if(auth===401){console.error("gateway preflight: the admitted token was refused, 401 — re-register before the run");process.exit(1)}' +
+			'console.log("gateway preflight ok: "+u+" answers 401 without a token and the admitted token is accepted")})' +
+			'.catch(e=>{console.error("gateway preflight failed: "+(e.cause?.code??e.message)+" — is the host-side forward up?");process.exit(1)})',
+		{ env: { GATEWAY_URL: admitted.url, GATEWAY_AUTH: admitted.headers.Authorization } },
+	);
 }
 
 // The auditor binds cwd to the checkout, so run it from /theta and capture
@@ -164,10 +244,12 @@ function audit(legs) {
 function main() {
 	const [subcommand, ...argv] = process.argv.slice(2);
 	if (subcommand === undefined || subcommand === "help" || subcommand === "--help") {
-		console.log("usage: run.mjs build | run [--provider P] [--model M] [--timeout S] [--session-dir D] [--leg ARG]... <prompt> | shell");
+		console.log("usage: run.mjs build | run [--provider P] [--model M] [--timeout S] [--session-dir D] [--leg ARG]... [--gateway] [--rpc] <prompt> | shell [--gateway]");
 		return;
 	}
 	const { flags, rest } = parseFlags(argv);
+	// Before the daemon wait, so a flag-only refusal never needs Docker.
+	if (flags.rpc && !flags.gateway) fail("--rpc needs --gateway — the confirm driver exists for gated gateway legs");
 	waitForDaemon();
 
 	if (subcommand === "build") {
@@ -187,8 +269,10 @@ function main() {
 	headSha = run("git", ["-C", repoRoot, "rev-parse", "HEAD"]).stdout.trim();
 
 	let providerDir;
+	let gatewayEntry;
 	try {
 		providerDir = prepareProviderConfig(flags.provider);
+		if (flags.gateway) gatewayEntry = prepareGatewayConfig(providerDir);
 		sourceDir = stageCloneSource();
 
 		if (subcommand === "run") {
@@ -205,7 +289,8 @@ function main() {
 			writeFileSync(path.join(sessionDir, "manifest-sha256"), manifestSha256(repoRoot));
 		}
 
-		startContainer(providerDir);
+		startContainer(providerDir, flags.gateway);
+		if (gatewayEntry) preflightGateway(gatewayEntry);
 
 		if (subcommand === "shell") {
 			run("docker", ["exec", "-it", container, "bash"], { stdio: "inherit" });
@@ -218,13 +303,24 @@ function main() {
 		// GNU timeout stands in for the host recipe's hand-rolled watchdog:
 		// SIGTERM at the bound, SIGKILL 15s later, 124 recorded on timeout.
 		// The exit status lands as a file, exactly as the host recipe writes
-		// it — stdout belongs to the model's reply, and nothing glues onto it.
-		execIn(
-			`cd "$HOME/theta" && timeout --signal=TERM --kill-after=15 ${flags.timeout} ` +
-			`node bin/theta.mjs --dev --provider ${flags.provider} --model ${flags.model} ` +
-			`--session-dir /session --print "$RIG_PROMPT" < /dev/null 2> /session/stderr.txt; echo $? > /session/exit-status`,
-			{ env: { RIG_PROMPT: rest.join(" ") } },
-		);
+		// it — stdout belongs to the model's reply, and nothing glues onto
+		// it. Print mode answers no confirms (the no-op UI denies them); the
+		// `--rpc` leg runs the driver instead, which answers the submit
+		// gate's confirm headlessly — evidence tooling, never a user path.
+		const sessionCommand = flags.rpc
+			? `cd "$HOME/theta" && timeout --signal=TERM --kill-after=15 ${flags.timeout} ` +
+				`node test/rig/rpc-driver.mjs "$HOME/theta" /session "$RIG_PROMPT" allow ` +
+				`2> /session/driver-stderr.txt`
+			: `cd "$HOME/theta" && timeout --signal=TERM --kill-after=15 ${flags.timeout} ` +
+				`node bin/theta.mjs --dev --provider ${flags.provider} --model ${flags.model} ` +
+				`--session-dir /session --print "$RIG_PROMPT" < /dev/null 2> /session/stderr.txt`;
+		const sessionEnv = { RIG_PROMPT: rest.join(" ") };
+		if (flags.rpc) {
+			sessionEnv.RIG_PROVIDER = flags.provider;
+			sessionEnv.RIG_MODEL = flags.model;
+			sessionEnv.RIG_TIMEOUT = String(flags.timeout);
+		}
+		execIn(`${sessionCommand}; echo $? > /session/exit-status`, { env: sessionEnv });
 		const exitStatus = Number.parseInt(
 			readFileSync(path.join(sessionDir, "exit-status"), "utf8").trim(),
 			10,

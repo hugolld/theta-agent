@@ -89,7 +89,7 @@ The compute gateway's per-principal rolling bound on job creation — the deploy
 _Avoid_: quota, spend cap
 
 **Clean-room rig**:
-The disposable Linux container a dogfood or adversarial session runs in: the checkout is a fresh clone of the pinned HEAD in the container's ephemeral home, the evidence dir mounts in from the host, and the provider key is the one credential it receives. ADR 0005 ships it.
+The disposable Linux container a dogfood or adversarial session runs in: the checkout is a fresh clone of the pinned HEAD in the container's ephemeral home, the evidence dir mounts in from the host, and it receives exactly two credentials — the provider key always, plus the gateway token on a gateway leg, reached through the host-side port-forward (the cluster SSH key never enters). ADR 0005 ships it; M5 S3 admits the second credential.
 _Avoid_: dev server, test server
 
 **Codemode**:
