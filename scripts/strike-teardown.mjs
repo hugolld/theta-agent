@@ -11,10 +11,12 @@
 // guard that licenses the -D below — plain -d compares against the remote
 // topic branch, which lags the merge), pull main fast-forward, remove the
 // worktree, then delete the branch — last, because the worktree holds it
-// checked out and the delete refuses until the worktree is gone. No
-// destructive mutation — the pull, the worktree remove, the branch delete —
-// precedes any refusal: a dead network or an unmerged branch leaves the
-// working tree exactly as it stood.
+// checked out and the delete refuses until the worktree is gone. A branch
+// already gone locally with its remote merged is the harness worktree-exit
+// having already torn down: the run finishes the shared steps and answers
+// success, not refusal. No destructive mutation — the pull, the worktree
+// remove, the branch delete — precedes any refusal: a dead network or an
+// unmerged branch leaves the working tree exactly as it stood.
 
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -83,12 +85,32 @@ function main() {
 	if (fetched.status !== 0) {
 		fail(`git fetch failed — nothing changed; check the network\n${fetched.stderr}`);
 	}
-	if (git(root, ["rev-parse", "--verify", "--quiet", `refs/heads/${branch}`]).status !== 0) {
-		fail(`no local branch ${branch}`);
+	const branchPresent =
+		git(root, ["rev-parse", "--verify", "--quiet", `refs/heads/${branch}`]).status === 0;
+	if (!branchPresent) {
+		// Absent locally is often the success path wearing a refusal's
+		// costume: the harness's worktree exit removes the worktree and its
+		// branch before this script runs, and the M5 S1 teardown walked the
+		// git state to learn that. Absent with no remote branch is a typo;
+		// absent with the remote unmerged is the same refusal as below.
+		if (
+			git(root, ["rev-parse", "--verify", "--quiet", `refs/remotes/origin/${branch}`]).status !== 0
+		) {
+			fail(`no local branch ${branch} and no origin/${branch} — check the branch name; nothing changed`);
+		}
 	}
-	const merged = git(root, ["merge-base", "--is-ancestor", branch, "origin/main"]);
+	const merged = git(root, [
+		"merge-base",
+		"--is-ancestor",
+		branchPresent ? branch : `origin/${branch}`,
+		"origin/main",
+	]);
 	if (merged.status !== 0) {
-		fail(`${branch} is not merged into origin/main — merge the PR first; nothing changed`);
+		fail(
+			branchPresent
+				? `${branch} is not merged into origin/main — merge the PR first; nothing changed`
+				: `no local branch ${branch} and origin/${branch} is not merged into origin/main — merge the PR first; nothing changed`,
+		);
 	}
 	// The pull fast-forwards whatever the main checkout holds, so it must
 	// hold main — a checked-out side branch would move instead (the very
@@ -122,9 +144,15 @@ function main() {
 		// The S3 retro session was standing in its worktree when it went away.
 		console.log("strike-teardown: any shell still standing in the removed worktree must leave it");
 	}
-	deleteBranch(root, branch);
 	const head = git(root, ["rev-parse", "--short", "HEAD"]).stdout.trim();
-	console.log(`strike-teardown: branch ${branch} deleted; main at ${head}`);
+	if (branchPresent) {
+		deleteBranch(root, branch);
+		console.log(`strike-teardown: branch ${branch} deleted; main at ${head}`);
+	} else {
+		console.log(
+			`strike-teardown: ${branch} is already torn down — no local branch, none to delete; main at ${head}`,
+		);
+	}
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

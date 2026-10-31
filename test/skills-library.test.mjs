@@ -349,11 +349,13 @@ const scanSurfaces = [
 	"test/manifest.test.mjs",
 	"test/skills-library.test.mjs",
 ];
-const scanText = (
-	await Promise.all(
-		scanSurfaces.map((path) => readFile(new URL(`../${path}`, import.meta.url), "utf8")),
-	)
-).join("\n");
+const scanSurfaceText = await Promise.all(
+	scanSurfaces.map(async (surface) => [
+		surface,
+		await readFile(new URL(`../${surface}`, import.meta.url), "utf8"),
+	]),
+);
+const scanText = scanSurfaceText.map(([, text]) => text).join("\n");
 const glossary = await readFile(new URL("../GLOSSARY.md", import.meta.url), "utf8");
 
 function wordPattern(core, hyphenGuarded) {
@@ -392,15 +394,46 @@ function glossaryAvoidTerms(markdown) {
 	return terms;
 }
 
+// The avoid-term scan's offenders, each named by surface and line: the
+// failure message is the check's UI — the term alone sent the S1 fixer
+// grepping, and the first grep missed docs/agents entirely.
+function avoidOffenders(surfaceText, glossaryText) {
+	const terms = glossaryAvoidTerms(glossaryText);
+	const offenders = [];
+	for (const [surface, text] of surfaceText) {
+		for (const term of terms) {
+			const pattern = wordPattern(term, true);
+			for (const [index, line] of text.split(/\r?\n/).entries()) {
+				if (pattern.test(line)) offenders.push(`${surface}:${index + 1} — ${term}`);
+			}
+		}
+	}
+	return offenders;
+}
+
 test("self-authored prose keeps the glossary's _Avoid_ terms out", () => {
-	const offenders = glossaryAvoidTerms(glossary).filter((term) =>
-		wordPattern(term, true).test(scanText),
-	);
+	const offenders = avoidOffenders(scanSurfaceText, glossary);
 	assert.deepEqual(
 		offenders,
 		[],
-		`_Avoid_ terms found in self-authored files: ${offenders.join(", ")}`,
+		`_Avoid_ terms found in self-authored files: ${offenders.join("; ")}`,
 	);
+});
+
+test("an avoid-term failure names the surface and the line", () => {
+	// The green tree never exercises the offenders loop; this pins the
+	// message's shape — place first, term second — against a synthetic
+	// glossary and surface pair. The terms are invented: this file is
+	// itself a scan surface, so the fixture must not speak a real ban.
+	const glossaryText = "**Fake headword**:\na definition\n_Avoid_: florblewort, gnarly capstan\n";
+	const offenders = avoidOffenders(
+		[
+			["docs/fake.md", "line one\nthe florblewort is spent\nline three"],
+			["docs/other.md", "gnarly capstan mentioned"],
+		],
+		glossaryText,
+	);
+	assert.deepEqual(offenders, ["docs/fake.md:2 — florblewort", "docs/other.md:1 — gnarly capstan"]);
 });
 
 test("every glossary headword describes language the docs use", () => {

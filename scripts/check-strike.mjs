@@ -164,7 +164,10 @@ function main(argv) {
 	if (freshness.verdict === "fresh") {
 		console.log(`\nevidence fresh: PR body attests ${head}.`);
 	} else if (prBody) {
-		console.log("\nno evidence attestation in the PR body — freshness check skipped.");
+		console.log(
+			"\nno dogfood attestation in the PR body — the gate hunts the auditor's `clean <sha>` verdict token, " +
+				"so live-leg-only and chore strikes pass here by design; freshness check skipped.",
+		);
 	} else if (branch === defaultBranch) {
 		console.log(
 			`\nno PR on the default branch (${branch}) — the gate reads the strike's ` +

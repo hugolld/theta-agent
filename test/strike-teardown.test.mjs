@@ -10,7 +10,9 @@ import { test } from "node:test";
 // main checkout by the shared git dir (the session's shell may stand anywhere
 // in the repo, including inside the worktree being removed), fetch, refuse
 // unless the branch is merged into origin/main, pull main fast-forward, then
-// remove the worktree and delete the branch. The fixture repos run offline —
+// remove the worktree and delete the branch — and answer success, not
+// refusal, when the branch is already gone locally with its remote merged
+// (the harness worktree-exit path). The fixture repos run offline —
 // the origin is a local bare clone — and the process tests drive the script at
 // the process boundary the way a strike session would.
 const scriptPath = fileURLToPath(
@@ -175,4 +177,39 @@ test("a branch with no worktree still deletes (the retry-after-partial-failure p
 	const run = runTeardown(fx.main, "feature-x");
 	assert.equal(run.status, 0, `stderr: ${run.stderr}`);
 	assert.equal(branchExists(fx.main, "feature-x"), false);
+});
+
+test("a branch absent locally whose remote is unmerged still refuses", (t) => {
+	const fx = makeFixture(t, { merged: false });
+	// The harness worktree-exit removed branch and worktree, but the PR
+	// never merged: the same guard as the present-branch case, named for
+	// the absent shape.
+	spawnSync("git", ["-C", fx.main, "push", "--quiet", "origin", "feature-x"]);
+	spawnSync("git", ["-C", fx.main, "worktree", "remove", fx.wt]);
+	spawnSync("git", ["-C", fx.main, "branch", "-D", "feature-x"]);
+	const run = runTeardown(fx.main, "feature-x");
+	assert.equal(run.status, 1);
+	assert.match(run.stderr, /no local branch feature-x and origin\/feature-x is not merged/);
+});
+
+test("an already-torn-down branch answers success, not the failure-costumed refusal", (t) => {
+	const fx = makeFixture(t, { merged: true });
+	// The harness's worktree exit removed the worktree and its branch
+	// before the teardown ran — the M5 S1 shape — and local main lags the
+	// GitHub-side merge, as it would then. The branch lives on at origin,
+	// merged, the way a merged PR's branch does.
+	spawnSync("git", ["-C", fx.main, "push", "--quiet", "origin", "feature-x"]);
+	spawnSync("git", ["-C", fx.main, "worktree", "remove", fx.wt]);
+	spawnSync("git", ["-C", fx.main, "branch", "-D", "feature-x"]);
+	spawnSync("git", ["-C", fx.main, "reset", "--quiet", "--hard", "HEAD~1"]);
+	const run = runTeardown(fx.main, "feature-x");
+	assert.equal(run.status, 0, `stderr: ${run.stderr}`);
+	assert.match(run.stdout, /already torn down/);
+	// The shared steps still ran: the fast-forward pull put main back at
+	// origin/main's merge commit.
+	const head = spawnSync("git", ["-C", fx.main, "rev-parse", "HEAD"], { encoding: "utf8" }).stdout.trim();
+	const originHead = spawnSync("git", ["-C", fx.main, "rev-parse", "origin/main"], {
+		encoding: "utf8",
+	}).stdout.trim();
+	assert.equal(head, originHead);
 });
