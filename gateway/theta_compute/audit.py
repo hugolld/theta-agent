@@ -173,12 +173,18 @@ class AuditLog:
 						count += 1
 		return count
 
+	@property
+	def _rotated_path(self) -> Path:
+		"""The one rotated generation: rotation writes it, the window
+		reads it — one home for the name, so the two never drift."""
+		return self._path.with_name(self._path.name + ".1")
+
 	def _window_files(self) -> list[Path]:
 		"""The current audit file plus the one rotated generation, each
 		only when present — a fresh deploy has written no line yet, so an
 		empty count is the honest one. The window's memory is exactly the
 		trail the deploy keeps; rotation must not reset the ceiling."""
-		candidates = [self._path, self._path.with_name(self._path.name + ".1")]
+		candidates = [self._path, self._rotated_path]
 		return [path for path in candidates if path.exists()]
 
 	def _rotate_if_needed(self, incoming: int) -> None:
@@ -187,7 +193,7 @@ class AuditLog:
 		except FileNotFoundError:
 			return
 		if current > 0 and current + incoming > self._max_bytes:
-			rotated = self._path.with_name(self._path.name + ".1")
+			rotated = self._rotated_path
 			if rotated.exists():
 				rotated.unlink()
 			self._path.rename(rotated)

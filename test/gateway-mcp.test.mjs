@@ -753,6 +753,27 @@ test("submits outside the rolling window do not count", { skip: skipReason }, as
 	assert.equal(audit.at(-1).submit_count, 2, "the count is this window's submits only");
 });
 
+test("cancel and the read-only tools spend nothing of the submit budget", { skip: skipReason }, async (t) => {
+	const gateway = await startGateway(t, { env: { THETA_COMPUTE_SUBMIT_CEILING: "1" } });
+
+	// Monitoring and remediation run first, against a budget of one.
+	const status = await gateway.callTool("job_status", { job_id: "424242" });
+	assert.equal(status.isError, false, "read-only tools stay in service");
+	const cancel = await gateway.callTool("cancel_job", { job_id: "424343" });
+	assert.equal(cancel.isError, false, "cancel stays in service");
+
+	// The budget is still unspent: the first submit passes, the second throttles.
+	const allowed = await gateway.callTool("submit_job", { run_name: "after-chores", directives: {} });
+	assert.equal(allowed.isError, false, "cancel and the read-only calls spent nothing");
+	const throttled = await gateway.callTool("submit_job", { run_name: "run-1", directives: {} });
+	assert.equal(throttled.isError, true);
+	assert.match(toolText(throttled), /1 submit\(s\)/, "the refusal holds the submit alone");
+
+	const audit = await readAudit(gateway.auditLog);
+	assert.deepEqual(audit.map((line) => line.decision), ["ALLOW", "ALLOW", "ALLOW", "THROTTLE"]);
+	assert.equal(audit.at(-1).submit_count, 1, "only the submit counted toward the ceiling");
+});
+
 test("a count already over the ceiling still throttles — the deploy lowered the ceiling mid-window", { skip: skipReason }, async (t) => {
 	const auditLog = await sharedAuditLog(t);
 	// Five in-window submits against a ceiling of two: the next call must
