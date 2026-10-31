@@ -1556,6 +1556,82 @@ function collectToolGraph(recs) {
 	return { calls, callOrder, results };
 }
 
+// pi's suffix grammar for nested-call ids: one or more `/<n>` segments
+// after the parent id (a deeper nest appends its own).
+const NESTED_ID_SUFFIX = /^(?:\/\d+)+$/;
+
+// Reads codemode's bounded record of the calls a tool made (pi keeps name,
+// arguments, status — never results — as `nestedCalls` on the calling
+// tool's result message) instead of assuming a flat call sequence. Each
+// nested id is assigned by pi as `<parent id>/<n>` and never appears as a
+// transcript record, so the record holds together only one way: every
+// nested id derives from the toolCallId of the result message carrying
+// it, all nested ids are unique, and none collides with a top-level call
+// or result id. A fabricated record — spliced onto the wrong parent,
+// duplicated, or claiming a top-level call's id — fails closed. Returns
+// the nested-call count for the attestation.
+export function collectNestedCalls(recs) {
+	const topLevelIds = new Set();
+	const nestedIds = new Set();
+	let count = 0;
+	for (const r of recs) {
+		const m = r.message;
+		if (!m) continue;
+		if (Array.isArray(m.content)) {
+			for (const t of m.content) {
+				if (t?.type === "toolCall" && typeof t.id === "string" && t.id !== "") {
+					topLevelIds.add(t.id);
+				}
+			}
+		}
+		if (m.role !== "toolResult") continue;
+		if (typeof m.toolCallId === "string" && m.toolCallId !== "") {
+			topLevelIds.add(m.toolCallId);
+		}
+		const nc = m.nestedCalls;
+		if (nc === undefined) continue;
+		if (!nonEmptyString(m.toolCallId)) {
+			throw new Error("nestedCalls on a tool result without a usable toolCallId");
+		}
+		if (!isPlainObject(nc) || !Array.isArray(nc.calls)) {
+			throw new Error(
+				`nestedCalls on tool result ${m.toolCallId} is not the bounded record (an object with a calls list)`,
+			);
+		}
+		if (nc.complete !== undefined && typeof nc.complete !== "boolean") {
+			throw new Error(`nestedCalls.complete on tool result ${m.toolCallId} must be a boolean`);
+		}
+		for (const entry of nc.calls) {
+			if (!isPlainObject(entry) || !nonEmptyString(entry.id) || !nonEmptyString(entry.name)) {
+				throw new Error(
+					`nestedCalls entry on tool result ${m.toolCallId} lacks the bounded record's shape (id, name)`,
+				);
+			}
+			if (
+				!entry.id.startsWith(m.toolCallId) ||
+				!NESTED_ID_SUFFIX.test(entry.id.slice(m.toolCallId.length))
+			) {
+				throw new Error(
+					`nestedCalls id ${entry.id} does not derive from its carrier's toolCallId ${m.toolCallId} — a fabricated nested record`,
+				);
+			}
+			if (nestedIds.has(entry.id)) {
+				throw new Error(`duplicate nestedCalls id: ${entry.id}`);
+			}
+			nestedIds.add(entry.id);
+			count += 1;
+		}
+	}
+	for (const id of nestedIds) {
+		if (topLevelIds.has(id)) {
+			throw new Error(
+				`nestedCalls id ${id} also appears as a top-level call id — nested ids never enter the transcript`,
+			);
+		}
+	}
+	return count;
+}
+
 // The id-paired calls of one tool, recorded after the prompt — the shared
 // shape of both spot-check attestations. isError is left to the caller:
 // the read attestation accepts only non-error results, while the script
@@ -1897,6 +1973,9 @@ export function auditSession(dir, rootArg, legs = []) {
 		}
 		prevId = id;
 	}
+	// Nested calls (codemode's bounded record) are transcript structure,
+	// not a spot-check concern: every session is checked, legs or not.
+	const nestedCount = collectNestedCalls(recs);
 	const sysRecs = recs.filter(
 		(r) => r.type === "message" && r.message?.role === "system",
 	);
@@ -2133,7 +2212,8 @@ export function auditSession(dir, rootArg, legs = []) {
 		`provider ${wantModel[0]}\n` +
 		`model ${wantModel[1]}\n` +
 		`inventory ${shaText(inventoryText)}\n` +
-		`prompt ${shaText(promptWanted)}`;
+		`prompt ${shaText(promptWanted)}\n` +
+		`nested-calls ${nestedCount}`;
 	// The spot-check attestations — skill read, script execution, notebook
 	// written — share one tool-call/result graph and one prompt-neutrality
 	// gate, and every leg runs through one interface (see Attestation legs
