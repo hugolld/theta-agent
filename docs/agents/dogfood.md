@@ -141,6 +141,8 @@ The script-executed attestation's residual trust boundaries, accumulated across 
 5. When the invocation is followed by `;`, `&`, or `||` commands in the same bash call — or runs inside `$( )` or a pipeline tail — the call's recorded exit status is the last command's: the execution attestation stands unless the trailing context could have skipped or stopped it, but the non-error result no longer speaks for the script's own exit.
 6. A redirection onto the script's own path would truncate it before the interpreter opens it — deliberate in-session tampering territory, but it means the attested bytes are the tree's bytes at audit time, not a copy of what executed.
 
+The nestedCalls checks (M5 S2) carry one residual of their own: the bounded record keeps no results, so a wholly invented entry whose id follows pi's `<parent id>/<n>` grammar — a fabricated `…/99` submit — is indistinguishable from a real one inside the record itself. The derivation, uniqueness, and id-space disjointness checks bound everything a realistic session or splice can produce; the operator's capture voucher covers the rest, as elsewhere.
+
 ## Clean up after
 
 Dogfood sessions execute skill scripts; they leave scratch venvs and `__pycache__` inside vendored trees. The hash-pin seam fails on them by design, so clear them before committing:

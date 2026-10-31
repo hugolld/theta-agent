@@ -1579,13 +1579,13 @@ export function collectNestedCalls(recs) {
 		if (!m) continue;
 		if (Array.isArray(m.content)) {
 			for (const t of m.content) {
-				if (t?.type === "toolCall" && typeof t.id === "string" && t.id !== "") {
+				if (t?.type === "toolCall" && nonEmptyString(t.id)) {
 					topLevelIds.add(t.id);
 				}
 			}
 		}
 		if (m.role !== "toolResult") continue;
-		if (typeof m.toolCallId === "string" && m.toolCallId !== "") {
+		if (nonEmptyString(m.toolCallId)) {
 			topLevelIds.add(m.toolCallId);
 		}
 		const nc = m.nestedCalls;

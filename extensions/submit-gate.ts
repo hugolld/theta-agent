@@ -100,10 +100,12 @@ interface GateCheck {
 	) => Promise<CheckVerdict | undefined> | CheckVerdict | undefined;
 }
 
-interface CheckVerdict {
-	decision: GateDecision;
-	reason?: string;
-}
+/**
+ * A check's verdict: "approved" passes the call through; a refusing
+ * decision carries its reason — the type has no refusing-without-a-reason
+ * shape, so no block can reach the model wordless.
+ */
+type CheckVerdict = { decision: "approved" } | { decision: Exclude<GateDecision, "approved">; reason: string };
 
 /**
  * The gate only judges calls in the gateway's namespace, and narrowing the
@@ -115,9 +117,14 @@ function isGatewayCall(
 	return event.toolName.startsWith(GATEWAY_PREFIX);
 }
 
+/** The call's name without the gateway prefix — the set's vocabulary. */
+function shortToolName(toolName: string): string {
+	return toolName.slice(GATEWAY_PREFIX.length);
+}
+
 /** The one-line target of the call, for the prompt and the refusal. */
 function describeCall(toolName: string, input: Record<string, unknown>): string {
-	const short = toolName.slice(GATEWAY_PREFIX.length);
+	const short = shortToolName(toolName);
 	if (typeof input.run_name === "string") return `${short} for run "${input.run_name}"`;
 	if (input.job_id !== undefined) return `${short} for job ${String(input.job_id)}`;
 	return short;
@@ -140,7 +147,7 @@ function nestedUnder(event: ToolCallEvent): string {
 const driftCheck: GateCheck = {
 	name: "confirm-set",
 	run: (event, _ctx, tool) => {
-		const short = event.toolName.slice(GATEWAY_PREFIX.length);
+		const short = shortToolName(event.toolName);
 		const inSet = CONFIRM_SET.has(short);
 		const declared = tool?.annotations?.destructiveHint === true;
 		if (inSet === declared) return undefined;
@@ -165,7 +172,7 @@ const driftCheck: GateCheck = {
 const confirmCheck: GateCheck = {
 	name: "confirm",
 	run: async (event, ctx) => {
-		const short = event.toolName.slice(GATEWAY_PREFIX.length);
+		const short = shortToolName(event.toolName);
 		if (!CONFIRM_SET.has(short)) return undefined;
 		const description = describeCall(event.toolName, event.input);
 		const nested = event.parentToolCallId !== undefined;
@@ -189,7 +196,9 @@ const CHECKS: readonly GateCheck[] = [driftCheck, confirmCheck];
 
 /** The default sink: one appended line beside the session transcript. */
 function sessionLogSink(ctx: GateContext): GateLogSink | undefined {
-	const sessionFile = ctx.sessionManager.getSessionFile();
+	// a context with no session manager (an in-memory test stub) logs
+	// nowhere — a guard, not a swallowed failure
+	const sessionFile = ctx.sessionManager?.getSessionFile();
 	if (sessionFile === undefined) return undefined; // nothing persistent to write beside
 	const file = path.join(path.dirname(sessionFile), GATE_LOG_NAME);
 	return (line) => fs.appendFileSync(file, `${JSON.stringify(line)}\n`);
@@ -215,21 +224,19 @@ export function createSubmitGate(
 				check: check.name,
 				decision: verdict.decision,
 				parentToolCallId: event.parentToolCallId,
-				reason: verdict.reason,
+				reason: verdict.decision === "approved" ? undefined : verdict.reason,
 				tool: event.toolName,
 				toolCallId: event.toolCallId,
 				ts: new Date().toISOString(),
 			};
 			try {
-				// a context with no session manager (an in-memory test
-				// stub) resolves to no sink and logs nowhere
 				(options.log ?? sessionLogSink(ctx))?.(line);
 			} catch {
 				// best-effort by design — see above
 			}
 			return verdict.decision === "approved"
 				? undefined
-				: { block: true, reason: verdict.reason ?? "refused by the submit gate" };
+				: { block: true, reason: verdict.reason };
 		}
 		return undefined;
 	};
