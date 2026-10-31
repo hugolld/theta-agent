@@ -1873,9 +1873,18 @@ export function auditSession(dir, rootArg, legs = []) {
 	// Mount aliases (e.g. /var vs /private/var on macOS) give the same tree
 	// two spellings; lexical containment accepts either spelling of root.
 	const rootAliases = [...new Set([rootArg, root])];
-	const files = fs.readdirSync(dir).filter((f) => f.endsWith(".jsonl"));
+	// The pi transcript is named `<ISO instant>_<uuid>.jsonl` (grammar
+	// observed on pi 1.4.0 sessions and pinned by the golden fixtures).
+	// A gated session's dir also holds the gate log (`gate.jsonl`, since M5 S2) and
+	// an RPC leg its raw event capture (`raw-rpc-events.jsonl`, since M5
+	// S3), so counting bare *.jsonl over-claims the dir. Match the
+	// transcript's own name grammar; the exactly-one invariant is over
+	// transcripts and stays.
+	const transcriptName =
+		/^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.jsonl$/;
+	const files = fs.readdirSync(dir).filter((f) => transcriptName.test(f));
 	if (files.length !== 1) {
-		throw new Error(`expected exactly 1 session file, found ${files.length}`);
+		throw new Error(`expected exactly 1 session transcript (the ISO-instant-named .jsonl), found ${files.length}`);
 	}
 	if (fs.existsSync(`${dir}/watchdog`)) {
 		throw new Error("watchdog fired: run exceeded 300s");

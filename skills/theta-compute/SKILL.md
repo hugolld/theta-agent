@@ -3,7 +3,7 @@ name: theta-compute
 description: Theta's compute doctrine - drives the theta-compute gateway (the compute gateway MCP server on the cluster's login node) through the whole Slurm job lifecycle, staging inputs, submitting, polling with discipline, fetching artifacts, and recording every job ID in the project notebook. Use when a research task needs cluster compute, an AlphaFold3 structure prediction, or the status, logs, or artifacts of a job an earlier session started. The model calls the gateway's tools directly; oversized inputs travel out-of-band by scp; destructive calls are confirmed by the submit gate before they reach the cluster.
 license: MIT
 metadata:
-  version: "0.3.0"
+  version: "0.4.0"
   authorship: self-authored
 ---
 
@@ -86,6 +86,39 @@ state what is about to run and let the answer land. A refused call stays
 refused — never retry it unprompted. Read-only calls (`job_status`,
 `job_logs`, `list_environments`, `fetch_artifacts`) and staging run without
 prompts; monitoring stays frictionless.
+
+## The server-side bounds
+
+Two bounds live in the gateway itself, set at deploy time. No session
+changes them, and both answer before any job is created.
+
+- **The submit capability** (ADR 0006): while it is off, `submit_job` and
+  `run_alphafold3` answer a hard refusal — a HOLD audit line — and
+  `cancel_job` with the read-only tools stay in service. On a held
+  submission, report the hold to the researcher and stop; the enable is
+  out-of-band (the cluster's deploy env), so retrying the call in-session
+  changes nothing.
+- **The submit ceiling**: one principal may spend only so many submits per
+  rolling hour; the deploy env names the number, 20 by default. Past it,
+  the same tools answer a throttled refusal — a THROTTLE audit line —
+  naming the principal, the count, and the window. The backoff is the
+  window itself: wait for it to roll, report the throttle to the
+  researcher, and do not resubmit in this session.
+
+Both refusals are answers, not failures to diagnose: the tool call
+returned, and the cluster declined to create the job. Spend them neither
+on retries nor on workarounds — a staging or polling call cannot reach
+what only a submit may.
+
+## Codemode inside compute sessions
+
+pi exposes the gateway's tools to codemode by default, and a session with
+the gateway registered runs codemode auto-activated — so a compute task
+that writes a script to drive the gateway is the normal case, not a
+detour. Every nested call still crosses the tool-call pipeline
+(`parentToolCallId` links the layers): the submit gate confirms it like a
+direct call, the gate log records it, and the gateway audits it. Scripted
+submits spend from the same ceiling as direct ones.
 
 ## Boundaries
 
