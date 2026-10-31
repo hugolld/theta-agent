@@ -1493,39 +1493,38 @@ export function commandResolvesToScript(command, target, root) {
 // consistent: every call needs exactly one later matching result, every
 // result an earlier call — a spliced transcript pairing a result with a
 // later call fails.
+// One walk over the transcript's tool-call surface, shared by the graph
+// and the nested-record check: each record's content array yields its
+// toolCall entries, and each toolResult message yields once. Consumers
+// accumulate their own state — the graph keeps record indexes and throws
+// on temporal faults; the nested-record check keeps id sets and reads
+// the bounded record.
+function* walkToolCallsAndResults(recs) {
+	let recordIndex = 0;
+	for (const r of recs) {
+		recordIndex += 1;
+		const m = r.message;
+		if (!m) continue;
+		if (Array.isArray(m.content)) {
+			for (const t of m.content) {
+				if (t?.type === "toolCall") {
+					yield { call: t, recordIndex, message: m };
+				}
+			}
+		}
+		if (r.type === "message" && m.role === "toolResult") {
+			yield { result: m, recordIndex };
+		}
+	}
+}
+
 function collectToolGraph(recs) {
 	const calls = [];
 	const callOrder = new Map();
 	const results = new Map();
-	let recordIndex = 0;
-	for (const r of recs) {
-		const m = r.message;
-		recordIndex += 1;
-		if (!m) continue;
-		// tool calls are assistant requests: one embedded in a system,
-		// user, or toolResult record is transcript corruption.
-		if (m.role !== "assistant" && Array.isArray(m.content)) {
-			for (const t of m.content) {
-				if (t?.type === "toolCall") {
-					throw new Error(
-						`toolCall in ${m.role} record — transcript corruption`,
-					);
-				}
-			}
-		}
-		if (Array.isArray(m.content))
-			for (const t of m.content) {
-				if (t?.type !== "toolCall") continue;
-				if (typeof t.id !== "string" || t.id === "") {
-					throw new Error(`toolCall without a usable id: ${JSON.stringify(t.id)}`);
-				}
-				if (callOrder.has(t.id)) {
-					throw new Error(`duplicate toolCall id: ${t.id}`);
-				}
-				callOrder.set(t.id, recordIndex);
-				calls.push(t);
-			}
-		if (r.type === "message" && m.role === "toolResult") {
+	for (const step of walkToolCallsAndResults(recs)) {
+		if (step.call === undefined) {
+			const m = step.result;
 			if (typeof m.toolCallId !== "string" || m.toolCallId === "") {
 				throw new Error(
 					`toolResult without a usable toolCallId: ${JSON.stringify(m.toolCallId)}`,
@@ -1534,8 +1533,25 @@ function collectToolGraph(recs) {
 			if (results.has(m.toolCallId)) {
 				throw new Error(`duplicate toolResult for ${m.toolCallId}`);
 			}
-			results.set(m.toolCallId, { recordIndex, message: m });
+			results.set(m.toolCallId, { recordIndex: step.recordIndex, message: m });
+			continue;
 		}
+		const t = step.call;
+		// tool calls are assistant requests: one embedded in a system,
+		// user, or toolResult record is transcript corruption.
+		if (step.message.role !== "assistant") {
+			throw new Error(
+				`toolCall in ${step.message.role} record — transcript corruption`,
+			);
+		}
+		if (typeof t.id !== "string" || t.id === "") {
+			throw new Error(`toolCall without a usable id: ${JSON.stringify(t.id)}`);
+		}
+		if (callOrder.has(t.id)) {
+			throw new Error(`duplicate toolCall id: ${t.id}`);
+		}
+		callOrder.set(t.id, step.recordIndex);
+		calls.push(t);
 	}
 	const orphans = [...results.keys()].filter((id) => !callOrder.has(id));
 	const unanswered = calls.filter((t) => !results.has(t.id));
@@ -1554,6 +1570,79 @@ function collectToolGraph(recs) {
 		}
 	}
 	return { calls, callOrder, results };
+}
+
+// pi's suffix grammar for nested-call ids: one or more `/<n>` segments
+// after the parent id (a deeper nest appends its own).
+const NESTED_ID_SUFFIX = /^(?:\/\d+)+$/;
+
+// Reads codemode's bounded record of the calls a tool made (pi keeps name,
+// arguments, status — never results — as `nestedCalls` on the calling
+// tool's result message) instead of assuming a flat call sequence. Each
+// nested id is assigned by pi as `<parent id>/<n>` and never appears as a
+// transcript record, so the record holds together only one way: every
+// nested id derives from the toolCallId of the result message carrying
+// it, all nested ids are unique, and none collides with a top-level call
+// or result id. A fabricated record — spliced onto the wrong parent,
+// duplicated, or claiming a top-level call's id — fails closed. Returns
+// the nested-call count for the attestation.
+export function collectNestedCalls(recs) {
+	const topLevelIds = new Set();
+	const nestedIds = new Set();
+	let count = 0;
+	for (const step of walkToolCallsAndResults(recs)) {
+		if (step.call !== undefined) {
+			if (nonEmptyString(step.call.id)) {
+				topLevelIds.add(step.call.id);
+			}
+			continue;
+		}
+		const m = step.result;
+		if (nonEmptyString(m.toolCallId)) {
+			topLevelIds.add(m.toolCallId);
+		}
+		const nc = m.nestedCalls;
+		if (nc === undefined) continue;
+		if (!nonEmptyString(m.toolCallId)) {
+			throw new Error("nestedCalls on a tool result without a usable toolCallId");
+		}
+		if (!isPlainObject(nc) || !Array.isArray(nc.calls)) {
+			throw new Error(
+				`nestedCalls on tool result ${m.toolCallId} is not the bounded record (an object with a calls list)`,
+			);
+		}
+		if (nc.complete !== undefined && typeof nc.complete !== "boolean") {
+			throw new Error(`nestedCalls.complete on tool result ${m.toolCallId} must be a boolean`);
+		}
+		for (const entry of nc.calls) {
+			if (!isPlainObject(entry) || !nonEmptyString(entry.id) || !nonEmptyString(entry.name)) {
+				throw new Error(
+					`nestedCalls entry on tool result ${m.toolCallId} lacks the bounded record's shape (id, name)`,
+				);
+			}
+			if (
+				!entry.id.startsWith(m.toolCallId) ||
+				!NESTED_ID_SUFFIX.test(entry.id.slice(m.toolCallId.length))
+			) {
+				throw new Error(
+					`nestedCalls id ${entry.id} does not derive from its carrier's toolCallId ${m.toolCallId} — a fabricated nested record`,
+				);
+			}
+			if (nestedIds.has(entry.id)) {
+				throw new Error(`duplicate nestedCalls id: ${entry.id}`);
+			}
+			nestedIds.add(entry.id);
+			count += 1;
+		}
+	}
+	for (const id of nestedIds) {
+		if (topLevelIds.has(id)) {
+			throw new Error(
+				`nestedCalls id ${id} also appears as a top-level call id — nested ids never enter the transcript`,
+			);
+		}
+	}
+	return count;
 }
 
 // The id-paired calls of one tool, recorded after the prompt — the shared
@@ -1897,6 +1986,9 @@ export function auditSession(dir, rootArg, legs = []) {
 		}
 		prevId = id;
 	}
+	// Nested calls (codemode's bounded record) are transcript structure,
+	// not a spot-check concern: every session is checked, legs or not.
+	const nestedCount = collectNestedCalls(recs);
 	const sysRecs = recs.filter(
 		(r) => r.type === "message" && r.message?.role === "system",
 	);
@@ -2133,7 +2225,8 @@ export function auditSession(dir, rootArg, legs = []) {
 		`provider ${wantModel[0]}\n` +
 		`model ${wantModel[1]}\n` +
 		`inventory ${shaText(inventoryText)}\n` +
-		`prompt ${shaText(promptWanted)}`;
+		`prompt ${shaText(promptWanted)}\n` +
+		`nested-calls ${nestedCount}`;
 	// The spot-check attestations — skill read, script execution, notebook
 	// written — share one tool-call/result graph and one prompt-neutrality
 	// gate, and every leg runs through one interface (see Attestation legs

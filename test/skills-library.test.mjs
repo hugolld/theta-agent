@@ -346,6 +346,12 @@ const scanSurfaces = [
 	// dogfood.md carries the Attestation leg headword — the auditor's legs
 	// and their registry are its working vocabulary.
 	"docs/agents/dogfood.md",
+	// pi-transcript-schema.md carries the Codemode headword's working
+	// vocabulary since the M5 S2 nestedCalls strike.
+	"docs/agents/pi-transcript-schema.md",
+	// extensions/submit-gate.ts carries the Submit gate headword's working
+	// vocabulary — the confirm dialog's title and the refusal/drift reasons.
+	"extensions/submit-gate.ts",
 	"test/manifest.test.mjs",
 	"test/skills-library.test.mjs",
 ];

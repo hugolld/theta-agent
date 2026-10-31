@@ -20,6 +20,7 @@ import {
 	isIsoDate,
 	resolveNotebookDir,
 	auditNotebook,
+	collectNestedCalls,
 	formatCleanLine,
 	CLEAN_LINE_PATTERN,
 	auditSession,
@@ -230,8 +231,10 @@ function goldenRepo(t, { skills, expectedSkills, gitignore = false } = {}) {
 // before any substitution, __REPO__ bound to the repo) plus the metadata
 // files every audit pins. `fixtureDir`, when given, supplies the six
 // operator-recorded files a committed scenario carries; otherwise the
-// standard boot literals both golden tests were written against.
-function goldenSession(t, repo, { text, fixtureDir } = {}) {
+// standard boot literals both golden tests were written against, with the
+// prompt the capture ran (the audit binds prompt.txt to the transcript's
+// user record).
+function goldenSession(t, repo, { text, fixtureDir, prompt = "test prompt" } = {}) {
 	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "dogfood-session-"));
 	t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
 	if (/\/Users\/|\/opt\/homebrew/.test(text)) {
@@ -253,7 +256,7 @@ function goldenSession(t, repo, { text, fixtureDir } = {}) {
 			fs.copyFileSync(path.join(fixtureDir, f), path.join(dir, f));
 		}
 	} else {
-		fs.writeFileSync(path.join(dir, "prompt.txt"), "test prompt");
+		fs.writeFileSync(path.join(dir, "prompt.txt"), prompt);
 		fs.writeFileSync(path.join(dir, "expected-model"), "zai-coding-cn glm-5.3-flash\n");
 		fs.writeFileSync(path.join(dir, "exit-status"), "0");
 		fs.writeFileSync(path.join(dir, "stderr.txt"), "");
@@ -1228,32 +1231,31 @@ function invNamesToLocs(names, hostDir) {
 		.join("\n");
 }
 
-// Golden fixture: a sanitized REAL pi transcript (run at the pinned pi
-// version, paths rewritten to the fixture repo) must pass the boot audit —
-// this pins the parser against real-pi schema drift, not just hand-authored
-// records. The repo carries the whole shipped library, its inventory
-// derived from the same test/expected-skills.json so the two cannot drift:
-// the auditor requires every shipped skill to be advertised, so each new
-// skill extends the fixture's skills section (the event structure stays the
-// real 2026-10-10 capture).
-test("auditSession accepts a sanitized real pi transcript (golden)", (t) => {
+// The golden repo every real-capture golden test audits against: the whole
+// shipped library, its inventory derived from the same
+// test/expected-skills.json so the two cannot drift — the auditor requires
+// every shipped skill to be advertised, so each new skill extends each
+// fixture's skills section (the event structure stays the real capture's).
+function goldenInventoryRepo(t) {
 	const realExpected = JSON.parse(
 		fs.readFileSync(path.resolve("test", "expected-skills.json")),
 	);
-	const repo = goldenRepo(t, {
+	return goldenRepo(t, {
 		skills: [
 			...realExpected.vendored.map((s) => s.name),
 			...realExpected["self-authored"],
 		],
 		expectedSkills: realExpected,
 	});
+}
 
-	const rawFixture = fs.readFileSync(
-		"test/fixtures/real-pi-transcript.jsonl",
-		"utf8",
-	);
-	// The portability guard inspects the raw fixture bytes before any
-	// substitution: machine-specific absolute paths must never be committed.
+// Golden transcript substitution, shared by the real-capture fixtures:
+// binds __REPO__ to the repo and materializes the host trees the captures
+// ran beside (the operator's host skills, the pi install lib) in temp
+// dirs. The raw fixture bytes are portability-guarded before any
+// substitution: machine-specific absolute paths must never be committed.
+function substituteGolden(t, repo, fixturePath) {
+	const rawFixture = fs.readFileSync(fixturePath, "utf8");
 	if (/\/Users\/|\/opt\/homebrew/.test(rawFixture)) {
 		throw new Error("golden fixture contains machine-specific absolute paths");
 	}
@@ -1266,11 +1268,7 @@ test("auditSession accepts a sanitized real pi transcript (golden)", (t) => {
 	]) {
 		fs.mkdirSync(path.join(hostPiLib, rel), { recursive: true });
 	}
-	const real = fs.realpathSync(repo);
-	let golden = rawFixture.replaceAll("__REPO__", real);
-	// Materialize the host-skill files the real session had advertised: pi
-	// runs with the operator's host skills, and the fixture must carry no
-	// machine-specific absolute paths.
+	let golden = rawFixture.replaceAll("__REPO__", fs.realpathSync(repo));
 	const hostRoot = fs.mkdtempSync(path.join(os.tmpdir(), "golden-host-"));
 	t.after(() => fs.rmSync(hostRoot, { recursive: true, force: true }));
 	for (const m of golden.matchAll(/__HOST_SKILLS__\/([^"']+?\/SKILL\.md)/g)) {
@@ -1278,9 +1276,18 @@ test("auditSession accepts a sanitized real pi transcript (golden)", (t) => {
 		fs.mkdirSync(path.dirname(hostSkill), { recursive: true });
 		fs.writeFileSync(hostSkill, "host skill content\n");
 	}
-	golden = golden
+	return golden
 		.replaceAll("__HOST_SKILLS__", path.join(hostRoot, "skills"))
 		.replaceAll("__HOST_PI_LIB__", path.join(hostPiLib, "@earendil-works/pi-coding-agent"));
+}
+
+// Golden fixture: a sanitized REAL pi transcript (run at the pinned pi
+// version, paths rewritten to the fixture repo) must pass the boot audit —
+// this pins the parser against real-pi schema drift, not just hand-authored
+// records. The event structure stays the real 2026-10-10 capture.
+test("auditSession accepts a sanitized real pi transcript (golden)", (t) => {
+	const repo = goldenInventoryRepo(t);
+	const golden = substituteGolden(t, repo, "test/fixtures/real-pi-transcript.jsonl");
 	const dir = goldenSession(t, repo, { text: golden });
 	const out = auditIn(repo, () => auditSession(dir, repo));
 	assert.match(out, /^clean /);
@@ -1298,6 +1305,183 @@ test("auditSession accepts a sanitized real pi transcript (golden)", (t) => {
 				),
 			),
 		/checkout script never executed/,
+	);
+});
+
+// The codemode capture's fixture path and its own prompt, shared by the
+// golden pass and the fabricated-record mutations below.
+const codemodeFixturePath = "test/fixtures/m4-s1-codemode-transcript.jsonl";
+const codemodeCapturePrompt =
+	"What partition-state groups does the cluster report right now, and what is the status of Slurm job 1851277? Use the theta-compute tools and quote the tool outputs in your answer.";
+
+// Golden fixture: the sanitized M4 S1 live capture (2026-10-21) — the
+// codemode session that drove the gateway through nested calls (spec #95)
+// — passes the full boot audit with the nestedCalls checks reading the
+// bounded record. The capture predates the theta-compute skill; the
+// fixture carries that record the same way the 2026-10-10 golden does.
+// Its prompt is the capture's own: the audit binds prompt.txt to the
+// transcript's user record, and rewriting evidence is not sanitization.
+// Tool output is redacted one class further than paths: Slurm node lists
+// ride `__HOST_NODES_*__` placeholders and the captured job's name rides
+// `__HOST_JOB_NAME__` — cluster topology stays out of the public repo.
+// The job id stays: it is already public in the M4 gate tests, and the
+// prompt naming it stays verbatim for the binding.
+test("auditSession accepts the sanitized M4 S1 codemode transcript and reads its nestedCalls (golden)", (t) => {
+	const repo = goldenInventoryRepo(t);
+	const golden = substituteGolden(t, repo, codemodeFixturePath);
+	const dir = goldenSession(t, repo, {
+		text: golden,
+		prompt: codemodeCapturePrompt,
+	});
+	const out = auditIn(repo, () => auditSession(dir, repo));
+	assert.match(out, /^clean /);
+	// the capture's codemode run made two nested gateway calls
+	assert.match(out, /nested-calls 2$/);
+});
+
+// The fabricated-transcript rejections (spec #95): each mutation breaks
+// exactly one invariant of the bounded record the real capture carries.
+// The mutations run through the full auditSession, so a mutation that
+// trips some earlier check (chain, advertisement, prompt) fails the test
+// itself — only the nestedCalls invariant named by the regex may fire.
+function codemodeMutation(mutate) {
+	const raw = fs.readFileSync(codemodeFixturePath, "utf8");
+	const recs = raw
+		.trimEnd()
+		.split("\n")
+		.map((l) => JSON.parse(l));
+	mutate(recs);
+	return recs.map((r) => JSON.stringify(r)).join("\n") + "\n";
+}
+
+test("auditSession rejects fabricated codemode nestedCalls records (golden)", (t) => {
+	const repo = goldenInventoryRepo(t);
+	const prompt = codemodeCapturePrompt;
+	const carrier = (recs) =>
+		recs.find((r) => r.message?.nestedCalls !== undefined).message;
+	for (const [name, mutate, error] of [
+		[
+			"a nested id re-parented onto another call",
+			(recs) => {
+				carrier(recs).nestedCalls.calls[0].id = "call_8939c6340ab4420ca6d8ce85/1";
+			},
+			/does not derive from its carrier's toolCallId/,
+		],
+		[
+			"a duplicated nested id",
+			(recs) => {
+				const nc = carrier(recs).nestedCalls;
+				nc.calls.push({ ...nc.calls[0] });
+			},
+			/duplicate nestedCalls id/,
+		],
+		[
+			"a nested id claimed by a top-level call",
+			(recs) => {
+				const nc = carrier(recs).nestedCalls;
+				// a hand-added tool call record claiming the nested id —
+				// added to a middle assistant record, so no other boot
+				// check (chain, final response) fires first
+				const mid = recs.find(
+					(r) =>
+						r.message?.role === "assistant" &&
+						r.message?.content?.some((c) => c?.type === "toolCall") &&
+						r.message?.content?.[0]?.type === "toolCall" &&
+						r.id !== recs[recs.length - 1].id &&
+						r.message.nestedCalls === undefined,
+				);
+				mid.message.content.push({
+					type: "toolCall",
+					id: nc.calls[0].id,
+					name: "bash",
+					arguments: { command: "true" },
+				});
+			},
+			/also appears as a top-level call id/,
+		],
+		[
+			"an entry stripped of its name",
+			(recs) => {
+				delete carrier(recs).nestedCalls.calls[0].name;
+			},
+			/lacks the bounded record's shape/,
+		],
+		[
+			"the calls list replaced with a string",
+			(recs) => {
+				carrier(recs).nestedCalls.calls = "two calls";
+			},
+			/is not the bounded record/,
+		],
+		[
+			"the complete flag made a string",
+			(recs) => {
+				carrier(recs).nestedCalls.complete = "yes";
+			},
+			/nestedCalls\.complete .* must be a boolean/,
+		],
+	]) {
+		const dir = goldenSession(t, repo, { text: codemodeMutation(mutate), prompt });
+		assert.throws(
+			() => auditIn(repo, () => auditSession(dir, repo)),
+			error,
+			`mutation "${name}" must fail the audit`,
+		);
+	}
+});
+
+test("collectNestedCalls reads the bounded record and counts multi-level ids", () => {
+	const carrier = (toolCallId, calls) => ({
+		type: "message",
+		message: {
+			role: "toolResult",
+			toolCallId,
+			toolName: "codemode",
+			nestedCalls: { calls, complete: true },
+		},
+	});
+	const assistant = (id) => ({
+		type: "message",
+		message: {
+			role: "assistant",
+			content: [{ type: "toolCall", id, name: "codemode", arguments: {} }],
+		},
+	});
+	const ok = [
+		assistant("call_p"),
+		carrier("call_p", [
+			{ id: "call_p/1", name: "mcp__theta_compute__submit_job", status: "error", arguments: {} },
+			{ id: "call_p/1/1", name: "read", status: "ok", arguments: {} },
+		]),
+	];
+	assert.equal(collectNestedCalls(ok), 2);
+	// the grandchild segment grammar is pi's own: deeper nests append /n
+	assert.equal(
+		collectNestedCalls([
+			assistant("call_p"),
+			carrier("call_p", [{ id: "call_p/2/3/4", name: "read", status: "ok" }]),
+		]),
+		1,
+	);
+	// a flat suffix with no digits is not an assigned id
+	assert.throws(
+		() =>
+			collectNestedCalls([
+				assistant("call_p"),
+				carrier("call_p", [{ id: "call_p/x", name: "read", status: "ok" }]),
+			]),
+		/does not derive/,
+	);
+	// the disjoint id spaces collide only when a transcript record claims
+	// a nested id — exactly the fabrication class
+	assert.throws(
+		() =>
+			collectNestedCalls([
+				assistant("call_p"),
+				assistant("call_p/1"),
+				carrier("call_p", [{ id: "call_p/1", name: "read", status: "ok" }]),
+			]),
+		/also appears as a top-level call id/,
 	);
 });
 

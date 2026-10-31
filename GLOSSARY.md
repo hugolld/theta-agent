@@ -77,7 +77,7 @@ The evidence item a compute job appends to the project notebook as a method entr
 _Avoid_: run receipt, job receipt
 
 **Submit gate**:
-The permission extension that confirms the compute gateway's destructive calls — `submit_job`, `cancel_job`, and `run_alphafold3`, the calls the gateway's own MCP annotations mark destructive — before they reach the gateway; read-only gateway tools run ungated. M4 ships the minimal form; M5's gate framework extends it.
+The permission extension that confirms the compute gateway's destructive calls — `submit_job`, `cancel_job`, and `run_alphafold3`, the confirm set the gateway's own MCP annotations must agree with (a disagreement is drift and refuses loudly) — before they reach the gateway; read-only gateway tools run ungated. A stacked gate framework since M5 S2: confirms from interleaved calls stay safe (pi 1.4.0's concurrent-dialog fix is the floor), and a nested (codemode) call carries its `parentToolCallId` into the prompt, the refusal, and the gate log — one JSONL line per gated decision, written beside the session transcript.
 _Avoid_: approval gate, consent prompt
 
 **Submit capability**:
