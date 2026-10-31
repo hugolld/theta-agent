@@ -1493,39 +1493,38 @@ export function commandResolvesToScript(command, target, root) {
 // consistent: every call needs exactly one later matching result, every
 // result an earlier call — a spliced transcript pairing a result with a
 // later call fails.
+// One walk over the transcript's tool-call surface, shared by the graph
+// and the nested-record check: each record's content array yields its
+// toolCall entries, and each toolResult message yields once. Consumers
+// accumulate their own state — the graph keeps record indexes and throws
+// on temporal faults; the nested-record check keeps id sets and reads
+// the bounded record.
+function* walkToolCallsAndResults(recs) {
+	let recordIndex = 0;
+	for (const r of recs) {
+		recordIndex += 1;
+		const m = r.message;
+		if (!m) continue;
+		if (Array.isArray(m.content)) {
+			for (const t of m.content) {
+				if (t?.type === "toolCall") {
+					yield { call: t, recordIndex, message: m };
+				}
+			}
+		}
+		if (r.type === "message" && m.role === "toolResult") {
+			yield { result: m, recordIndex };
+		}
+	}
+}
+
 function collectToolGraph(recs) {
 	const calls = [];
 	const callOrder = new Map();
 	const results = new Map();
-	let recordIndex = 0;
-	for (const r of recs) {
-		const m = r.message;
-		recordIndex += 1;
-		if (!m) continue;
-		// tool calls are assistant requests: one embedded in a system,
-		// user, or toolResult record is transcript corruption.
-		if (m.role !== "assistant" && Array.isArray(m.content)) {
-			for (const t of m.content) {
-				if (t?.type === "toolCall") {
-					throw new Error(
-						`toolCall in ${m.role} record — transcript corruption`,
-					);
-				}
-			}
-		}
-		if (Array.isArray(m.content))
-			for (const t of m.content) {
-				if (t?.type !== "toolCall") continue;
-				if (typeof t.id !== "string" || t.id === "") {
-					throw new Error(`toolCall without a usable id: ${JSON.stringify(t.id)}`);
-				}
-				if (callOrder.has(t.id)) {
-					throw new Error(`duplicate toolCall id: ${t.id}`);
-				}
-				callOrder.set(t.id, recordIndex);
-				calls.push(t);
-			}
-		if (r.type === "message" && m.role === "toolResult") {
+	for (const step of walkToolCallsAndResults(recs)) {
+		if (step.call === undefined) {
+			const m = step.result;
 			if (typeof m.toolCallId !== "string" || m.toolCallId === "") {
 				throw new Error(
 					`toolResult without a usable toolCallId: ${JSON.stringify(m.toolCallId)}`,
@@ -1534,8 +1533,25 @@ function collectToolGraph(recs) {
 			if (results.has(m.toolCallId)) {
 				throw new Error(`duplicate toolResult for ${m.toolCallId}`);
 			}
-			results.set(m.toolCallId, { recordIndex, message: m });
+			results.set(m.toolCallId, { recordIndex: step.recordIndex, message: m });
+			continue;
 		}
+		const t = step.call;
+		// tool calls are assistant requests: one embedded in a system,
+		// user, or toolResult record is transcript corruption.
+		if (step.message.role !== "assistant") {
+			throw new Error(
+				`toolCall in ${step.message.role} record — transcript corruption`,
+			);
+		}
+		if (typeof t.id !== "string" || t.id === "") {
+			throw new Error(`toolCall without a usable id: ${JSON.stringify(t.id)}`);
+		}
+		if (callOrder.has(t.id)) {
+			throw new Error(`duplicate toolCall id: ${t.id}`);
+		}
+		callOrder.set(t.id, step.recordIndex);
+		calls.push(t);
 	}
 	const orphans = [...results.keys()].filter((id) => !callOrder.has(id));
 	const unanswered = calls.filter((t) => !results.has(t.id));
@@ -1574,17 +1590,14 @@ export function collectNestedCalls(recs) {
 	const topLevelIds = new Set();
 	const nestedIds = new Set();
 	let count = 0;
-	for (const r of recs) {
-		const m = r.message;
-		if (!m) continue;
-		if (Array.isArray(m.content)) {
-			for (const t of m.content) {
-				if (t?.type === "toolCall" && nonEmptyString(t.id)) {
-					topLevelIds.add(t.id);
-				}
+	for (const step of walkToolCallsAndResults(recs)) {
+		if (step.call !== undefined) {
+			if (nonEmptyString(step.call.id)) {
+				topLevelIds.add(step.call.id);
 			}
+			continue;
 		}
-		if (m.role !== "toolResult") continue;
+		const m = step.result;
 		if (nonEmptyString(m.toolCallId)) {
 			topLevelIds.add(m.toolCallId);
 		}

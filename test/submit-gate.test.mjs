@@ -71,7 +71,7 @@ const makeEvent = (toolName, input = {}, parentToolCallId) => ({
 
 const escapeRegExp = (core) => core.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
-const makeGate = () => createSubmitGate({ getAllTools: () => TOOL_INFOS });
+const makeGate = (log) => createSubmitGate({ getAllTools: () => TOOL_INFOS }, log && { log });
 
 // The S4 retro's pin: the gate's prefix must match the tool names pi
 // actually registers. The stub above spells the sanitized form by hand —
@@ -206,7 +206,7 @@ test("a call where the confirm set and the annotations disagree is refused as dr
 
 test("a nested call carries its parent into the prompt, the refusal, and the gate log", async () => {
 	const lines = [];
-	const gate = createSubmitGate({ getAllTools: () => TOOL_INFOS }, { log: (l) => lines.push(l) });
+	const gate = makeGate((l) => lines.push(l));
 	const nestedEvent = makeEvent(
 		`${SERVER}submit_job`,
 		{ run_name: "af3-nested" },
@@ -239,7 +239,7 @@ test("a nested call carries its parent into the prompt, the refusal, and the gat
 
 test("gate log lines carry the decision vocabulary and only the fields that apply", async () => {
 	const lines = [];
-	const gate = createSubmitGate({ getAllTools: () => TOOL_INFOS }, { log: (l) => lines.push(l) });
+	const gate = makeGate((l) => lines.push(l));
 	await gate(makeEvent(`${SERVER}submit_job`, { run_name: "r" }), stubContext(true)); // approved
 	await gate(makeEvent(`${SERVER}cancel_job`, { job_id: "1851277" }), stubContext(false)); // refused
 	const drifted = createSubmitGate(
@@ -265,7 +265,7 @@ test("gate log lines carry the decision vocabulary and only the fields that appl
 
 test("stacked confirms resolve to their own calls under interleaving", async () => {
 	const lines = [];
-	const gate = createSubmitGate({ getAllTools: () => TOOL_INFOS }, { log: (l) => lines.push(l) });
+	const gate = makeGate((l) => lines.push(l));
 	// Two confirms whose resolutions the test orders: the second call's
 	// dialog settles first while the first's stays pending — the stacked
 	// case pi 1.4.0's concurrent-dialog fix made sound.

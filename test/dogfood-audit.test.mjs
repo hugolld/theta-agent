@@ -1308,6 +1308,12 @@ test("auditSession accepts a sanitized real pi transcript (golden)", (t) => {
 	);
 });
 
+// The codemode capture's fixture path and its own prompt, shared by the
+// golden pass and the fabricated-record mutations below.
+const codemodeFixturePath = "test/fixtures/m4-s1-codemode-transcript.jsonl";
+const codemodeCapturePrompt =
+	"What partition-state groups does the cluster report right now, and what is the status of Slurm job 1851277? Use the theta-compute tools and quote the tool outputs in your answer.";
+
 // Golden fixture: the sanitized M4 S1 live capture (2026-10-21) — the
 // codemode session that drove the gateway through nested calls (spec #95)
 // — passes the full boot audit with the nestedCalls checks reading the
@@ -1315,17 +1321,17 @@ test("auditSession accepts a sanitized real pi transcript (golden)", (t) => {
 // fixture carries that record the same way the 2026-10-10 golden does.
 // Its prompt is the capture's own: the audit binds prompt.txt to the
 // transcript's user record, and rewriting evidence is not sanitization.
+// Tool output is redacted one class further than paths: Slurm node lists
+// ride `__HOST_NODES_*__` placeholders and the captured job's name rides
+// `__HOST_JOB_NAME__` — cluster topology stays out of the public repo.
+// The job id stays: it is already public in the M4 gate tests, and the
+// prompt naming it stays verbatim for the binding.
 test("auditSession accepts the sanitized M4 S1 codemode transcript and reads its nestedCalls (golden)", (t) => {
 	const repo = goldenInventoryRepo(t);
-	const golden = substituteGolden(
-		t,
-		repo,
-		"test/fixtures/m4-s1-codemode-transcript.jsonl",
-	);
+	const golden = substituteGolden(t, repo, codemodeFixturePath);
 	const dir = goldenSession(t, repo, {
 		text: golden,
-		prompt:
-			"What partition-state groups does the cluster report right now, and what is the status of Slurm job 1851277? Use the theta-compute tools and quote the tool outputs in your answer.",
+		prompt: codemodeCapturePrompt,
 	});
 	const out = auditIn(repo, () => auditSession(dir, repo));
 	assert.match(out, /^clean /);
@@ -1339,7 +1345,7 @@ test("auditSession accepts the sanitized M4 S1 codemode transcript and reads its
 // trips some earlier check (chain, advertisement, prompt) fails the test
 // itself — only the nestedCalls invariant named by the regex may fire.
 function codemodeMutation(mutate) {
-	const raw = fs.readFileSync("test/fixtures/m4-s1-codemode-transcript.jsonl", "utf8");
+	const raw = fs.readFileSync(codemodeFixturePath, "utf8");
 	const recs = raw
 		.trimEnd()
 		.split("\n")
@@ -1350,8 +1356,7 @@ function codemodeMutation(mutate) {
 
 test("auditSession rejects fabricated codemode nestedCalls records (golden)", (t) => {
 	const repo = goldenInventoryRepo(t);
-	const prompt =
-		"What partition-state groups does the cluster report right now, and what is the status of Slurm job 1851277? Use the theta-compute tools and quote the tool outputs in your answer.";
+	const prompt = codemodeCapturePrompt;
 	const carrier = (recs) =>
 		recs.find((r) => r.message?.nestedCalls !== undefined).message;
 	for (const [name, mutate, error] of [
