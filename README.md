@@ -8,8 +8,8 @@
 
 ## Status
 
-**Very early development (0.4.0).** The architecture, skill-selection plan, and
-milestones are being designed in the open. M1 through M4 are built: the `theta`
+**Very early development (0.5.0).** The architecture, skill-selection plan, and
+milestones are being designed in the open. M1 through M5 are built: the `theta`
 launcher plus the Tier-1 research-loop skill library — K-Dense skills vendored
 verbatim plus the self-authored `theta-research-loop` orchestrator (see
 [Vendored skills](#vendored-skills)) — the first connector skill,
@@ -22,7 +22,11 @@ loop and after standalone searches per
 compute gateway, `theta-compute` — remote Slurm jobs through an MCP gateway
 with bearer auth, a command guard, and an audit trail
 ([ADR 0004](docs/adr/0004-compute-is-a-native-mcp-server.md),
-`gateway/README.md`). The milestones below continue from there.
+`gateway/README.md`) — and the M5 safety gates stacked on it: the deploy-time
+submit capability and per-principal submit ceiling server-side
+([ADR 0006](docs/adr/0006-a-server-held-capability-bounds-submits.md)), the
+stacked submit gate with its session gate log on the theta side, and the
+clean-room rig's gateway legs. The milestones below continue from there.
 
 ## What Theta will be
 
@@ -49,7 +53,7 @@ engine — macOS and Linux first, Windows later.
 - [x] M2 — literature connectors (PubMed, arXiv, Semantic Scholar)
 - [x] M3 — project notebook: provenance entries with graded evidence
 - [x] M4 — compute: Slurm MCP gateway + typed AlphaFold3 tool
-- [ ] M5 — safety gates + containerized execution
+- [x] M5 — safety gates + containerized execution
 - [ ] M6 — eval suite (MCP client is built into pi)
 - [ ] M7 — standalone `theta` shell on pi's headless core (macOS/Linux)
 - [ ] M8 — installers & release channel: Homebrew, deb/AUR, Windows
@@ -57,13 +61,13 @@ engine — macOS and Linux first, Windows later.
 ## Install
 
 ```sh
-pi install npm:theta-agent@0.4.0
+pi install npm:theta-agent@0.5.0
 ```
 
-Requires theta-agent ≥ 0.4.0 on the registry — 0.3.0 and earlier predate the
-compute gateway, and a version-pinned install fails loudly until 0.4.0 is
-visible. If the registry is not there yet, run Theta from a checkout
-instead — see [Try it](#try-it).
+Requires theta-agent ≥ 0.5.0 on the registry — 0.3.0 and earlier predate the
+compute gateway, 0.4.0 predates the M5 safety gates, and a version-pinned
+install fails loudly until 0.5.0 is visible. If the registry is not there
+yet, run Theta from a checkout instead — see [Try it](#try-it).
 
 ## Try it
 
@@ -83,12 +87,13 @@ from a checkout you can also name another directory with
 this way). Theta targets pi ≥ 1.4.0; if the launcher reports
 `pi not found`, install pi with the command above and retry.
 
-Once theta-agent ≥ 0.4.0 is on the registry (0.3.0 and earlier predate
-the compute gateway — until 0.4.0 is visible, stay on the checkout path
-above), the installed form is:
+Once theta-agent ≥ 0.5.0 is on the registry (0.3.0 and earlier predate
+the compute gateway, and 0.4.0 predates the M5 safety gates — until
+0.5.0 is visible, stay on the checkout path above), the installed form
+is:
 
 ```sh
-npm i -g theta-agent@0.4.0
+npm i -g theta-agent@0.5.0
 theta
 ```
 
