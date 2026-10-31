@@ -9,6 +9,12 @@ import { createHash } from "node:crypto";
 // The pi runtime every synthetic session records — the current floor, so the
 // audit's runtime binding passes. Golden fixtures carry their own copies.
 const recordedPiVersion = "1.4.0\n";
+
+// The transcript's own name grammar, which the auditor's session-file
+// discovery matches: a gated session dir also holds gate.jsonl (M5 S2) and
+// an RPC leg raw-rpc-events.jsonl (M5 S3), so bare *.jsonl counting would
+// over-claim the dir. Every synthetic session writes under this name.
+const transcriptFile = "2026-10-21T00-00-00-000Z_00000000-0000-4000-8000-000000000000.jsonl";
 import {
 	ge,
 	decodeXmlEntities,
@@ -241,7 +247,7 @@ function goldenSession(t, repo, { text, fixtureDir, prompt = "test prompt" } = {
 		throw new Error("golden fixture contains machine-specific absolute paths");
 	}
 	fs.writeFileSync(
-		path.join(dir, "session.jsonl"),
+		path.join(dir, transcriptFile),
 		text.replaceAll("__REPO__", fs.realpathSync(repo)),
 	);
 	if (fixtureDir !== undefined) {
@@ -416,7 +422,7 @@ function buildSession(t, repo, overrides = {}) {
 		prevFx = rec.id;
 	});
 	fs.writeFileSync(
-			path.join(dir, "session.jsonl"),
+			path.join(dir, transcriptFile),
 			records
 				.map((r) => JSON.stringify(r))
 				.join("\n") + "\n",
@@ -1036,7 +1042,7 @@ test("auditSession fails on corrupt, mismatched, or stale evidence", (t) => {
 	const repo = makeTempRepo(t);
 
 	const corrupt = buildSession(t, repo);
-	fs.appendFileSync(path.join(corrupt, "session.jsonl"), "{corrupt\n");
+	fs.appendFileSync(path.join(corrupt, transcriptFile), "{corrupt\n");
 	assert.throws(
 		() => auditIn(repo, () => auditSession(corrupt, repo)),
 		/corrupt transcript/,
@@ -1090,7 +1096,7 @@ test("auditSession fails on corrupt, mismatched, or stale evidence", (t) => {
 
 	const twoSessions = buildSession(t, repo);
 	fs.appendFileSync(
-		path.join(twoSessions, "session.jsonl"),
+		path.join(twoSessions, transcriptFile),
 		JSON.stringify({ type: "session", cwd: "/somewhere/else" }) + "\n",
 	);
 	assert.throws(
@@ -1202,7 +1208,7 @@ test("auditSession rejects host aliases under inventory names", (t) => {
 		prevHost = rec.id;
 	});
 	fs.writeFileSync(
-		path.join(dir, "session.jsonl"),
+		path.join(dir, transcriptFile),
 		records.map((r) => JSON.stringify(r)).join("\n") + "\n",
 	);
 	fs.writeFileSync(path.join(dir, "prompt.txt"), "test prompt");
@@ -2503,6 +2509,19 @@ test("the leg registry: an empty leg list attests boot only", (t) => {
 	for (const line of ["selected-file-opened", "script-executed", "notebook-written"]) {
 		assert.ok(!out.includes(line), `empty legs must not attest: ${line}`);
 	}
+});
+
+test("a gated RPC session dir audits clean beside its gate and raw-event sidecars", (t) => {
+	const repo = makeTempRepo(t);
+	const dir = buildSession(t, repo);
+	// The M5 S2 gate log and the M5 S3 RPC event capture ride beside the
+	// transcript by name; discovery must find the transcript by its own
+	// name grammar, not by *.jsonl uniqueness (the S3 rehearsal caught the
+	// old count refusing the three-file dir).
+	fs.writeFileSync(path.join(dir, "gate.jsonl"), JSON.stringify({ decision: "approved", tool: "submit_job" }) + "\n");
+	fs.writeFileSync(path.join(dir, "raw-rpc-events.jsonl"), JSON.stringify({ type: "agent_settled" }) + "\n");
+	const out = auditIn(repo, () => auditSession(dir, repo, []));
+	assert.match(out, /^clean /);
 });
 
 test("the auditor CLI refuses more leg arguments than the registry holds", () => {
