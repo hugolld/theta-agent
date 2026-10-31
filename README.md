@@ -53,7 +53,7 @@ engine — macOS and Linux first, Windows later.
 - [x] M2 — literature connectors (PubMed, arXiv, Semantic Scholar)
 - [x] M3 — project notebook: provenance entries with graded evidence
 - [x] M4 — compute: Slurm MCP gateway + typed AlphaFold3 tool
-- [ ] M5 — safety gates + containerized execution
+- [x] M5 — safety gates + containerized execution
 - [ ] M6 — eval suite (MCP client is built into pi)
 - [ ] M7 — standalone `theta` shell on pi's headless core (macOS/Linux)
 - [ ] M8 — installers & release channel: Homebrew, deb/AUR, Windows
