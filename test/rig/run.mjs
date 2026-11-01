@@ -258,6 +258,27 @@ function preflightGateway(admitted, providerDir) {
 	});
 }
 
+// The run's teardown, on every exit path. A fail() call mid-run runs
+// process.exit, which does not unwind a finally — so a failed run used to
+// leak its container and temp dirs (#110: fifteen theta-rig corpses by
+// 2026-11-01). The teardown rides a process exit hook instead; exit-hook
+// law binds the shape: synchronous only, and a cleanup error must never
+// mask the primary failure — so every step is fire-and-forget and a
+// container that never started is a harmless failed rm.
+export function runTeardown({ containerName, sourceDir, providerDir }) {
+	if (containerName) spawnRun("docker", ["rm", "-f", containerName], { stdio: "ignore" });
+	// Each removal guarded alone: rmSync's force only suppresses ENOENT, and
+	// a throwing removal (EBUSY, EPERM) must neither skip the next step nor
+	// flip a successful run's exit — the cleanup-never-masks convention.
+	for (const dir of [sourceDir, providerDir]) {
+		try {
+			rmSync(dir ?? "", { recursive: true, force: true });
+		} catch {
+			// teardown is best-effort by design
+		}
+	}
+}
+
 // The auditor binds cwd to the checkout, so run it from /theta and capture
 // the attestation for the evidence dir; printed output is the record. Leg
 // arguments ride shell-quoted — the auditor re-validates each against the
@@ -302,6 +323,10 @@ function main() {
 	let gatewayEntry;
 	try {
 		providerDir = prepareProviderConfig(flags.provider);
+		// From the first disposable artifact on, the exit hook owns
+		// teardown — the finally it replaces could not run under fail()'s
+		// process.exit (#110).
+		process.on("exit", () => runTeardown({ containerName: container, sourceDir, providerDir }));
 		if (flags.gateway) gatewayEntry = prepareGatewayConfig(providerDir);
 		sourceDir = stageCloneSource();
 
@@ -362,10 +387,10 @@ function main() {
 
 		audit(flags.legs);
 		console.log(`rig: evidence in ${sessionDir}`);
-	} finally {
-		run("docker", ["rm", "-f", container], { stdio: "ignore" });
-		rmSync(sourceDir ?? "", { recursive: true, force: true });
-		rmSync(providerDir ?? "", { recursive: true, force: true });
+	} catch (error) {
+		// The exit hook still tears down; this only gives an unexpected
+		// crash the runner's one failure story instead of a bare stack.
+		fail(`unexpected failure: ${error?.message ?? error}`);
 	}
 }
 

@@ -1,11 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile, mkdtemp, mkdir, rm, stat, symlink, writeFile } from "node:fs/promises";
+import { existsSync, readFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { parseFlags, prepareProviderConfig, prepareGatewayConfig, gatewayPreflightScript } from "./rig/run.mjs";
+import { gitStatus } from "../scripts/dogfood-gates.mjs";
+import { parseFlags, prepareProviderConfig, prepareGatewayConfig, gatewayPreflightScript, runTeardown } from "./rig/run.mjs";
 
 const dockerfile = await readFile(fileURLToPath(new URL("./rig/Dockerfile", import.meta.url)), "utf8");
 const runnerPath = fileURLToPath(new URL("./rig/run.mjs", import.meta.url));
@@ -284,4 +286,85 @@ test("rig builds and boots (RIG_E2E)", { skip: !process.env.RIG_E2E }, async (t)
 	const boot = spawnSync("docker", ["run", "--rm", "theta-rig:test"]);
 	assert.equal(boot.status, 0, boot.stderr);
 	assert.match(boot.stdout.toString(), /^\d+\.\d+\.\d+\n$/);
+});
+
+// #110: a failing rig run must still remove its container. fail() runs
+// process.exit mid-try — no finally unwinds under it — so teardown rides a
+// process exit hook. The stub docker records every argv it receives; exec
+// answers 1, so the first in-container step fails exactly the way a real
+// failed run does.
+async function stubDockerDir() {
+	const dir = await mkdtemp(path.join(tmpdir(), "rig-stub-"));
+	await writeFile(
+		path.join(dir, "docker"),
+		["#!/bin/sh", 'echo "$@" >> "$STUB_DOCKER_LOG"', "case $1 in", "  exec) exit 1 ;;", "  *) exit 0 ;;", "esac"].join("\n"),
+		{ mode: 0o755 },
+	);
+	return dir;
+}
+
+test("runTeardown removes the container and both temp dirs, fire-and-forget", async (t) => {
+	const stubDir = await stubDockerDir();
+	const logPath = path.join(stubDir, "log");
+	const sourceDir = await mkdtemp(path.join(tmpdir(), "rig-td-src-"));
+	const providerDir = await mkdtemp(path.join(tmpdir(), "rig-td-pi-"));
+	t.after(() =>
+		Promise.all([stubDir, sourceDir, providerDir].map((d) => rm(d, { recursive: true, force: true }))),
+	);
+	const realPath = process.env.PATH;
+	process.env.PATH = `${stubDir}:${realPath}`;
+	process.env.STUB_DOCKER_LOG = logPath;
+	try {
+		runTeardown({ containerName: "theta-rig-unit", sourceDir, providerDir });
+	} finally {
+		process.env.PATH = realPath;
+		delete process.env.STUB_DOCKER_LOG;
+	}
+	assert.equal(existsSync(sourceDir), false, "the staged clone dir survived teardown");
+	assert.equal(existsSync(providerDir), false, "the provider config dir survived teardown");
+	assert.match(readFileSync(logPath, "utf8"), /^rm -f theta-rig-unit$/m);
+});
+
+// The wiring this issue is about: run.mjs itself, failing through fail()'s
+// process.exit, must still fire the rm. Machine-gated the way the suite's
+// other main()-driving paths are: the host pi provider config must exist,
+// and a dirty tree (a pre-commit run's staged state) skips rather than
+// fights the launch gate.
+const wiringSkipReason = (() => {
+	const configPath = path.join(process.env.HOME ?? "", ".pi/agent/models.json");
+	if (!existsSync(configPath)) return "no host pi provider config";
+	try {
+		const config = JSON.parse(readFileSync(configPath, "utf8"));
+		if (!config?.providers?.["zai-coding-cn"]) return "default provider not in the host pi config";
+	} catch {
+		return "host pi config unreadable";
+	}
+	if (gitStatus(path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".."))) {
+		return "working tree dirty (pre-commit staged state)";
+	}
+	return false;
+})();
+
+test("a failed rig run removes its container on the exit path", { skip: wiringSkipReason }, async (t) => {
+	const stubDir = await stubDockerDir();
+	const logPath = path.join(stubDir, "log");
+	const sessionDir = await mkdtemp(path.join(tmpdir(), "rig-wire-"));
+	t.after(() => Promise.all([rm(stubDir, { recursive: true, force: true }), rm(sessionDir, { recursive: true, force: true })]));
+
+	const run = spawnSync(
+		process.execPath,
+		[runnerPath, "run", "probe", "--session-dir", sessionDir, "--timeout", "5"],
+		{
+			encoding: "utf8",
+			env: { ...process.env, PATH: `${stubDir}:${process.env.PATH}`, STUB_DOCKER_LOG: logPath },
+		},
+	);
+	assert.equal(run.status, 1, `expected the run to fail, got exit ${run.status}\n${run.stderr}`);
+	assert.match(run.stderr, /in-container step exited 1/);
+
+	const calls = readFileSync(logPath, "utf8").trim().split("\n");
+	const execIndex = calls.findIndex((c) => c.startsWith("exec"));
+	const rmIndex = calls.findIndex((c, i) => i > execIndex && c.startsWith("rm -f theta-rig-"));
+	assert.ok(execIndex !== -1, "the stub log never saw the failing exec");
+	assert.ok(rmIndex !== -1, "no container rm followed the failure — the run leaked its container");
 });
