@@ -6,9 +6,12 @@ import path from "node:path";
 import { execSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 
-// The pi runtime every synthetic session records — the current floor, so the
-// audit's runtime binding passes. Golden fixtures carry their own copies.
-const recordedPiVersion = "1.4.0\n";
+// The pi runtime every synthetic session records — derived from the floor
+// the session-evidence module owns, so the audit's runtime binding passes;
+// golden fixtures carry their own copies. The expected-model line every
+// synthetic session records, given the same single home.
+const recordedPiVersion = `${PI_FLOOR}\n`;
+const recordedExpectedModel = "zai-coding-cn glm-5.3-flash\n";
 
 // The transcript's own name grammar, which the auditor's session-file
 // discovery matches: a gated session dir also holds gate.jsonl (M5 S2) and
@@ -32,6 +35,13 @@ import {
 	auditSession,
 	ATTESTATION_LEGS,
 } from "../scripts/audit-dogfood.mjs";
+import { manifestSha256 } from "../scripts/dogfood-gates.mjs";
+import {
+	PI_FLOOR,
+	SESSION_FILES,
+	TRANSCRIPT_NAME,
+	readSessionEvidence,
+} from "../scripts/session-evidence.mjs";
 
 test("ge enforces the pi and node version floors", () => {
 	assert.equal(ge("1.4.2", "1.4"), true);
@@ -211,10 +221,15 @@ function makeTempRepo(t) {
 
 const repoHead = (repo) =>
 	execSync("git rev-parse HEAD", { cwd: repo }).toString().trim();
-const repoManifestSha = (repo) =>
-	createHash("sha256")
-		.update(fs.readFileSync(path.join(repo, "package.json")))
-		.digest("hex");
+
+// Golden fixture bytes must never carry machine-specific absolute paths —
+// one guard wherever a fixture enters the tree (the same shape appeared
+// twice before it got this home).
+function assertNoMachinePaths(text) {
+	if (/\/Users\/|\/opt\/homebrew/.test(text)) {
+		throw new Error("golden fixture contains machine-specific absolute paths");
+	}
+}
 
 // Golden-fixture repo construction (#39 retro from #38): the golden tests —
 // the sanitized real-pi transcript and the notebook-audit fixture scenarios
@@ -243,34 +258,32 @@ function goldenRepo(t, { skills, expectedSkills, gitignore = false } = {}) {
 function goldenSession(t, repo, { text, fixtureDir, prompt = "test prompt" } = {}) {
 	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "dogfood-session-"));
 	t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
-	if (/\/Users\/|\/opt\/homebrew/.test(text)) {
-		throw new Error("golden fixture contains machine-specific absolute paths");
-	}
+	assertNoMachinePaths(text);
 	fs.writeFileSync(
 		path.join(dir, transcriptFile),
 		text.replaceAll("__REPO__", fs.realpathSync(repo)),
 	);
 	if (fixtureDir !== undefined) {
 		for (const f of [
-			"prompt.txt",
-			"expected-model",
-			"exit-status",
-			"stderr.txt",
-			"pi-version",
-			"node-version",
+			SESSION_FILES.prompt,
+			SESSION_FILES.expectedModel,
+			SESSION_FILES.exitStatus,
+			SESSION_FILES.stderr,
+			SESSION_FILES.piVersion,
+			SESSION_FILES.nodeVersion,
 		]) {
 			fs.copyFileSync(path.join(fixtureDir, f), path.join(dir, f));
 		}
 	} else {
-		fs.writeFileSync(path.join(dir, "prompt.txt"), prompt);
-		fs.writeFileSync(path.join(dir, "expected-model"), "zai-coding-cn glm-5.3-flash\n");
-		fs.writeFileSync(path.join(dir, "exit-status"), "0");
-		fs.writeFileSync(path.join(dir, "stderr.txt"), "");
-		fs.writeFileSync(path.join(dir, "pi-version"), recordedPiVersion);
-		fs.writeFileSync(path.join(dir, "node-version"), "v26.11.0\n");
+		fs.writeFileSync(path.join(dir, SESSION_FILES.prompt), prompt);
+		fs.writeFileSync(path.join(dir, SESSION_FILES.expectedModel), recordedExpectedModel);
+		fs.writeFileSync(path.join(dir, SESSION_FILES.exitStatus), "0");
+		fs.writeFileSync(path.join(dir, SESSION_FILES.stderr), "");
+		fs.writeFileSync(path.join(dir, SESSION_FILES.piVersion), recordedPiVersion);
+		fs.writeFileSync(path.join(dir, SESSION_FILES.nodeVersion), "v26.11.0\n");
 	}
-	fs.writeFileSync(path.join(dir, "pre-head"), repoHead(repo));
-	fs.writeFileSync(path.join(dir, "manifest-sha256"), repoManifestSha(repo));
+	fs.writeFileSync(path.join(dir, SESSION_FILES.preHead), repoHead(repo));
+	fs.writeFileSync(path.join(dir, SESSION_FILES.manifestSha), manifestSha256(repo));
 	return dir;
 }
 
@@ -427,32 +440,30 @@ function buildSession(t, repo, overrides = {}) {
 				.map((r) => JSON.stringify(r))
 				.join("\n") + "\n",
 		);
-	fs.writeFileSync(path.join(dir, "prompt.txt"), "test prompt");
+	fs.writeFileSync(path.join(dir, SESSION_FILES.prompt), "test prompt");
 	fs.writeFileSync(
-		path.join(dir, "expected-model"),
-		overrides.expectedModel ?? "zai-coding-cn glm-5.3-flash\n",
+		path.join(dir, SESSION_FILES.expectedModel),
+		overrides.expectedModel ?? recordedExpectedModel,
 	);
-	fs.writeFileSync(path.join(dir, "exit-status"), overrides.exit ?? "0");
-	fs.writeFileSync(path.join(dir, "stderr.txt"), overrides.stderr ?? "");
-	fs.writeFileSync(path.join(dir, "pi-version"), overrides.piVersion ?? recordedPiVersion);
+	fs.writeFileSync(path.join(dir, SESSION_FILES.exitStatus), overrides.exit ?? "0");
+	fs.writeFileSync(path.join(dir, SESSION_FILES.stderr), overrides.stderr ?? "");
+	fs.writeFileSync(path.join(dir, SESSION_FILES.piVersion), overrides.piVersion ?? recordedPiVersion);
 	fs.writeFileSync(
-		path.join(dir, "node-version"),
+		path.join(dir, SESSION_FILES.nodeVersion),
 		overrides.nodeVersion ?? "v26.11.0\n",
 	);
-	fs.writeFileSync(path.join(dir, "pre-head"), overrides.preHead ?? repoHead(repo));
-	fs.writeFileSync(path.join(dir, "manifest-sha256"), repoManifestSha(repo));
-	if (overrides.watchdog) fs.writeFileSync(path.join(dir, "watchdog"), "fired");
+	fs.writeFileSync(path.join(dir, SESSION_FILES.preHead), overrides.preHead ?? repoHead(repo));
+	fs.writeFileSync(path.join(dir, SESSION_FILES.manifestSha), manifestSha256(repo));
+	if (overrides.watchdog) fs.writeFileSync(path.join(dir, SESSION_FILES.watchdog), "fired");
 	return dir;
 }
 
-function auditIn(cwd, fn) {
-	const prev = process.cwd();
-	process.chdir(cwd);
-	try {
-		return fn();
-	} finally {
-		process.chdir(prev);
-	}
+// auditSession binds its root explicitly — every git call passes cwd — so
+// the chdir this wrapper once did was a phantom ritual (main's own root
+// binding is its realpathSync(".")). The wrapper keeps the call sites'
+// shape; only the ritual is gone.
+function auditIn(_repo, fn) {
+	return fn();
 }
 
 // Builds the legs array for auditSession from named slots — registry order
@@ -463,6 +474,49 @@ function withLegs(spec) {
 		arg: spec[l.name],
 	}));
 }
+
+test("readSessionEvidence returns the bundle's facts and owns its read failures", (t) => {
+	// The synthetic sessions' literal name conforms to the grammar the
+	// session-evidence module owns: one home for the grammar, pinned here.
+	assert.match(transcriptFile, TRANSCRIPT_NAME);
+
+	const repo = makeTempRepo(t);
+	const evidence = readSessionEvidence(buildSession(t, repo));
+	assert.equal(evidence.watchdogFired, false);
+	assert.equal(evidence.exitStatusRaw, "0");
+	assert.equal(evidence.stderrBytes.length, 0);
+	assert.equal(evidence.piVersionRaw, `${PI_FLOOR}\n`);
+	assert.ok(evidence.transcriptText.includes('"id":"fx0"'));
+	assert.ok(evidence.transcriptBytes.length > 0);
+
+	const timedOut = buildSession(t, repo, { watchdog: true });
+	assert.equal(readSessionEvidence(timedOut).watchdogFired, true);
+
+	const empty = fs.mkdtempSync(path.join(os.tmpdir(), "session-evidence-"));
+	t.after(() => fs.rmSync(empty, { recursive: true, force: true }));
+	assert.throws(
+		() => readSessionEvidence(empty),
+		/expected exactly 1 session transcript \(the ISO-instant-named \.jsonl\), found 0/,
+	);
+
+	const missingOne = buildSession(t, repo);
+	fs.rmSync(path.join(missingOne, SESSION_FILES.exitStatus));
+	assert.throws(
+		() => readSessionEvidence(missingOne),
+		/missing process-evidence files \(exit-status, stderr\.txt, pi-version, node-version, prompt\.txt\)/,
+	);
+
+	const undecodable = buildSession(t, repo);
+	fs.appendFileSync(
+		path.join(undecodable, transcriptFile),
+		Buffer.from([0xff, 0xfe, 0x0a]),
+	);
+	assert.throws(() => readSessionEvidence(undecodable), /corrupt transcript/);
+
+	const noModel = buildSession(t, repo);
+	fs.rmSync(path.join(noModel, SESSION_FILES.expectedModel));
+	assert.throws(() => readSessionEvidence(noModel), /expected-model/);
+});
 
 test("auditSession attests a well-formed boot session", (t) => {
 	const repo = makeTempRepo(t);
@@ -1211,14 +1265,14 @@ test("auditSession rejects host aliases under inventory names", (t) => {
 		path.join(dir, transcriptFile),
 		records.map((r) => JSON.stringify(r)).join("\n") + "\n",
 	);
-	fs.writeFileSync(path.join(dir, "prompt.txt"), "test prompt");
-	fs.writeFileSync(path.join(dir, "expected-model"), "zai-coding-cn glm-5.3-flash\n");
-	fs.writeFileSync(path.join(dir, "exit-status"), "0");
-	fs.writeFileSync(path.join(dir, "stderr.txt"), "");
-	fs.writeFileSync(path.join(dir, "pi-version"), recordedPiVersion);
-	fs.writeFileSync(path.join(dir, "node-version"), "v26.11.0\n");
-	fs.writeFileSync(path.join(dir, "pre-head"), repoHead(repo));
-	fs.writeFileSync(path.join(dir, "manifest-sha256"), repoManifestSha(repo));
+	fs.writeFileSync(path.join(dir, SESSION_FILES.prompt), "test prompt");
+	fs.writeFileSync(path.join(dir, SESSION_FILES.expectedModel), recordedExpectedModel);
+	fs.writeFileSync(path.join(dir, SESSION_FILES.exitStatus), "0");
+	fs.writeFileSync(path.join(dir, SESSION_FILES.stderr), "");
+	fs.writeFileSync(path.join(dir, SESSION_FILES.piVersion), recordedPiVersion);
+	fs.writeFileSync(path.join(dir, SESSION_FILES.nodeVersion), "v26.11.0\n");
+	fs.writeFileSync(path.join(dir, SESSION_FILES.preHead), repoHead(repo));
+	fs.writeFileSync(path.join(dir, SESSION_FILES.manifestSha), manifestSha256(repo));
 	// A host alias under an inventory name does not prove the package loaded
 	// the skill from its own manifest — it must be rejected.
 	assert.throws(
@@ -1262,9 +1316,7 @@ function goldenInventoryRepo(t) {
 // substitution: machine-specific absolute paths must never be committed.
 function substituteGolden(t, repo, fixturePath) {
 	const rawFixture = fs.readFileSync(fixturePath, "utf8");
-	if (/\/Users\/|\/opt\/homebrew/.test(rawFixture)) {
-		throw new Error("golden fixture contains machine-specific absolute paths");
-	}
+	assertNoMachinePaths(rawFixture);
 	const hostPiLib = fs.mkdtempSync(path.join(os.tmpdir(), "golden-pi-lib-"));
 	t.after(() => fs.rmSync(hostPiLib, { recursive: true, force: true }));
 	for (const rel of [

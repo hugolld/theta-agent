@@ -36,6 +36,7 @@ kill $watchdog 2>/dev/null; pkill -P $watchdog 2>/dev/null
 - Run inside an isolated `--session-dir`: the fresh temp dir holds exactly this run's transcript, so the audit below can never pick up another session (a newest-by-mtime lookup races every other pi session on the machine). The dir name carries the short HEAD, so evidence dirs self-identify.
 - Keep the prompt neutral: a prompt that names a skill adds nothing, and a neutral one keeps the spot-check honest.
 - Boot-clean is process evidence: `exit-status` must hold 0 and `stderr.txt` must be 0 bytes. Both persist in the session dir next to the transcript, and the audit below re-verifies them fail-closed.
+- Session evidence has one home: `scripts/session-evidence.mjs` owns the artifact names, the transcript's ISO-instant name grammar, the floor constants, and the read-once discipline — the recipes here and the rig runner write exactly those names.
 
 ## Run the one-shot in the clean-room rig
 
