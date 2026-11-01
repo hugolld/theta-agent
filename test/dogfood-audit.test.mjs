@@ -499,6 +499,22 @@ test("readSessionEvidence returns the bundle's facts and owns its read failures"
 		/expected exactly 1 session transcript \(the ISO-instant-named \.jsonl\), found 0/,
 	);
 
+	const doubled = buildSession(t, repo);
+	fs.copyFileSync(
+		path.join(doubled, transcriptFile),
+		path.join(
+			doubled,
+			transcriptFile.replace(
+				"00000000-0000-4000-8000-000000000000",
+				"00000000-0000-4000-8001-000000000000",
+			),
+		),
+	);
+	assert.throws(
+		() => readSessionEvidence(doubled),
+		/expected exactly 1 session transcript \(the ISO-instant-named \.jsonl\), found 2/,
+	);
+
 	const missingOne = buildSession(t, repo);
 	fs.rmSync(path.join(missingOne, SESSION_FILES.exitStatus));
 	assert.throws(
@@ -575,7 +591,7 @@ test("auditSession attests skill use when paired and errors otherwise", (t) => {
 		transcriptPrompt: "Use lіterature-review and open its instructions",
 	});
 	fs.writeFileSync(
-		path.join(confusable, "prompt.txt"),
+		path.join(confusable, SESSION_FILES.prompt),
 		"Use lіterature-review and open its instructions",
 	);
 	assert.throws(
@@ -587,7 +603,7 @@ test("auditSession attests skill use when paired and errors otherwise", (t) => {
 		transcriptPrompt: "Use LiteratureReview and open its instructions",
 	});
 	fs.writeFileSync(
-		path.join(camelSteer, "prompt.txt"),
+		path.join(camelSteer, SESSION_FILES.prompt),
 		"Use LiteratureReview and open its instructions",
 	);
 	assert.throws(
@@ -1038,7 +1054,7 @@ test("auditSession attests script execution when the checkout's script ran", (t)
 		transcriptPrompt: "run scripts/search.py and show me the output",
 	});
 	fs.writeFileSync(
-		path.join(steered, "prompt.txt"),
+		path.join(steered, SESSION_FILES.prompt),
 		"run scripts/search.py and show me the output",
 	);
 	assert.throws(
@@ -2536,7 +2552,7 @@ test("auditSession attests notebook-written when the recorder ran and the notebo
 		transcriptPrompt: "append your finding to .theta/notebook.jsonl yourself",
 	});
 	fs.writeFileSync(
-		path.join(steered, "prompt.txt"),
+		path.join(steered, SESSION_FILES.prompt),
 		"append your finding to .theta/notebook.jsonl yourself",
 	);
 	assert.throws(

@@ -21,6 +21,7 @@ import { spawn } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { drainJsonl } from "./rpc-jsonl.mjs";
+import { SESSION_FILES } from "../../scripts/session-evidence.mjs";
 
 // A bare invocation prints usage and exits 0, the runner's own help shape —
 // node --test executes every file under test/ as a test file, and this file
@@ -44,7 +45,7 @@ if (gateAnswer !== "allow" && gateAnswer !== "deny") {
 const provider = process.env.RIG_PROVIDER ?? "zai-coding-cn";
 const model = process.env.RIG_MODEL ?? "glm-5.3-flash";
 mkdirSync(sessionDir, { recursive: true });
-writeFileSync(path.join(sessionDir, "prompt.txt"), prompt);
+writeFileSync(path.join(sessionDir, SESSION_FILES.prompt), prompt);
 
 // Inherit the environment, then scrub the families the M5 S0 leg named:
 // ambient ANTHROPIC_* proxies break provider auth, and stale PI_* state
@@ -99,7 +100,7 @@ function finish(code) {
 	clearTimeout(deadline);
 	writeFileSync(path.join(sessionDir, "raw-rpc-events.jsonl"), events.map((e) => JSON.stringify(e)).join("\n") + "\n");
 	writeFileSync(path.join(sessionDir, "stdout.txt"), lastText);
-	writeFileSync(path.join(sessionDir, "stderr.txt"), stderrChunks.join(""));
+	writeFileSync(path.join(sessionDir, SESSION_FILES.stderr), stderrChunks.join(""));
 	child.stdin.end();
 	child.on("close", () => process.exit(code));
 	setTimeout(() => {

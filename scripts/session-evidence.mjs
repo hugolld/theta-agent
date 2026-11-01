@@ -1,10 +1,12 @@
 // The session-evidence module: one home for the session-dir artifact
 // bundle the dogfood auditor binds and attests (GLOSSARY, "Session
-// evidence"). The names, the transcript's name grammar, the version
-// floors, and the read-once discipline live here; the auditor reads
-// through readSessionEvidence, and every writer — the rig runner and the
-// test fixtures — imports SESSION_FILES instead of hand-typing names, so
-// a rename fails as an import error, not as a hand-sync miss.
+// evidence"). The names, the transcript's name grammar, the audit's
+// floor constants, and the read-once discipline live here; the auditor
+// reads through readSessionEvidence, and every code-side writer — the
+// rig runner, the RPC driver, and the test fixtures — imports
+// SESSION_FILES instead of hand-typing names. Recorded golden fixtures
+// carry the names as data; a rename breaks their copy loudly, never as a
+// silent hand-sync miss.
 
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 
@@ -24,8 +26,9 @@ export const SESSION_FILES = Object.freeze({
 
 // The pi and node floors the audit enforces against the recorded runtime.
 // The comparison itself stays beside the SemVer `ge` comparator in
-// audit-dogfood.mjs; the constants live here so each floor literal has
-// one home.
+// audit-dogfood.mjs. These are the audit's constants; separately shipped
+// surfaces carry their own copies (the launcher's warn-only guard, the
+// package.json engines field).
 export const PI_FLOOR = "1.4.0";
 export const NODE_FLOOR = "22.19.0";
 
@@ -96,7 +99,6 @@ export function readSessionEvidence(dir) {
 		expectedModelRaw: readFileSync(`${dir}/${SESSION_FILES.expectedModel}`, "utf8"),
 		preHeadRaw: readFileSync(`${dir}/${SESSION_FILES.preHead}`, "utf8"),
 		manifestShaRaw: readFileSync(`${dir}/${SESSION_FILES.manifestSha}`, "utf8"),
-		transcriptName: transcripts[0],
 		transcriptBytes,
 		transcriptText,
 	};

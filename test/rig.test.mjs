@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { gitStatus } from "../scripts/dogfood-gates.mjs";
+import { SESSION_FILES } from "../scripts/session-evidence.mjs";
 import { parseFlags, prepareProviderConfig, prepareGatewayConfig, gatewayPreflightScript, runTeardown } from "./rig/run.mjs";
 
 const dockerfile = await readFile(fileURLToPath(new URL("./rig/Dockerfile", import.meta.url)), "utf8");
@@ -239,10 +240,10 @@ test("rpc driver answers the confirm and captures the settled session", async (t
 	const events = (await readFile(path.join(sessionDir, "raw-rpc-events.jsonl"), "utf8")).trim().split("\n").map((l) => JSON.parse(l));
 	assert.ok(events.some((e) => e.type === "extension_ui_request" && e.method === "confirm"));
 	assert.equal(await readFile(path.join(sessionDir, "stdout.txt"), "utf8"), "done");
-	assert.equal(await readFile(path.join(sessionDir, "stderr.txt"), "utf8"), "");
-	assert.equal(await readFile(path.join(sessionDir, "prompt.txt"), "utf8"), "a gated prompt");
+	assert.equal(await readFile(path.join(sessionDir, SESSION_FILES.stderr), "utf8"), "");
+	assert.equal(await readFile(path.join(sessionDir, SESSION_FILES.prompt), "utf8"), "a gated prompt");
 	// The wrapper owns the exit-status file, never the driver.
-	await assert.rejects(readFile(path.join(sessionDir, "exit-status")));
+	await assert.rejects(readFile(path.join(sessionDir, SESSION_FILES.exitStatus)));
 });
 
 test("rpc driver can refuse instead: the deny answer cancels the confirm", async (t) => {

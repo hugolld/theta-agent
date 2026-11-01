@@ -1874,11 +1874,9 @@ export function auditSession(dir, rootArg, legs = []) {
 	// Mount aliases (e.g. /var vs /private/var on macOS) give the same tree
 	// two spellings; lexical containment accepts either spelling of root.
 	const rootAliases = [...new Set([rootArg, root])];
-	// The evidence bundle — artifact names, transcript discovery, the
-	// read-once discipline — is the session-evidence module's. Each file is
-	// read exactly once there: the same bytes are validated here and hashed
-	// into the attestation, so a later mutation cannot produce a successful
-	// attestation whose hashes identify invalid evidence.
+	// The evidence bundle — names, transcript discovery, read-once
+	// discipline — is the session-evidence module's; the bytes it returns
+	// are the bytes validated here and hashed into the attestation.
 	const {
 		transcriptBytes,
 		transcriptText: text,
