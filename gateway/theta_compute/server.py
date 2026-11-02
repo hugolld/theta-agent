@@ -153,6 +153,20 @@ class AuditMiddleware(Middleware):
 		self._submit_capability = submit_capability
 		self._submit_ceiling = submit_ceiling
 		self._policies = policies
+		# The registry is still empty at construction (the defs below the
+		# FastMCP call populate it), so the job-creating set materializes
+		# on first use — a fact of the registry, derived once.
+		self._derived_job_creating: frozenset[str] | None = None
+
+	def _job_creating(self) -> frozenset[str]:
+		"""The job-creating names, derived from the registry on first use
+		(see __init__ for why not at construction): the submit ceiling
+		counts exactly these."""
+		if self._derived_job_creating is None:
+			self._derived_job_creating = frozenset(
+				name for name, policy in self._policies.items() if policy.job_creating
+			)
+		return self._derived_job_creating
 
 	async def on_call_tool(
 		self,
@@ -214,15 +228,8 @@ class AuditMiddleware(Middleware):
 		# and the ceiling both fail a call, the hold above has already
 		# answered: one call, one line, the outer bound wins (ADR 0006).
 		if policy.job_creating:
-			# Derived per call, not in the constructor: the registry is
-			# still empty when the middleware is built (the defs below
-			# the FastMCP call populate it), so anything snapshot at
-			# construction would freeze the empty set.
-			job_creating = frozenset(
-				name for name, tool_policy in self._policies.items() if tool_policy.job_creating
-			)
 			observed = self._audit.count_recent_submits(
-				user=user, tools=job_creating, window_seconds=SUBMIT_WINDOW_SECONDS
+				user=user, tools=self._job_creating(), window_seconds=SUBMIT_WINDOW_SECONDS
 			)
 			if observed >= self._submit_ceiling:
 				reason = _throttled_message(user, observed, self._submit_ceiling, SUBMIT_WINDOW_SECONDS)

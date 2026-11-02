@@ -64,10 +64,6 @@ _Avoid_: compute daemon, job server
 The compute gateway's allow-list over `submit_job` directives — partition, time, mem, ntasks, cpus-per-task, gres — each value one safe token under its ceiling; the client shapes directives only, never commands.
 _Avoid_: directive guard
 
-**Tool policy**:
-The compute gateway's per-tool enforcement record — annotations, job-creating, guard — co-located with each tool's definition and read by the audit middleware, the hold and throttle bounds, and the boundary tests; a mismatch between policy and registered surface refuses at boot. Spec #116 ships it.
-_Avoid_: tool set, policy table, tool registry
-
 **Staging root**:
 The one cluster-side directory that holds every run directory; the boundary the gateway's path sandbox enforces and the target the over-cap error names for the out-of-band scp move.
 _Avoid_: staging area, staging directory, staging folder
@@ -107,3 +103,7 @@ _Avoid_: code mode, sandbox mode
 **Durable run**:
 A run that outlives its process — turns committed to storage before they are shown, an interrupted run resumed from storage after a crash. The pi coding agent has durable session files but no durable runs (a run dies with its process; resume is transcript replay in a new process); true durable runs live only in the separate experimental pi-durable harness, a watch item under the floor-review cadence — M7's session/run broker stays Theta-built, and long-horizon durability rides theta-compute (cluster jobs outlive the laptop).
 _Avoid_: persistent session, background run
+
+**Tool policy**:
+The compute gateway's per-tool enforcement record — annotations, job-creating, guard — co-located with each tool's definition and read by the audit middleware, the hold and throttle bounds, and the boundary tests; a mismatch between policy and registered surface refuses at boot. Spec #116 ships it.
+_Avoid_: tool set, policy table, tool registry

@@ -904,14 +904,15 @@ test("the tool-policy registry drives the wire hints and the bounds' tool sets",
 
 	// The hold's words stay literals — ADR 0006 freezes these bytes on
 	// every HOLD line — and they must name exactly the job-creating set;
-	// so must the instructions' capability-off sentence.
+	// so must the instructions' capability-off sentence, read as the
+	// folded string constant it must be (an f-string or a derived string
+	// would not be one Constant, so the walker would report null).
 	assert.equal(dump.held_message, HELD_REASON, "the walker read the hold's exact bytes");
 	assert.ok(dump.held_message.includes("(submit_job, run_alphafold3)"), "the hold names the job creators");
-	const source = await readFile(new URL("../gateway/theta_compute/server.py", import.meta.url), "utf8");
-	assert.match(
-		source,
-		/The submit capability is off: submit_job and run_alphafold3/,
-		"the instructions' off sentence names them too",
+	assert.equal(
+		dump.instructions_off,
+		" The submit capability is off: submit_job and run_alphafold3 answer a hard refusal until the deploy env re-enables them.",
+		"the instructions' off sentence names them too, as literal bytes",
 	);
 });
 

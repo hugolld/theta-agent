@@ -52,7 +52,19 @@ def main():
 	decorated = []
 	bindings = {}
 	held_message = None
+	instructions_off = None
 	for node in ast.walk(tree):
+		# The instructions' capability-off sentence: a plain string
+		# constant (adjacent literals fold at parse), so finding it here
+		# proves it stayed a literal — an f-string or a derived string
+		# would not be one Constant.
+		if (
+			instructions_off is None
+			and isinstance(node, ast.Constant)
+			and isinstance(node.value, str)
+			and "The submit capability is off:" in node.value
+		):
+			instructions_off = node.value
 		if isinstance(node, ast.Assign) and len(node.targets) == 1:
 			target = node.targets[0]
 			if isinstance(target, ast.Name) and target.id == HELD_MESSAGE:
@@ -90,7 +102,13 @@ def main():
 						):
 							bindings[node.name] = binding.value.slice.value
 	json.dump(
-		{"records": records, "decorated": decorated, "bindings": bindings, "held_message": held_message},
+		{
+			"records": records,
+			"decorated": decorated,
+			"bindings": bindings,
+			"held_message": held_message,
+			"instructions_off": instructions_off,
+		},
 		sys.stdout,
 	)
 	return 0
