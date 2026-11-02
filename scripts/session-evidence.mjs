@@ -28,7 +28,9 @@ export const SESSION_FILES = Object.freeze({
 // The comparison itself stays beside the SemVer `ge` comparator in
 // audit-dogfood.mjs. These are the audit's constants; separately shipped
 // surfaces carry their own copies (the launcher's warn-only guard, the
-// package.json engines field).
+// package.json engines field), and docs/agents/dogfood.md quotes both
+// floors in the operator prose — a floor bump edits all of these in one
+// strike.
 export const PI_FLOOR = "1.4.0";
 export const NODE_FLOOR = "22.19.0";
 

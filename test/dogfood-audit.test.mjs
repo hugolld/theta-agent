@@ -12,6 +12,10 @@ import { createHash } from "node:crypto";
 // synthetic session records, given the same single home.
 const recordedPiVersion = `${PI_FLOOR}\n`;
 const recordedExpectedModel = "zai-coding-cn glm-5.3-flash\n";
+// The node runtime every synthetic session records — this machine's live
+// node, well above NODE_FLOOR (unlike pi's, it is not the floor; the floor
+// only has to be cleared). Golden fixtures carry their own copies.
+const recordedNodeVersion = "v26.11.0\n";
 
 // The transcript's own name grammar, which the auditor's session-file
 // discovery matches: a gated session dir also holds gate.jsonl (M5 S2) and
@@ -231,6 +235,34 @@ function assertNoMachinePaths(text) {
 	}
 }
 
+// The binding pair: evidence binds to a tree at write time, and the audit
+// refuses when either moved afterwards. `preHead` overrides the recorded
+// HEAD — the stale-evidence cases record a head the audit must refuse.
+function writeBinding(dir, repo, preHead) {
+	fs.writeFileSync(path.join(dir, SESSION_FILES.preHead), preHead ?? repoHead(repo));
+	fs.writeFileSync(path.join(dir, SESSION_FILES.manifestSha), manifestSha256(repo));
+}
+
+// The process-evidence bundle every synthetic session writes: the six
+// process files with clean-boot defaults (overrides replace per field;
+// the keys are buildSession's, unchanged for its callers), then the
+// binding pair.
+function writeProcessFiles(dir, repo, overrides = {}) {
+	fs.writeFileSync(path.join(dir, SESSION_FILES.prompt), overrides.prompt ?? "test prompt");
+	fs.writeFileSync(
+		path.join(dir, SESSION_FILES.expectedModel),
+		overrides.expectedModel ?? recordedExpectedModel,
+	);
+	fs.writeFileSync(path.join(dir, SESSION_FILES.exitStatus), overrides.exit ?? "0");
+	fs.writeFileSync(path.join(dir, SESSION_FILES.stderr), overrides.stderr ?? "");
+	fs.writeFileSync(path.join(dir, SESSION_FILES.piVersion), overrides.piVersion ?? recordedPiVersion);
+	fs.writeFileSync(
+		path.join(dir, SESSION_FILES.nodeVersion),
+		overrides.nodeVersion ?? recordedNodeVersion,
+	);
+	writeBinding(dir, repo, overrides.preHead);
+}
+
 // Golden-fixture repo construction (#39 retro from #38): the golden tests —
 // the sanitized real-pi transcript and the notebook-audit fixture scenarios
 // — build the same repo shape (skill trees + inventory + manifest, one
@@ -274,16 +306,10 @@ function goldenSession(t, repo, { text, fixtureDir, prompt = "test prompt" } = {
 		]) {
 			fs.copyFileSync(path.join(fixtureDir, f), path.join(dir, f));
 		}
+		writeBinding(dir, repo);
 	} else {
-		fs.writeFileSync(path.join(dir, SESSION_FILES.prompt), prompt);
-		fs.writeFileSync(path.join(dir, SESSION_FILES.expectedModel), recordedExpectedModel);
-		fs.writeFileSync(path.join(dir, SESSION_FILES.exitStatus), "0");
-		fs.writeFileSync(path.join(dir, SESSION_FILES.stderr), "");
-		fs.writeFileSync(path.join(dir, SESSION_FILES.piVersion), recordedPiVersion);
-		fs.writeFileSync(path.join(dir, SESSION_FILES.nodeVersion), "v26.11.0\n");
+		writeProcessFiles(dir, repo, { prompt });
 	}
-	fs.writeFileSync(path.join(dir, SESSION_FILES.preHead), repoHead(repo));
-	fs.writeFileSync(path.join(dir, SESSION_FILES.manifestSha), manifestSha256(repo));
 	return dir;
 }
 
@@ -440,20 +466,7 @@ function buildSession(t, repo, overrides = {}) {
 				.map((r) => JSON.stringify(r))
 				.join("\n") + "\n",
 		);
-	fs.writeFileSync(path.join(dir, SESSION_FILES.prompt), "test prompt");
-	fs.writeFileSync(
-		path.join(dir, SESSION_FILES.expectedModel),
-		overrides.expectedModel ?? recordedExpectedModel,
-	);
-	fs.writeFileSync(path.join(dir, SESSION_FILES.exitStatus), overrides.exit ?? "0");
-	fs.writeFileSync(path.join(dir, SESSION_FILES.stderr), overrides.stderr ?? "");
-	fs.writeFileSync(path.join(dir, SESSION_FILES.piVersion), overrides.piVersion ?? recordedPiVersion);
-	fs.writeFileSync(
-		path.join(dir, SESSION_FILES.nodeVersion),
-		overrides.nodeVersion ?? "v26.11.0\n",
-	);
-	fs.writeFileSync(path.join(dir, SESSION_FILES.preHead), overrides.preHead ?? repoHead(repo));
-	fs.writeFileSync(path.join(dir, SESSION_FILES.manifestSha), manifestSha256(repo));
+	writeProcessFiles(dir, repo, overrides);
 	if (overrides.watchdog) fs.writeFileSync(path.join(dir, SESSION_FILES.watchdog), "fired");
 	return dir;
 }
@@ -532,6 +545,17 @@ test("readSessionEvidence returns the bundle's facts and owns its read failures"
 	const noModel = buildSession(t, repo);
 	fs.rmSync(path.join(noModel, SESSION_FILES.expectedModel));
 	assert.throws(() => readSessionEvidence(noModel), /expected-model/);
+});
+
+// Read-order precedence, the delta #113 disclosed and the merge-round
+// review accepted: the module reads all-upfront, so a read failure
+// outranks the watchdog refusal in a multi-defect dir. Pinned so a later
+// refactor cannot reshuffle the order silently.
+test("read failures surface before the watchdog refusal in a multi-defect dir", (t) => {
+	const repo = makeTempRepo(t);
+	const dir = buildSession(t, repo, { watchdog: true });
+	fs.appendFileSync(path.join(dir, transcriptFile), Buffer.from([0xff, 0xfe, 0x0a]));
+	assert.throws(() => auditIn(repo, () => auditSession(dir, repo)), /corrupt transcript/);
 });
 
 test("auditSession attests a well-formed boot session", (t) => {
@@ -1281,14 +1305,7 @@ test("auditSession rejects host aliases under inventory names", (t) => {
 		path.join(dir, transcriptFile),
 		records.map((r) => JSON.stringify(r)).join("\n") + "\n",
 	);
-	fs.writeFileSync(path.join(dir, SESSION_FILES.prompt), "test prompt");
-	fs.writeFileSync(path.join(dir, SESSION_FILES.expectedModel), recordedExpectedModel);
-	fs.writeFileSync(path.join(dir, SESSION_FILES.exitStatus), "0");
-	fs.writeFileSync(path.join(dir, SESSION_FILES.stderr), "");
-	fs.writeFileSync(path.join(dir, SESSION_FILES.piVersion), recordedPiVersion);
-	fs.writeFileSync(path.join(dir, SESSION_FILES.nodeVersion), "v26.11.0\n");
-	fs.writeFileSync(path.join(dir, SESSION_FILES.preHead), repoHead(repo));
-	fs.writeFileSync(path.join(dir, SESSION_FILES.manifestSha), manifestSha256(repo));
+	writeProcessFiles(dir, repo);
 	// A host alias under an inventory name does not prove the package loaded
 	// the skill from its own manifest — it must be rejected.
 	assert.throws(
