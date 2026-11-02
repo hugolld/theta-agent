@@ -5,9 +5,10 @@ of a regex over source text, Python's own parser reads the co-located
 records — ``tool_policies["name"] = ToolPolicy(...)`` — and the decorated
 ``@app.tool`` defs, so formatting and comments cannot fool it. Output on
 stdout is one JSON object: {"records": {...}, "decorated": [...],
-"bindings": {...}, "held_message": "..."}; the test asserts records,
-decorated defs, and decorator bindings name the same tools, and that the
-hold's words still name the job creators.
+"bindings": {...}, "held_message": "...", "instructions_off": "..."};
+the test asserts records, decorated defs, and decorator bindings name
+the same tools, and that the hold's words and the instructions' off
+sentence still name the job creators.
 """
 
 from __future__ import annotations
