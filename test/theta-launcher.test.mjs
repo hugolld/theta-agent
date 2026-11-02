@@ -282,13 +282,18 @@ test('signal-forwarding seam: SIGTERM aimed at theta is forwarded to pi, which e
 	mkdirSync(binDir, { recursive: true });
 	// A stub pi that announces readiness, waits, and records how it died.
 	// /bin-absolute tools because PATH holds only this stub dir.
+	// The trap precedes readiness: a TERM arriving after the ready flag
+	// must always be trapped and recorded — the reverse order left a
+	// window where the forwarded TERM killed the stub before the trap
+	// existed (status 143 still passed; death.txt ENOENT — flaked twice
+	// in CI before the order was fixed).
 	writeFileSync(
 		join(binDir, 'pi'),
 		[
 			'#!/bin/sh',
 			'if [ "$1" = "--version" ]; then echo "pi 1.4.2"; exit 0; fi',
-			'/usr/bin/touch "$READY_FLAG"',
 			'trap "echo TERM-handled > \"$DEATH_REPORT\"; exit 143" TERM',
+			'/usr/bin/touch "$READY_FLAG"',
 			'while [ ! -f "$DEATH_REPORT" ]; do /bin/sleep 0.05; done',
 		].join('\n'),
 		{ mode: 0o755 },

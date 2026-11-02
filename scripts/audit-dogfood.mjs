@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { execSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { gitStatus, manifestSha256 } from "./dogfood-gates.mjs";
+import { NODE_FLOOR, PI_FLOOR, readSessionEvidence } from "./session-evidence.mjs";
 
 // SemVer comparison: true when a >= b. Prereleases follow SemVer precedence
 // (a release outranks its own prerelease; numeric identifiers compare
@@ -1873,53 +1874,34 @@ export function auditSession(dir, rootArg, legs = []) {
 	// Mount aliases (e.g. /var vs /private/var on macOS) give the same tree
 	// two spellings; lexical containment accepts either spelling of root.
 	const rootAliases = [...new Set([rootArg, root])];
-	// The pi transcript is named `<ISO instant>_<uuid>.jsonl` (grammar
-	// observed on pi 1.4.0 sessions and pinned by the golden fixtures).
-	// A gated session's dir also holds the gate log (`gate.jsonl`, since M5 S2) and
-	// an RPC leg its raw event capture (`raw-rpc-events.jsonl`, since M5
-	// S3), so counting bare *.jsonl over-claims the dir. Match the
-	// transcript's own name grammar; the exactly-one invariant is over
-	// transcripts and stays.
-	const transcriptName =
-		/^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.jsonl$/;
-	const files = fs.readdirSync(dir).filter((f) => transcriptName.test(f));
-	if (files.length !== 1) {
-		throw new Error(`expected exactly 1 session transcript (the ISO-instant-named .jsonl), found ${files.length}`);
-	}
-	if (fs.existsSync(`${dir}/watchdog`)) {
+	// The evidence bundle — names, transcript discovery, read-once
+	// discipline — is the session-evidence module's; the bytes it returns
+	// are the bytes validated here and hashed into the attestation.
+	const {
+		transcriptBytes,
+		transcriptText: text,
+		watchdogFired,
+		exitStatusRaw: bootExitRaw,
+		stderrBytes: bootErrBuf,
+		piVersionRaw,
+		nodeVersionRaw,
+		promptText: promptWanted,
+		expectedModelRaw,
+		preHeadRaw,
+		manifestShaRaw,
+	} = readSessionEvidence(dir);
+	if (watchdogFired) {
 		throw new Error("watchdog fired: run exceeded 300s");
 	}
-	let bootExit;
-	let bootErr;
-	let bootExitRaw;
-	let bootErrBuf;
-	let piVersion;
-	let nodeVersion;
-	let promptWanted;
-	// Read each evidence file exactly once: the same bytes are validated here
-	// and hashed into the attestation, so a later mutation cannot produce a
-	// successful attestation whose hashes identify invalid evidence.
-	try {
-		bootExitRaw = fs.readFileSync(`${dir}/exit-status`, "utf8");
-		bootErrBuf = fs.readFileSync(`${dir}/stderr.txt`);
-		bootExit = bootExitRaw.trim();
-		bootErr = bootErrBuf.length;
-		piVersion = fs.readFileSync(`${dir}/pi-version`, "utf8").trim().replace(/^v/, "");
-		nodeVersion = fs
-			.readFileSync(`${dir}/node-version`, "utf8")
-			.trim()
-			.replace(/^v/, "");
-		promptWanted = fs.readFileSync(`${dir}/prompt.txt`, "utf8");
-	} catch {
-		throw new Error(
-			"missing process-evidence files (exit-status, stderr.txt, pi-version, node-version, prompt.txt)",
-		);
+	const bootExit = bootExitRaw.trim();
+	const bootErr = bootErrBuf.length;
+	const piVersion = piVersionRaw.trim().replace(/^v/, "");
+	const nodeVersion = nodeVersionRaw.trim().replace(/^v/, "");
+	if (!ge(piVersion, PI_FLOOR)) {
+		throw new Error(`pi ${piVersion} is below the supported ${PI_FLOOR} floor`);
 	}
-	if (!ge(piVersion, "1.4.0")) {
-		throw new Error(`pi ${piVersion} is below the supported 1.4.0 floor`);
-	}
-	if (!ge(nodeVersion, "22.19.0")) {
-		throw new Error(`node ${nodeVersion} is below the supported 22.19.0 floor`);
+	if (!ge(nodeVersion, NODE_FLOOR)) {
+		throw new Error(`node ${nodeVersion} is below the supported ${NODE_FLOOR} floor`);
 	}
 	if (bootExit !== "0" || bootErr !== 0) {
 		throw new Error(`boot not clean: exit ${bootExit}, stderr ${bootErr} bytes`);
@@ -1935,15 +1917,6 @@ export function auditSession(dir, rootArg, legs = []) {
 		throw new Error(
 			`index entries marked assume-unchanged or skip-worktree:\n${flagged.join("\n")}`,
 		);
-	}
-	// The transcript is hashed as raw file bytes and decoded strictly: lossy
-	// UTF-8 replacement or normalization would let byte-corrupt evidence pass.
-	const transcriptBuf = fs.readFileSync(`${dir}/${files[0]}`);
-	let text;
-	try {
-		text = new TextDecoder("utf-8", { fatal: true }).decode(transcriptBuf);
-	} catch (e) {
-		throw new Error(`corrupt transcript: ${e.message}`);
 	}
 	// Strip only the trailing newline terminator: blank interior lines are
 	// malformed JSONL and fail closed in the parse below.
@@ -2085,7 +2058,7 @@ export function auditSession(dir, rootArg, legs = []) {
 	if (userText !== promptWanted) {
 		throw new Error("prompt mismatch: the session did not run the recorded prompt");
 	}
-	const wantModel = fs.readFileSync(`${dir}/expected-model`, "utf8").trim().split(/\s+/);
+	const wantModel = expectedModelRaw.trim().split(/\s+/);
 	const changes = recs.filter((r) => r.type === "model_change");
 	if (changes.length !== 1) {
 		throw new Error(`expected exactly 1 model_change record, found ${changes.length}`);
@@ -2215,18 +2188,18 @@ export function auditSession(dir, rootArg, legs = []) {
 		throw new Error(`working tree dirty:\n${dirty}`);
 	}
 	const head = execSync("git rev-parse HEAD", { cwd: root }).toString().trim();
-	const preHead = fs.readFileSync(`${dir}/pre-head`, "utf8").trim();
+	const preHead = preHeadRaw.trim();
 	if (head !== preHead) {
 		throw new Error(`HEAD moved since the run: ${preHead} -> ${head}`);
 	}
-	const manifestSha = fs.readFileSync(`${dir}/manifest-sha256`, "utf8").trim();
+	const manifestSha = manifestShaRaw.trim();
 	const curManifest = manifestSha256(root);
 	if (curManifest !== manifestSha) {
 		throw new Error("package.json changed since the run");
 	}
 	let out =
 		`${formatCleanLine(head)}\n` +
-		`transcript ${createHash("sha256").update(transcriptBuf).digest("hex")}\n` +
+		`transcript ${createHash("sha256").update(transcriptBytes).digest("hex")}\n` +
 		`exit-status ${shaText(bootExitRaw)}\n` +
 		`stderr ${shaText(bootErrBuf)}\n` +
 		`pi ${piVersion}\n` +

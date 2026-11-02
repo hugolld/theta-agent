@@ -52,6 +52,10 @@ _Avoid_: trust score, confidence level
 One spot-check module of the dogfood auditor — skill read, script executed, notebook written — registered in one ordered array and run through one shared interface against the session's transcript.
 _Avoid_: spot-check block, inline check
 
+**Session evidence**:
+The artifact bundle a dogfood or adversarial run leaves in its session dir — the process facts (`exit-status`, `stderr.txt`, `pi-version`, `node-version`, `prompt.txt`, `expected-model`, `pre-head`, `manifest-sha256`, the `watchdog` sentinel) plus the transcript its ISO-instant name grammar picks out — which the dogfood auditor binds to the checkout and attests. `scripts/session-evidence.mjs` owns the artifact list, the grammar, the audit's floor constants, and the read-once discipline; the rig runner, the RPC driver, and the test fixtures import the names.
+_Avoid_: evidence folder, session bundle
+
 **Compute gateway**:
 The MCP server (theta-compute) on the cluster's login node wrapping the Slurm CLI; enforcement — path sandbox, command guard, audit line — stays server-side. M4 ships it.
 _Avoid_: compute daemon, job server

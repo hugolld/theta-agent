@@ -28,6 +28,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { gitStatus, manifestSha256, run as spawnRun } from "../../scripts/dogfood-gates.mjs";
+import { SESSION_FILES } from "../../scripts/session-evidence.mjs";
 
 const rigDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(rigDir, "../..");
@@ -338,10 +339,10 @@ function main() {
 				process.env.HOME, ".theta-evidence", `rig-${headSha.slice(0, 7)}-${Date.now()}`,
 			);
 			mkdirSync(sessionDir, { recursive: true });
-			writeFileSync(path.join(sessionDir, "pre-head"), headSha);
-			writeFileSync(path.join(sessionDir, "prompt.txt"), prompt);
-			writeFileSync(path.join(sessionDir, "expected-model"), `${flags.provider} ${flags.model}\n`);
-			writeFileSync(path.join(sessionDir, "manifest-sha256"), manifestSha256(repoRoot));
+			writeFileSync(path.join(sessionDir, SESSION_FILES.preHead), headSha);
+			writeFileSync(path.join(sessionDir, SESSION_FILES.prompt), prompt);
+			writeFileSync(path.join(sessionDir, SESSION_FILES.expectedModel), `${flags.provider} ${flags.model}\n`);
+			writeFileSync(path.join(sessionDir, SESSION_FILES.manifestSha), manifestSha256(repoRoot));
 		}
 
 		startContainer(providerDir, flags.gateway);
@@ -353,7 +354,9 @@ function main() {
 		}
 
 		// The runtime record the audit re-verifies.
-		execIn("pi --version > /session/pi-version && node --version > /session/node-version");
+		execIn(
+			`pi --version > /session/${SESSION_FILES.piVersion} && node --version > /session/${SESSION_FILES.nodeVersion}`,
+		);
 
 		// GNU timeout stands in for the host recipe's hand-rolled watchdog:
 		// SIGTERM at the bound, SIGKILL 15s later, 124 recorded on timeout.
@@ -369,20 +372,20 @@ function main() {
 				`2> /session/driver-stderr.txt`
 			: sessionPrefix +
 				`node bin/theta.mjs --dev --provider ${flags.provider} --model ${flags.model} ` +
-				`--session-dir /session --print "$RIG_PROMPT" < /dev/null 2> /session/stderr.txt`;
+				`--session-dir /session --print "$RIG_PROMPT" < /dev/null 2> /session/${SESSION_FILES.stderr}`;
 		const sessionEnv = { RIG_PROMPT: rest.join(" ") };
 		if (flags.rpc) {
 			sessionEnv.RIG_PROVIDER = flags.provider;
 			sessionEnv.RIG_MODEL = flags.model;
 			sessionEnv.RIG_TIMEOUT = String(flags.timeout);
 		}
-		execIn(`${sessionCommand}; echo $? > /session/exit-status`, { env: sessionEnv });
+		execIn(`${sessionCommand}; echo $? > /session/${SESSION_FILES.exitStatus}`, { env: sessionEnv });
 		const exitStatus = Number.parseInt(
-			readFileSync(path.join(sessionDir, "exit-status"), "utf8").trim(),
+			readFileSync(path.join(sessionDir, SESSION_FILES.exitStatus), "utf8").trim(),
 			10,
 		);
 		if (!Number.isInteger(exitStatus)) fail("cannot read the session exit-status file");
-		if (exitStatus === 124) writeFileSync(path.join(sessionDir, "watchdog"), "fired\n");
+		if (exitStatus === 124) writeFileSync(path.join(sessionDir, SESSION_FILES.watchdog), "fired\n");
 		if (exitStatus !== 0) fail(`session exited ${exitStatus} — evidence in ${sessionDir}`);
 
 		audit(flags.legs);
