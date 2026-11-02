@@ -558,6 +558,48 @@ test("read failures surface before the watchdog refusal in a multi-defect dir", 
 	assert.throws(() => auditIn(repo, () => auditSession(dir, repo)), /corrupt transcript/);
 });
 
+// The names have one home (the #113 retro): the strike's extraction-
+// completeness defect was caught by review and then verified by a manual
+// grep three separate times — the grep is the invariant, so the suite
+// owns it. A quote-delimited bundle name outside the module is a
+// hand-typed writer; new writers import SESSION_FILES. A string that
+// only coincides with a name argues its role here, beside the check.
+test("session-evidence names stay quote-delimited only in their one home", () => {
+	// theta-launcher.test.mjs forwards the string prompt.txt as an argv
+	// payload — a prompt text that happens to read like a file name — not
+	// a session-evidence write.
+	const exemptions = new Set(["test/theta-launcher.test.mjs — prompt.txt"]);
+	const root = path.resolve(".");
+	const files = [];
+	const walk = (dir) => {
+		for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+			if (entry.isDirectory()) walk(path.join(dir, entry.name));
+			else if (entry.name.endsWith(".mjs")) files.push(path.join(dir, entry.name));
+		}
+	};
+	walk(path.resolve("scripts"));
+	walk(path.resolve("test"));
+	const offenders = [];
+	for (const file of files) {
+		if (file === path.resolve("scripts/session-evidence.mjs")) continue;
+		const rel = path.relative(root, file);
+		const text = fs.readFileSync(file, "utf8");
+		for (const name of Object.values(SESSION_FILES)) {
+			if (exemptions.has(`${rel} — ${name}`)) continue;
+			const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+			const pattern = new RegExp(`["'\\\`]${escaped}["'\\\`]`);
+			for (const [index, line] of text.split(/\r?\n/).entries()) {
+				if (pattern.test(line)) offenders.push(`${rel}:${index + 1} — ${name}`);
+			}
+		}
+	}
+	assert.deepEqual(
+		offenders,
+		[],
+		`hand-typed session-evidence names (import SESSION_FILES instead): ${offenders.join("; ")}`,
+	);
+});
+
 test("auditSession attests a well-formed boot session", (t) => {
 	const repo = makeTempRepo(t);
 	const dir = buildSession(t, repo);
