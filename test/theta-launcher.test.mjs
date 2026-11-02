@@ -96,10 +96,10 @@ test('launch seam: --dev from the launcher\'s own checkout uses the cwd as the -
 	const record = join(binDir, 'record.txt');
 
 	// cwd = repo root (where bin/theta.mjs lives) is the canonical dev path.
-	const result = runTheta(['--dev', 'prompt.txt'], { pathDir: binDir, record, cwd: root });
+	const result = runTheta(['--dev', 'find me a paper'], { pathDir: binDir, record, cwd: root });
 
 	assert.equal(result.status, 0, `stderr: ${result.stderr}`);
-	assert.deepEqual(recordedArgs(record).map(normalizeArg), ['-e', root, 'prompt.txt'].map(normalizeArg));
+	assert.deepEqual(recordedArgs(record).map(normalizeArg), ['-e', root, 'find me a paper'].map(normalizeArg));
 });
 
 test('launch seam: --dev in a directory matching $THETA_DEV_ROOT is allowed', { skip: skipOnWindows }, (t) => {
@@ -109,10 +109,10 @@ test('launch seam: --dev in a directory matching $THETA_DEV_ROOT is allowed', { 
 	const devCwd = makeDevCheckout();
 	t.after(() => rmSync(devCwd, { recursive: true, force: true }));
 
-	const result = runTheta(['--dev', 'prompt.txt'], { pathDir: binDir, record, cwd: devCwd, env: { THETA_DEV_ROOT: devCwd } });
+	const result = runTheta(['--dev', 'find me a paper'], { pathDir: binDir, record, cwd: devCwd, env: { THETA_DEV_ROOT: devCwd } });
 
 	assert.equal(result.status, 0, `stderr: ${result.stderr}`);
-	assert.deepEqual(recordedArgs(record).map(normalizeArg), ['-e', devCwd, 'prompt.txt'].map(normalizeArg));
+	assert.deepEqual(recordedArgs(record).map(normalizeArg), ['-e', devCwd, 'find me a paper'].map(normalizeArg));
 });
 
 test('launch seam: exits with the exit code of the spawned pi', { skip: skipOnWindows }, (t) => {
