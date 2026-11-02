@@ -1,6 +1,13 @@
 """The FastMCP app: the seven generic tools behind bearer auth, one audit
 line per tool call (spec #49, ADR 0004).
 
+Each tool's policy — its annotations, whether it creates cluster jobs,
+and its pre-dispatch guard callable — lives in one co-located ToolPolicy
+record (spec #116): the registry the middleware reads per call, the hold
+and throttle bounds derive from, and the boundary tests pin. Boot
+reconciles the registry against the registered surface and refuses a
+mismatch — the same fail-loudly contract as a broken deploy env.
+
 The audit middleware is the only cross-cutting code: it sees every tool
 call after authentication (a call without a valid token is answered 401
 by the transport and is not a tool call), records the decision line, and
@@ -23,10 +30,12 @@ recorded as a THROTTLE line.
 
 from __future__ import annotations
 
+import asyncio
 import sys
 from contextvars import ContextVar
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from fastmcp import FastMCP
 from fastmcp.exceptions import ToolError
@@ -43,8 +52,15 @@ from .guard import (
 	DEFAULT_TAIL_LINES,
 	GuardLimits,
 	GuardRefusal,
+	guard_cancel_job,
 	guard_directives,
-	guard_tool_arguments,
+	guard_fetch_artifacts,
+	guard_job_logs,
+	guard_job_status,
+	guard_list_environments,
+	guard_run_alphafold3,
+	guard_stage_files,
+	guard_submit_job,
 	parse_job_id,
 	parse_tail_lines,
 	run_dir,
@@ -59,20 +75,34 @@ from .slurm import submit_job as slurm_submit
 #: The argument name whose value rides the audit line's job_id field.
 JOB_ID_ARGUMENT = "job_id"
 
-#: The tools that create cluster jobs — the ones the submit capability
-#: holds while it is off (ADR 0006). cancel_job deliberately stays
-#: available during a hold: it remediates a runaway, it starts nothing.
-JOB_CREATING_TOOLS = frozenset({"submit_job", "run_alphafold3"})
+@dataclass(frozen=True)
+class ToolPolicy:
+	"""One tool's enforcement record — the tool policy (spec #116): the
+	annotations the wire reports, whether the tool creates cluster jobs
+	(the set the submit capability holds, ADR 0006, and the submit ceiling
+	counts, spec #94), and the pre-dispatch guard callable. One record sits
+	beside each tool definition in build_app; the middleware, the bounds,
+	and the boundary tests read this one structure. `mutating` is derived,
+	never stored: a tool is mutating exactly when its annotations say it
+	is not read-only, so the audit line's submit_capability field and the
+	wire's hint cannot drift apart."""
 
-#: The tools whose audit lines carry the observed submit capability, on
-#: every decision — the mutating surface. Read-only lines omit the field.
-#: The boundary tests hold both sets against tools/list's hints, so a new
-#: tool cannot drift past them.
-MUTATING_TOOLS = frozenset({"stage_files", "submit_job", "cancel_job", "run_alphafold3"})
+	annotations: ToolAnnotations
+	job_creating: bool
+	guard: Callable[[dict[str, Any], GuardLimits], None]
+
+	@property
+	def mutating(self) -> bool:
+		"""The mutating surface: the lines that carry the observed submit
+		capability on every decision; read-only lines omit the field."""
+		return not self.annotations.read_only_hint
 
 #: The hold's words. The audit line's reason and the tool error carry the
 #: same text, so the far side and the trail say one thing — and the far
-#: side learns the remediation channel from the refusal alone.
+#: side learns the remediation channel from the refusal alone. The tool
+#: names in these words stay literal bytes — ADR 0006 freezes them on
+#: every HOLD line — and the boundary test pins them to the registry's
+#: job-creating set (spec #116).
 SUBMIT_HELD_MESSAGE = (
 	"the submit capability is off — job-creating calls (submit_job, "
 	"run_alphafold3) are held; the enable is out-of-band: the deploy env "
@@ -116,11 +146,13 @@ class AuditMiddleware(Middleware):
 		limits: GuardLimits,
 		submit_capability: SubmitCapability,
 		submit_ceiling: int,
+		policies: dict[str, ToolPolicy],
 	) -> None:
 		self._audit = audit
 		self._limits = limits
 		self._submit_capability = submit_capability
 		self._submit_ceiling = submit_ceiling
+		self._policies = policies
 
 	async def on_call_tool(
 		self,
@@ -139,6 +171,13 @@ class AuditMiddleware(Middleware):
 			# fail loudly rather than misattribute the audit trail.
 			raise RuntimeError("tool call reached the middleware unauthenticated")
 		user = token.client_id
+		policy = self._policies.get(tool)
+		if policy is None:
+			# Boot reconciliation already refused a registry that does not
+			# match the registered surface; a call reaching this without a
+			# record means the server is misassembled — fail loudly rather
+			# than police a call there is no policy for.
+			raise RuntimeError(f"tool call reached the middleware without a tool policy: {tool!r}")
 
 		def record(
 			decision: Decision,
@@ -155,7 +194,7 @@ class AuditMiddleware(Middleware):
 				reason=reason,
 				# The observed capability rides every mutating-tool line,
 				# whatever the decision; read-only lines omit the field.
-				submit_capability=self._submit_capability if tool in MUTATING_TOOLS else None,
+				submit_capability=self._submit_capability if policy.mutating else None,
 				# The ceiling's count and window ride only THROTTLE lines.
 				submit_count=submit_count,
 				submit_window_seconds=submit_window_seconds,
@@ -164,7 +203,7 @@ class AuditMiddleware(Middleware):
 		# The capability is the outer bound: a held call is refused before
 		# the guard, any tool code, or a subprocess — and its own line kind
 		# makes held submits countable like denials (ADR 0006).
-		if tool in JOB_CREATING_TOOLS and self._submit_capability != "on":
+		if policy.job_creating and self._submit_capability != "on":
 			record("HOLD", SUBMIT_HELD_MESSAGE)
 			raise ToolError(SUBMIT_HELD_MESSAGE)
 
@@ -174,9 +213,16 @@ class AuditMiddleware(Middleware):
 		# log's own record — no state but the trail (spec #94). When a hold
 		# and the ceiling both fail a call, the hold above has already
 		# answered: one call, one line, the outer bound wins (ADR 0006).
-		if tool in JOB_CREATING_TOOLS:
+		if policy.job_creating:
+			# Derived per call, not in the constructor: the registry is
+			# still empty when the middleware is built (the defs below
+			# the FastMCP call populate it), so anything snapshot at
+			# construction would freeze the empty set.
+			job_creating = frozenset(
+				name for name, tool_policy in self._policies.items() if tool_policy.job_creating
+			)
 			observed = self._audit.count_recent_submits(
-				user=user, tools=JOB_CREATING_TOOLS, window_seconds=SUBMIT_WINDOW_SECONDS
+				user=user, tools=job_creating, window_seconds=SUBMIT_WINDOW_SECONDS
 			)
 			if observed >= self._submit_ceiling:
 				reason = _throttled_message(user, observed, self._submit_ceiling, SUBMIT_WINDOW_SECONDS)
@@ -186,7 +232,7 @@ class AuditMiddleware(Middleware):
 		# The guard runs before dispatch: a refusal is a policy decision
 		# (DENY) and never reaches a subprocess or a file.
 		try:
-			guard_tool_arguments(tool, arguments, self._limits)
+			policy.guard(arguments, self._limits)
 			result = await call_next(context)
 		except GuardRefusal as refusal:
 			record("DENY", str(refusal))
@@ -204,14 +250,24 @@ class AuditMiddleware(Middleware):
 def build_app(config: Config, template_specs: dict[str, template_registry.TemplateSpec]) -> FastMCP:
 	"""Assemble the gateway: verifier, audit middleware, tool surface.
 
-	The typed tools register only when a template registry is configured —
-	the seven generic tools are the fixed base surface; a deployment
-	without templates serves exactly that."""
+	Every tool definition below carries its tool policy — one co-located
+	ToolPolicy record assigned into the registry, and the @app.tool
+	decorator binding its annotations from that record — so the policy
+	cannot drift from the registration it governs (spec #116). The typed
+	tools register only when a template registry is configured — the seven
+	generic tools are the fixed base surface; a deployment without
+	templates serves exactly that."""
 	if config.templates_dir is not None and "alphafold3" not in template_specs:
 		raise ConfigError(
 			"the template registry registers no alphafold3 template — run_alphafold3 has nothing to render; check THETA_COMPUTE_TEMPLATES"
 		)
 	audit = AuditLog(config.audit_log, config.audit_max_bytes)
+	# The tool-policy registry: filled in by the co-located records as the
+	# defs below register, read by the middleware on every call, and
+	# reconciled against the registered surface before build_app returns.
+	# The middleware takes the dict itself — no call can arrive until the
+	# assembly below has finished populating it.
+	tool_policies: dict[str, ToolPolicy] = {}
 	app = FastMCP(
 		name="theta-compute",
 		instructions=(
@@ -226,10 +282,20 @@ def build_app(config: Config, template_specs: dict[str, template_registry.Templa
 			)
 		),
 		auth=StaticBearerToken(config.token, config.user),
-		middleware=[AuditMiddleware(audit, config.guard_limits(), config.submit_capability, config.submit_ceiling)],
+		middleware=[
+			AuditMiddleware(
+				audit, config.guard_limits(), config.submit_capability, config.submit_ceiling, tool_policies
+			)
+		],
 	)
 
-	@app.tool(annotations=ToolAnnotations(read_only_hint=True, open_world_hint=False))
+	tool_policies["list_environments"] = ToolPolicy(
+		annotations=ToolAnnotations(read_only_hint=True, open_world_hint=False),
+		job_creating=False,
+		guard=guard_list_environments,
+	)
+
+	@app.tool(annotations=tool_policies["list_environments"].annotations)
 	async def list_environments() -> dict[str, Any]:
 		"""List the cluster's partition-state groups: where a job can run.
 
@@ -242,7 +308,13 @@ def build_app(config: Config, template_specs: dict[str, template_registry.Templa
 		except SlurmError as error:
 			raise ToolError(str(error)) from error
 
-	@app.tool(annotations=ToolAnnotations(read_only_hint=True, open_world_hint=False))
+	tool_policies["job_status"] = ToolPolicy(
+		annotations=ToolAnnotations(read_only_hint=True, open_world_hint=False),
+		job_creating=False,
+		guard=guard_job_status,
+	)
+
+	@app.tool(annotations=tool_policies["job_status"].annotations)
 	async def job_status(job_id: str) -> dict[str, Any]:
 		"""Read one Slurm job's status by job id (digits only).
 
@@ -255,7 +327,13 @@ def build_app(config: Config, template_specs: dict[str, template_registry.Templa
 		except SlurmError as error:
 			raise ToolError(str(error)) from error
 
-	@app.tool(annotations=ToolAnnotations(read_only_hint=False, open_world_hint=False))
+	tool_policies["stage_files"] = ToolPolicy(
+		annotations=ToolAnnotations(read_only_hint=False, open_world_hint=False),
+		job_creating=False,
+		guard=guard_stage_files,
+	)
+
+	@app.tool(annotations=tool_policies["stage_files"].annotations)
 	async def stage_files(run_name: str, files: list[dict[str, Any]]) -> dict[str, Any]:
 		"""Stage input files into one run's directory under the staging root.
 
@@ -287,7 +365,13 @@ def build_app(config: Config, template_specs: dict[str, template_registry.Templa
 		_minted_job_id.set(job_id)
 		return job_id
 
-	@app.tool(annotations=ToolAnnotations(read_only_hint=False, destructive_hint=True, open_world_hint=False))
+	tool_policies["submit_job"] = ToolPolicy(
+		annotations=ToolAnnotations(read_only_hint=False, destructive_hint=True, open_world_hint=False),
+		job_creating=True,
+		guard=guard_submit_job,
+	)
+
+	@app.tool(annotations=tool_policies["submit_job"].annotations)
 	async def submit_job(run_name: str, directives: dict[str, str | int] | None = None) -> dict[str, Any]:
 		"""Submit the run's guarded batch script to Slurm; answers the job id.
 
@@ -312,7 +396,13 @@ def build_app(config: Config, template_specs: dict[str, template_registry.Templa
 			"script_path": str(script_path),
 		}
 
-	@app.tool(annotations=ToolAnnotations(read_only_hint=True, open_world_hint=False))
+	tool_policies["job_logs"] = ToolPolicy(
+		annotations=ToolAnnotations(read_only_hint=True, open_world_hint=False),
+		job_creating=False,
+		guard=guard_job_logs,
+	)
+
+	@app.tool(annotations=tool_policies["job_logs"].annotations)
 	async def job_logs(job_id: str, tail_lines: int | None = None) -> dict[str, Any]:
 		"""Read one job's stdout and stderr from its run directory.
 
@@ -335,7 +425,16 @@ def build_app(config: Config, template_specs: dict[str, template_registry.Templa
 			raise ToolError(f"reading logs for job {parsed} failed: {error}") from error
 		return {"found": True, "job_id": parsed, "stdout": stdout, "stderr": stderr}
 
-	@app.tool(annotations=ToolAnnotations(read_only_hint=False, destructive_hint=True, open_world_hint=False))
+	# cancel_job is deliberately not job-creating: it remediates a
+	# runaway, it starts nothing — it stays in service during a hold
+	# (ADR 0006).
+	tool_policies["cancel_job"] = ToolPolicy(
+		annotations=ToolAnnotations(read_only_hint=False, destructive_hint=True, open_world_hint=False),
+		job_creating=False,
+		guard=guard_cancel_job,
+	)
+
+	@app.tool(annotations=tool_policies["cancel_job"].annotations)
 	async def cancel_job(job_id: str) -> dict[str, Any]:
 		"""Cancel one gateway-owned job (the theta- prefix marks ownership).
 
@@ -362,7 +461,13 @@ def build_app(config: Config, template_specs: dict[str, template_registry.Templa
 			raise ToolError(str(error)) from error
 		return {"found": True, "canceled": True, "job_id": parsed, "job_name": name}
 
-	@app.tool(annotations=ToolAnnotations(read_only_hint=True, open_world_hint=False))
+	tool_policies["fetch_artifacts"] = ToolPolicy(
+		annotations=ToolAnnotations(read_only_hint=True, open_world_hint=False),
+		job_creating=False,
+		guard=guard_fetch_artifacts,
+	)
+
+	@app.tool(annotations=tool_policies["fetch_artifacts"].annotations)
 	async def fetch_artifacts(run_name: str, paths: list[str] | None = None) -> dict[str, Any]:
 		"""Fetch one run's files back in-band: the whole run directory by
 		default, or the named picks.
@@ -385,7 +490,13 @@ def build_app(config: Config, template_specs: dict[str, template_registry.Templa
 	if config.templates_dir is not None:
 		af3 = template_specs["alphafold3"]
 
-		@app.tool(annotations=ToolAnnotations(read_only_hint=False, destructive_hint=True, open_world_hint=False))
+		tool_policies["run_alphafold3"] = ToolPolicy(
+			annotations=ToolAnnotations(read_only_hint=False, destructive_hint=True, open_world_hint=False),
+			job_creating=True,
+			guard=guard_run_alphafold3,
+		)
+
+		@app.tool(annotations=tool_policies["run_alphafold3"].annotations)
 		async def run_alphafold3(run_name: str, fold_input: dict[str, Any]) -> dict[str, Any]:
 			"""Fold one input on the cluster's registered AlphaFold3 template.
 
@@ -425,6 +536,19 @@ def build_app(config: Config, template_specs: dict[str, template_registry.Templa
 				"fold_input_path": str(input_path),
 				"output_dir": str(output_path),
 			}
+
+	# Boot reconciliation (spec #116): the registry and the registered
+	# surface must name the same tools. A def without a record is a tool
+	# the middleware cannot police; a record without a def is dead policy.
+	# The same fail-loudly contract as a broken theta-compute.env — the
+	# server refuses to start misassembled.
+	registered = {tool.name for tool in asyncio.run(app.list_tools())}
+	if registered != set(tool_policies):
+		raise ConfigError(
+			"tool policies do not match the registered surface — "
+			f"no record for {sorted(registered - set(tool_policies))}, "
+			f"no tool for {sorted(set(tool_policies) - registered)}"
+		)
 
 	return app
 

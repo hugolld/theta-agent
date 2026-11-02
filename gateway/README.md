@@ -111,6 +111,26 @@ server-held bound: the submit capability, below.
   output_dir}`. Registered only when `THETA_COMPUTE_TEMPLATES` is set and
   its registry registers an `alphafold3` template.
 
+## Tool policy
+
+Every tool's policy lives in one co-located record beside its definition
+in `server.py` (`ToolPolicy`: the annotations, whether the tool is
+job-creating, and its pre-dispatch guard callable). The `@app.tool`
+decorator binds its annotations from that record, so the wire's hints are
+the record's; the audit middleware reads the same record per call for the
+submit capability's hold, the submit ceiling's count, the mutating
+surface that carries the observed capability on its audit lines, and the
+guard dispatch. `mutating` is not stored — it is exactly the negation of
+the read-only hint, so the audit line and the wire cannot disagree.
+
+Boot reconciles the registry against the registered surface and refuses
+to start on a mismatch — a tool without a record is a tool the middleware
+cannot police; a record without a tool is dead policy. The offline
+boundary test holds the same invariant against the source (Python's own
+parser, not a regex) and the live `tools/list`, and pins the hold's and
+the instructions' words to the job-creating records — those bytes are
+frozen on every HOLD audit line (ADR 0006), so they stay literals.
+
 ## The submit capability
 
 The outer bound (ADR 0006), deploy-time and server-held: while

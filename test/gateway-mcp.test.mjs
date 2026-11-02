@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 
 import {
@@ -11,6 +12,7 @@ import {
 	assertAuditLine,
 	argumentDigest,
 	b64,
+	dumpToolPolicies,
 	exists,
 	readArgv,
 	readArgvCalls,
@@ -849,39 +851,68 @@ test("a submit ceiling below one refuses to boot", { skip: skipReason }, async (
 	assert.match(stderr, /THETA_COMPUTE_SUBMIT_CEILING='0' must be 1 or greater/);
 });
 
-test("the middleware's mutating and job-creating sets track tools/list's hints", { skip: skipReason }, async (t) => {
-	const gateway = await startGateway(t);
+test("the tool-policy registry drives the wire hints and the bounds' tool sets", { skip: skipReason }, async (t) => {
+	// The full surface needs the typed tool registered, so this boot
+	// carries the fixture template registry (the typed-tool tests' own
+	// fixture): the registry and the wire must name the same eight tools.
+	const templatesDir = fileURLToPath(new URL("fixtures/gateway/templates", import.meta.url));
+	const gateway = await startGateway(t, { env: { THETA_COMPUTE_TEMPLATES: templatesDir } });
 
-	// The Python sets cannot read the annotations at call time (the
-	// middleware context carries no app reference), so this test is the
-	// coupling that keeps them from drifting: every listed non-read-only
-	// tool is in MUTATING_TOOLS, and the hold set holds the job creators.
-	const source = await readFile(new URL("../gateway/theta_compute/server.py", import.meta.url), "utf8");
-	const setOf = (name) => {
-		const found = source.match(new RegExp(`${name} = frozenset\\(\\{([^}]*)\\}\\)`));
-		assert.ok(found, `${name} is a frozenset literal in server.py`);
-		return new Set([...found[1].matchAll(/"([^"]+)"/g)].map((match) => match[1]));
-	};
-	const mutating = setOf("MUTATING_TOOLS");
-	const jobCreating = setOf("JOB_CREATING_TOOLS");
+	// The load-bearing scrape, moved onto the registry (spec #116): the
+	// ast walker reads the co-located ToolPolicy records with Python's own
+	// parser — a regex over source text could be fooled by formatting or
+	// comments. Source-side completeness first: a record per decorated
+	// def, each decorator binding its own record's annotations — the same
+	// invariant boot reconciliation enforces at runtime.
+	const dump = dumpToolPolicies();
+	const records = dump.records;
+	assert.deepEqual(
+		Object.keys(records).sort(),
+		[...dump.decorated].sort(),
+		"a registry record per decorated def",
+	);
+	assert.deepEqual(
+		dump.bindings,
+		Object.fromEntries(Object.keys(records).map((name) => [name, name])),
+		"each decorator binds its own record's annotations",
+	);
 
+	// The registry reached the wire: every listed tool's read-only hint is
+	// its record's — mutating is derived from that hint (the audit line's
+	// submit_capability field and the wire cannot drift apart).
 	const result = await gateway.request("tools/list", {});
-	for (const tool of result.tools) {
-		const mutatingListed = tool.annotations?.readOnlyHint !== true;
+	const listed = new Map(result.tools.map((tool) => [tool.name, tool]));
+	assert.deepEqual([...listed.keys()].sort(), Object.keys(records).sort(), "the registered surface is the registry");
+	for (const [name, record] of Object.entries(records)) {
+		const mutatingListed = listed.get(name).annotations?.readOnlyHint !== true;
 		assert.equal(
-			mutating.has(tool.name),
+			!record.annotations.read_only_hint,
 			mutatingListed,
-			`${tool.name}: ${mutatingListed ? "carries" : "omits"} submit_capability per its read-only hint`,
+			`${name}: ${mutatingListed ? "carries" : "omits"} submit_capability per its read-only hint`,
 		);
 	}
-	// The hold set is the job creators only: cancel remediates, staging
-	// spends nothing.
-	assert.equal(jobCreating.has("submit_job"), true);
-	assert.equal(jobCreating.has("run_alphafold3"), true);
-	assert.equal(jobCreating.has("cancel_job"), false);
+
+	// The bounds' set: job-creating is the submitting pair only — cancel
+	// remediates, staging spends nothing — and every job creator mutates.
+	const jobCreating = Object.entries(records)
+		.filter(([, record]) => record.job_creating)
+		.map(([name]) => name);
+	assert.deepEqual(jobCreating.sort(), ["run_alphafold3", "submit_job"]);
 	for (const name of jobCreating) {
-		assert.ok(mutating.has(name), `${name} creates jobs but is not in the mutating set`);
+		assert.equal(records[name].annotations.read_only_hint, false, `${name} creates jobs but is not mutating`);
 	}
+
+	// The hold's words stay literals — ADR 0006 freezes these bytes on
+	// every HOLD line — and they must name exactly the job-creating set;
+	// so must the instructions' capability-off sentence.
+	assert.equal(dump.held_message, HELD_REASON, "the walker read the hold's exact bytes");
+	assert.ok(dump.held_message.includes("(submit_job, run_alphafold3)"), "the hold names the job creators");
+	const source = await readFile(new URL("../gateway/theta_compute/server.py", import.meta.url), "utf8");
+	assert.match(
+		source,
+		/The submit capability is off: submit_job and run_alphafold3/,
+		"the instructions' off sentence names them too",
+	);
 });
 
 test("job_logs tails the run directory's own log files", { skip: skipReason }, async (t) => {

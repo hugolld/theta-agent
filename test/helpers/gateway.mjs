@@ -230,6 +230,23 @@ export function startGatewayExit(t, { env = {}, timeoutMs = 60_000 } = {}) {
 	});
 }
 
+// The tool-policy registry as JSON, dumped by the ast walker — the
+// load-bearing scrape (spec #116), moved from a regex over source text
+// onto Python's own parser. Runs in the gateway's locked uv environment
+// (the same interpreter the server spawns under), so the walker adds no
+// dependency of its own.
+export function dumpToolPolicies() {
+	const walker = fileURLToPath(new URL("./dump-tool-policies.py", import.meta.url));
+	const serverPy = path.join(gatewayDir, "theta_compute", "server.py");
+	const result = spawnSync("uv", ["run", "--locked", "python", walker, serverPy], {
+		cwd: gatewayDir,
+		env: { ...process.env },
+		encoding: "utf8",
+	});
+	assert.equal(result.status, 0, `the tool-policy walker failed:\n${result.stderr}`);
+	return JSON.parse(result.stdout);
+}
+
 // A file's non-empty lines; an absent file reads as no lines yet.
 export async function readLines(file) {
 	let raw;
