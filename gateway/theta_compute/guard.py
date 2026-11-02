@@ -1,9 +1,10 @@
 """The argument guard: what may become a Slurm argument at all (spec #49).
 
-The audit middleware calls the guard before dispatching a tool; a refusal
-raises GuardRefusal, records as DENY, and never reaches a subprocess or a
-file. A Slurm-side failure is not a refusal — it stays a SlurmError and
-records as an allowed call that failed.
+The audit middleware calls each tool's guard callable before dispatch —
+the tool policy record binds it (spec #116); a refusal raises
+GuardRefusal, records as DENY, and never reaches a subprocess or a file.
+A Slurm-side failure is not a refusal — it stays a SlurmError and records
+as an allowed call that failed.
 
 S2 grows the guard from digits-only job ids to the full pre-dispatch
 policy (spec #49): run names, staged-path shapes and the path sandbox,
@@ -275,34 +276,67 @@ def validate_fold_input(raw: Any, inband_max_bytes: int) -> bytes:
 	return payload
 
 
-def guard_tool_arguments(tool: str, arguments: dict[str, Any], limits: GuardLimits) -> None:
-	"""Refuse arguments that may not reach a Slurm argv or the staging
-	tree, or return. The whole check is pre-dispatch: a refusal here is a
-	DENY line and nothing has run."""
-	if tool in ("job_status", "job_logs", "cancel_job"):
-		raw = arguments.get("job_id")
-		if not isinstance(raw, str):
-			raise GuardRefusal(f"invalid job id {raw!r}: expected a string of digits")
-		parse_job_id(raw)
-	if tool == "job_logs" and arguments.get("tail_lines") is not None:
+def guard_list_environments(arguments: dict[str, Any], limits: GuardLimits) -> None:
+	"""The environment listing takes no arguments; the record keeps one
+	signature for every tool, so the middleware never branches on the
+	guard."""
+
+
+def _require_job_id(arguments: dict[str, Any]) -> None:
+	"""The string-and-digits check the job-id tools share."""
+	raw = arguments.get("job_id")
+	if not isinstance(raw, str):
+		raise GuardRefusal(f"invalid job id {raw!r}: expected a string of digits")
+	parse_job_id(raw)
+
+
+def guard_job_status(arguments: dict[str, Any], limits: GuardLimits) -> None:
+	"""One digits-only job id; the queue read happens in the tool."""
+	_require_job_id(arguments)
+
+
+def guard_stage_files(arguments: dict[str, Any], limits: GuardLimits) -> None:
+	"""Run name, then the in-band cap and the path sandbox over the file
+	records — everything checked before any write."""
+	run_name = parse_run_name(arguments.get("run_name"))
+	_guard_stage_files(run_name, arguments.get("files"), limits)
+
+
+def guard_submit_job(arguments: dict[str, Any], limits: GuardLimits) -> None:
+	"""Run name, then the command guard over the directives."""
+	parse_run_name(arguments.get("run_name"))
+	guard_directives(arguments.get("directives") or {}, limits)
+
+
+def guard_job_logs(arguments: dict[str, Any], limits: GuardLimits) -> None:
+	"""One job id and the tail size's ceiling."""
+	_require_job_id(arguments)
+	if arguments.get("tail_lines") is not None:
 		parse_tail_lines(arguments["tail_lines"])
-	if tool in ("stage_files", "submit_job", "fetch_artifacts"):
-		run_name = parse_run_name(arguments.get("run_name"))
-		if tool == "stage_files":
-			_guard_stage_files(run_name, arguments.get("files"), limits)
-		elif tool == "submit_job":
-			guard_directives(arguments.get("directives") or {}, limits)
-		else:
-			_guard_fetch_paths(run_name, arguments.get("paths"), limits)
-	if tool == "run_alphafold3":
-		extra = sorted(set(arguments) - ALPHAFOLD3_ARGUMENTS)
-		if extra:
-			raise GuardRefusal(
-				f"run_alphafold3 takes run_name and fold_input only (refused: {', '.join(extra)}) — partition, gres, and binds are fixed by the template"
-			)
-		parse_run_name(arguments.get("run_name"))
-		validate_fold_input(arguments.get("fold_input"), limits.inband_max_bytes)
-	# list_environments takes no arguments; nothing to guard.
+
+
+def guard_cancel_job(arguments: dict[str, Any], limits: GuardLimits) -> None:
+	"""One digits-only job id. The ownership check needs squeue's answer,
+	so it belongs to the tool, not the guard."""
+	_require_job_id(arguments)
+
+
+def guard_fetch_artifacts(arguments: dict[str, Any], limits: GuardLimits) -> None:
+	"""Run name, then every explicit pick inside the path sandbox."""
+	run_name = parse_run_name(arguments.get("run_name"))
+	_guard_fetch_paths(run_name, arguments.get("paths"), limits)
+
+
+def guard_run_alphafold3(arguments: dict[str, Any], limits: GuardLimits) -> None:
+	"""The typed tool's whole surface: one run name and the fold-input
+	envelope; every other key is an override attempt."""
+	extra = sorted(set(arguments) - ALPHAFOLD3_ARGUMENTS)
+	if extra:
+		raise GuardRefusal(
+			f"run_alphafold3 takes run_name and fold_input only (refused: {', '.join(extra)}) — partition, gres, and binds are fixed by the template"
+		)
+	parse_run_name(arguments.get("run_name"))
+	validate_fold_input(arguments.get("fold_input"), limits.inband_max_bytes)
 
 
 def _guard_stage_files(run_name: str, raw_files: Any, limits: GuardLimits) -> None:
