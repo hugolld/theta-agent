@@ -46,6 +46,7 @@ import {
 	TRANSCRIPT_NAME,
 	readSessionEvidence,
 } from "../scripts/session-evidence.mjs";
+import { escapeRegExp } from "./helpers/escape-regexp.mjs";
 
 test("ge enforces the pi and node version floors", () => {
 	assert.equal(ge("1.4.2", "1.4"), true);
@@ -556,6 +557,44 @@ test("read failures surface before the watchdog refusal in a multi-defect dir", 
 	const dir = buildSession(t, repo, { watchdog: true });
 	fs.appendFileSync(path.join(dir, transcriptFile), Buffer.from([0xff, 0xfe, 0x0a]));
 	assert.throws(() => auditIn(repo, () => auditSession(dir, repo)), /corrupt transcript/);
+});
+
+// The names have one home (the #113 retro): the strike's extraction-
+// completeness defect was caught by review and then verified by a manual
+// grep three separate times — the grep is the invariant, so the suite
+// owns it. A quote-delimited bundle name outside the module is a
+// hand-typed writer; new writers import SESSION_FILES. A string that
+// merely coincides with a name gets renamed off it (the launcher tests'
+// argv payload), not exempted — the invariant stays total.
+test("session-evidence names stay quote-delimited only in their one home", () => {
+	const root = path.resolve(".");
+	const files = [];
+	const walk = (dir) => {
+		for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+			if (entry.isDirectory()) walk(path.join(dir, entry.name));
+			else if (entry.name.endsWith(".mjs")) files.push(path.join(dir, entry.name));
+		}
+	};
+	walk(path.resolve("scripts"));
+	walk(path.resolve("test"));
+	files.sort(); // the walk's order is the failure message's
+	const offenders = [];
+	for (const file of files) {
+		if (file === path.resolve("scripts/session-evidence.mjs")) continue;
+		const rel = path.relative(root, file);
+		const text = fs.readFileSync(file, "utf8");
+		for (const name of Object.values(SESSION_FILES)) {
+			const pattern = new RegExp(`["'\\\`]${escapeRegExp(name)}["'\\\`]`);
+			for (const [index, line] of text.split(/\r?\n/).entries()) {
+				if (pattern.test(line)) offenders.push(`${rel}:${index + 1} — ${name}`);
+			}
+		}
+	}
+	assert.deepEqual(
+		offenders,
+		[],
+		`hand-typed session-evidence names (import SESSION_FILES instead): ${offenders.join("; ")}`,
+	);
 });
 
 test("auditSession attests a well-formed boot session", (t) => {

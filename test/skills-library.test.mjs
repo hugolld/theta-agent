@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { readdir, readFile } from "node:fs/promises";
 import { test } from "node:test";
 import { parse as parseYaml, YAMLParseError } from "yaml";
+import { escapeRegExp } from "./helpers/escape-regexp.mjs";
 
 // Seam guard for the shipped skills library (see test/manifest.test.mjs for
 // the same philosophy): if these break, pi loads a skill wrong or the library
@@ -369,9 +370,7 @@ const scanText = scanSurfaceText.map(([, text]) => text).join("\n");
 const glossary = await readFile(new URL("../GLOSSARY.md", import.meta.url), "utf8");
 
 function wordPattern(core, hyphenGuarded) {
-	const escaped = core
-		.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
-		.replace(/\s+/g, "\\s+");
+	const escaped = escapeRegExp(core).replace(/\s+/g, "\\s+");
 	const [start, end] = hyphenGuarded ? ["(?<![\\w-])", "(?![\\w-])"] : ["\\b", "\\b"];
 	return new RegExp(`${start}${escaped}s?${end}`, "i");
 }

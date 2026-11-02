@@ -5,6 +5,7 @@ import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createJiti } from "jiti";
+import { escapeRegExp } from "./helpers/escape-regexp.mjs";
 
 // The submit gate is the package's tool-call-pipeline permission extension
 // (spec #54, ADR 0004), grown into the stacked gate framework by spec #95
@@ -68,8 +69,6 @@ const makeEvent = (toolName, input = {}, parentToolCallId) => ({
 	toolName,
 	input,
 });
-
-const escapeRegExp = (core) => core.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 const makeGate = (log) => createSubmitGate({ getAllTools: () => TOOL_INFOS }, log && { log });
 
