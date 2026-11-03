@@ -299,50 +299,52 @@ test("the notebook recorder exit-code contract agrees across its two prose sites
 // table's strictness class. Prose naming gateway tools joins here in the
 // same strike that lands it.
 
-// snake_case backticked tokens only: gateway tool names are snake_case,
-// so camelCase (`parentToolCallId`) and hyphenated (`theta-notebook`)
-// tokens stay outside the extract on purpose.
+// One spelling of a backticked snake_case name — gateway tool names are
+// snake_case — shared by every extractor below; camelCase
+// (`parentToolCallId`) and hyphenated (`theta-notebook`) tokens stay
+// outside the extracts on purpose.
+const SNAKE_NAME = "[a-z][a-z0-9_]*";
+// An enumeration's run must open the claim's remainder (leading
+// whitespace only), so an emptied passage cannot borrow a later
+// enumeration — it fails loudly instead (the review round's fix).
+const SNAKE_ENUMERATION = new RegExp(
+	"^(?:`" + SNAKE_NAME + "`(?:,\\s+(?:and\\s+)?`" + SNAKE_NAME + "`)*)",
+);
+// Sorted: every comparison below is a deepEqual against a sorted oracle
+// set.
 const snakeBackticked = (text) =>
-	[...text.matchAll(/`([a-z][a-z0-9_]*)`/g)].map((match) => match[1]).sort();
+	[...text.matchAll(new RegExp("`(" + SNAKE_NAME + ")`", "g"))].map((match) => match[1]).sort();
+
+// An anchor's loss is a re-pin, never a silent pass — the shared tail of
+// every anchor-gone failure below.
+const ANCHOR_CHANGED = " — the anchor wording changed; re-pin it deliberately";
 
 // The enumeration a claim introduces ("every destructive gateway call —
-// `a`, `b`, and `c`"): the claim text first, then its run of backticked
-// names. A missing claim or an empty run is an anchor re-pin, never a
-// silent pass.
+// `a`, `b`, and `c`"): the claim text first, then the run it opens.
 const claimEnumeration = (text, claim, surface) => {
 	const at = text.indexOf(claim);
-	assert.ok(
-		at !== -1,
-		`${surface}: the claim "${claim.trim()}" is gone — the anchor wording changed; re-pin it deliberately`,
-	);
-	const run = text
-		.slice(at + claim.length)
-		.match(/`[a-z][a-z0-9_]*`(?:,\s+(?:and\s+)?`[a-z][a-z0-9_]*`)*/);
-	assert.ok(run, `${surface}: no backticked enumeration follows "${claim.trim()}"`);
+	assert.ok(at !== -1, `${surface}: the claim "${claim.trim()}" is gone${ANCHOR_CHANGED}`);
+	const run = text.slice(at + claim.length).replace(/^\s+/, "").match(SNAKE_ENUMERATION);
+	assert.ok(run, `${surface}: no backticked enumeration opens "${claim.trim()}"${ANCHOR_CHANGED}`);
 	return snakeBackticked(run[0]);
 };
 
 // The parenthetical that hands a claim its names ("Read-only calls
-// (`a`, `b`) run without prompts"): same rule — the anchor is the phrase
-// after the closing paren, and its loss is a failure, not a skip.
+// (`a`, `b`) run without prompts"): the anchor is the phrase after the
+// closing paren.
 const parentheticalBefore = (text, after, surface) => {
 	const match = text.match(new RegExp(`\\(([^)]*)\\) ${escapeRegExp(after)}`));
-	assert.ok(
-		match,
-		`${surface}: the parenthetical before "${after}" is gone — the anchor wording changed; re-pin it deliberately`,
-	);
+	assert.ok(match, `${surface}: the parenthetical before "${after}" is gone${ANCHOR_CHANGED}`);
 	return snakeBackticked(match[1]);
 };
 
+// The oracle's classified name sets, sorted — the equality targets.
+const namesWhere = (owns) =>
+	GATEWAY_ANNOTATIONS.filter(owns).map((row) => row.name).sort();
+
 test("the gateway tool names in prose agree with the annotation oracle", async () => {
-	const destructive = GATEWAY_ANNOTATIONS
-		.filter((row) => row.annotations.destructiveHint)
-		.map((row) => row.name)
-		.sort();
-	const readOnly = GATEWAY_ANNOTATIONS
-		.filter((row) => row.annotations.readOnlyHint)
-		.map((row) => row.name)
-		.sort();
+	const destructive = namesWhere((row) => row.annotations.destructiveHint);
+	const readOnly = namesWhere((row) => row.annotations.readOnlyHint);
 	const known = new Set(GATEWAY_ANNOTATIONS.map((row) => row.name));
 
 	const { markdown: skill } = await loadSkill("theta-compute");
@@ -350,7 +352,9 @@ test("the gateway tool names in prose agree with the annotation oracle", async (
 	// Call-shaped existence, whole file: every `tool(` instruction names
 	// a tool the oracle knows, so a rename or removal stops teaching
 	// stale calls (six today).
-	const callShaped = [...skill.matchAll(/`([a-z][a-z0-9_]*)\(/g)].map((match) => match[1]);
+	const callShaped = [...skill.matchAll(new RegExp("`(" + SNAKE_NAME + ")\\(", "g"))].map(
+		(match) => match[1],
+	);
 	const unknown = callShaped.filter((name) => !known.has(name));
 	assert.deepEqual(
 		unknown,
@@ -395,8 +399,8 @@ test("the gateway tool names in prose agree with the annotation oracle", async (
 
 	// Example claims: passages that name some destructive tools without
 	// claiming the whole set — every name they carry must still be one.
-	// (These pass vacuously if their passage is deleted; the equality
-	// anchors above cannot — #122's recorded residual.)
+	// (An emptied claim fails loudly in claimEnumeration; an emptied
+	// bounds section still passes here vacuously — #122's residual.)
 	const cancelBullet = claimEnumeration(skill, "Never call ", "theta-compute poll discipline");
 	const boundsSection = /## The server-side bounds\n([\s\S]*?)(?=\n## )/.exec(skill)?.[1];
 	assert.ok(
@@ -424,7 +428,7 @@ test("the gateway tool names in prose agree with the annotation oracle", async (
 	assert.deepEqual(
 		unnamed,
 		[],
-		`oracle rows no enrolled prose names — a new tool joins the prose in the same strike: ${unnamed.join(", ")}`,
+		`theta-compute: oracle rows no enrolled prose names — a new tool joins the prose in the same strike: ${unnamed.join(", ")}`,
 	);
 });
 
