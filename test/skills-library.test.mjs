@@ -304,16 +304,20 @@ test("the notebook recorder exit-code contract agrees across its two prose sites
 // (`parentToolCallId`) and hyphenated (`theta-notebook`) tokens stay
 // outside the extracts on purpose.
 const SNAKE_NAME = "[a-z][a-z0-9_]*";
+// One backticked token — the whole-token extracts below share this
+// spelling; the call-shaped scan (`name(`) keeps its own, no closing
+// backtick.
+const SNAKE_TOKEN = "`" + SNAKE_NAME + "`";
 // An enumeration's run must open the claim's remainder (leading
 // whitespace only), so an emptied passage cannot borrow a later
 // enumeration — it fails loudly instead (the review round's fix).
 const SNAKE_ENUMERATION = new RegExp(
-	"^(?:`" + SNAKE_NAME + "`(?:,\\s+(?:and\\s+)?`" + SNAKE_NAME + "`)*)",
+	"^(?:" + SNAKE_TOKEN + "(?:,\\s+(?:and\\s+)?" + SNAKE_TOKEN + ")*)",
 );
 // Sorted: every comparison below is a deepEqual against a sorted oracle
 // set.
 const snakeBackticked = (text) =>
-	[...text.matchAll(new RegExp("`(" + SNAKE_NAME + ")`", "g"))].map((match) => match[1]).sort();
+	[...text.matchAll(new RegExp(SNAKE_TOKEN, "g"))].map((match) => match[0].slice(1, -1)).sort();
 
 // An anchor's loss is a re-pin, never a silent pass — the shared tail of
 // every anchor-gone failure below.
@@ -342,6 +346,15 @@ const parentheticalBefore = (text, after, surface) => {
 const namesWhere = (owns) =>
 	GATEWAY_ANNOTATIONS.filter(owns).map((row) => row.name).sort();
 
+// Nothing may survive the predicate: offenders fail loudly, comma-joined
+// — the shared shape of every empty-filter assert below (call-shaped
+// existence, the subset claims, composition, Tier-2). The predicate
+// rides the call site, so the membership polarity stays visible there.
+const assertEmptyWhere = (names, where, message) => {
+	const offenders = names.filter(where);
+	assert.deepEqual(offenders, [], `${message}: ${offenders.join(", ")}`);
+};
+
 test("the gateway tool names in prose agree with the annotation oracle", async () => {
 	const destructive = namesWhere((row) => row.annotations.destructiveHint);
 	const readOnly = namesWhere((row) => row.annotations.readOnlyHint);
@@ -355,11 +368,10 @@ test("the gateway tool names in prose agree with the annotation oracle", async (
 	const callShaped = [...skill.matchAll(new RegExp("`(" + SNAKE_NAME + ")\\(", "g"))].map(
 		(match) => match[1],
 	);
-	const unknown = callShaped.filter((name) => !known.has(name));
-	assert.deepEqual(
-		unknown,
-		[],
-		`theta-compute: call-shaped names no oracle tool knows: ${unknown.join(", ")}`,
+	assertEmptyWhere(
+		callShaped,
+		(name) => !known.has(name),
+		"theta-compute: call-shaped names no oracle tool knows",
 	);
 
 	// Completeness claims: the enumeration that claims to name the whole
@@ -412,11 +424,10 @@ test("the gateway tool names in prose agree with the annotation oracle", async (
 		["theta-compute poll discipline", cancelBullet],
 		["theta-compute server-side bounds", boundsNames],
 	]) {
-		const notDestructive = names.filter((name) => !destructive.includes(name));
-		assert.deepEqual(
-			notDestructive,
-			[],
-			`${surface}: names tools the oracle does not mark destructive: ${notDestructive.join(", ")}`,
+		assertEmptyWhere(
+			names,
+			(name) => !destructive.includes(name),
+			`${surface}: names tools the oracle does not mark destructive`,
 		);
 	}
 
@@ -424,11 +435,10 @@ test("the gateway tool names in prose agree with the annotation oracle", async (
 	// passages name every oracle row — a new tool reaches the prose in
 	// the same strike it reaches the oracle, or this names it.
 	const named = new Set([...callShaped, ...gateSet, ...monitoringSet, ...cancelBullet, ...boundsNames]);
-	const unnamed = GATEWAY_ANNOTATIONS.map((row) => row.name).filter((name) => !named.has(name));
-	assert.deepEqual(
-		unnamed,
-		[],
-		`theta-compute: oracle rows no enrolled prose names — a new tool joins the prose in the same strike: ${unnamed.join(", ")}`,
+	assertEmptyWhere(
+		GATEWAY_ANNOTATIONS.map((row) => row.name),
+		(name) => !named.has(name),
+		"theta-compute: oracle rows no enrolled prose names — a new tool joins the prose in the same strike",
 	);
 });
 
@@ -449,8 +459,7 @@ const TIER2_INFRA_NAMES = [
 ];
 
 test("no Tier-2 infra skills ship", () => {
-	const crossed = shipped.filter((name) => TIER2_INFRA_NAMES.includes(name));
-	assert.deepEqual(crossed, [], `Tier-2 infra skills must not ship: ${crossed.join(", ")}`);
+	assertEmptyWhere(shipped, (name) => TIER2_INFRA_NAMES.includes(name), "Tier-2 infra skills must not ship");
 });
 
 // Glossary discipline, with GLOSSARY.md as the single source of truth: the
