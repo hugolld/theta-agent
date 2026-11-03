@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { readdir, readFile } from "node:fs/promises";
 import { test } from "node:test";
 import { parse as parseYaml, YAMLParseError } from "yaml";
+import { GATEWAY_ANNOTATIONS } from "./fixtures/gateway/annotations.mjs";
 import { escapeRegExp } from "./helpers/escape-regexp.mjs";
 
 // Seam guard for the shipped skills library (see test/manifest.test.mjs for
@@ -282,6 +283,149 @@ test("the notebook recorder exit-code contract agrees across its two prose sites
 		(match) => [Number(match[1]), match[2].toLowerCase()],
 	);
 	assert.deepEqual(codes, NOTEBOOK_EXIT_CODE_CONTRACT, "notebook.py: docstring exit codes drifted");
+});
+
+// The gateway tool names in prose follow the annotation oracle (spec
+// #122, #120's candidate 2): the oracle's fourth consumer. #121 closed
+// the machine chain — wire, listing, typed-tool asserts, stub, pin; this
+// is the prose half. The skill, the README, and the glossary name the
+// gateway's tools inside claims (which calls prompt, which never do),
+// and a flipped or renamed row must reach those sentences the way it
+// already reaches the stub. Pinned: extracted name and classification
+// sets. Not pinned: claim semantics — a passage can name the right tools
+// and lie about them (#122's recorded residual). The anchors are the
+// claim-shaped enumerations, not line numbers; a reworded enumeration
+// fails until its anchor is re-pinned deliberately — the exit-code
+// table's strictness class. Prose naming gateway tools joins here in the
+// same strike that lands it.
+
+// snake_case backticked tokens only: gateway tool names are snake_case,
+// so camelCase (`parentToolCallId`) and hyphenated (`theta-notebook`)
+// tokens stay outside the extract on purpose.
+const snakeBackticked = (text) =>
+	[...text.matchAll(/`([a-z][a-z0-9_]*)`/g)].map((match) => match[1]).sort();
+
+// The enumeration a claim introduces ("every destructive gateway call —
+// `a`, `b`, and `c`"): the claim text first, then its run of backticked
+// names. A missing claim or an empty run is an anchor re-pin, never a
+// silent pass.
+const claimEnumeration = (text, claim, surface) => {
+	const at = text.indexOf(claim);
+	assert.ok(
+		at !== -1,
+		`${surface}: the claim "${claim.trim()}" is gone — the anchor wording changed; re-pin it deliberately`,
+	);
+	const run = text
+		.slice(at + claim.length)
+		.match(/`[a-z][a-z0-9_]*`(?:,\s+(?:and\s+)?`[a-z][a-z0-9_]*`)*/);
+	assert.ok(run, `${surface}: no backticked enumeration follows "${claim.trim()}"`);
+	return snakeBackticked(run[0]);
+};
+
+// The parenthetical that hands a claim its names ("Read-only calls
+// (`a`, `b`) run without prompts"): same rule — the anchor is the phrase
+// after the closing paren, and its loss is a failure, not a skip.
+const parentheticalBefore = (text, after, surface) => {
+	const match = text.match(new RegExp(`\\(([^)]*)\\) ${escapeRegExp(after)}`));
+	assert.ok(
+		match,
+		`${surface}: the parenthetical before "${after}" is gone — the anchor wording changed; re-pin it deliberately`,
+	);
+	return snakeBackticked(match[1]);
+};
+
+test("the gateway tool names in prose agree with the annotation oracle", async () => {
+	const destructive = GATEWAY_ANNOTATIONS
+		.filter((row) => row.annotations.destructiveHint)
+		.map((row) => row.name)
+		.sort();
+	const readOnly = GATEWAY_ANNOTATIONS
+		.filter((row) => row.annotations.readOnlyHint)
+		.map((row) => row.name)
+		.sort();
+	const known = new Set(GATEWAY_ANNOTATIONS.map((row) => row.name));
+
+	const { markdown: skill } = await loadSkill("theta-compute");
+
+	// Call-shaped existence, whole file: every `tool(` instruction names
+	// a tool the oracle knows, so a rename or removal stops teaching
+	// stale calls (six today).
+	const callShaped = [...skill.matchAll(/`([a-z][a-z0-9_]*)\(/g)].map((match) => match[1]);
+	const unknown = callShaped.filter((name) => !known.has(name));
+	assert.deepEqual(
+		unknown,
+		[],
+		`theta-compute: call-shaped names no oracle tool knows: ${unknown.join(", ")}`,
+	);
+
+	// Completeness claims: the enumeration that claims to name the whole
+	// set equals the oracle set — a fourth destructive tool or a fifth
+	// read-only one crosses here the same way a rename does.
+	const gateSet = claimEnumeration(skill, "destructive gateway call — ", "theta-compute gate section");
+	assert.deepEqual(
+		gateSet,
+		destructive,
+		`theta-compute: the destructive enumeration is not the oracle's destructive set (${destructive.join(", ")})`,
+	);
+
+	const monitoringSet = parentheticalBefore(skill, "and staging run without", "theta-compute gate section");
+	assert.deepEqual(
+		monitoringSet,
+		readOnly,
+		`theta-compute: the read-only enumeration is not the oracle's readOnly set (${readOnly.join(", ")})`,
+	);
+
+	const readme = await readFile(new URL("../README.md", import.meta.url), "utf8");
+	assert.deepEqual(
+		parentheticalBefore(readme, "prompt you for confirmation", "README gateway setup"),
+		destructive,
+		`README: the confirmation parenthetical is not the oracle's destructive set (${destructive.join(", ")})`,
+	);
+
+	const glossary = await readFile(new URL("../GLOSSARY.md", import.meta.url), "utf8");
+	const submitGateEntry = glossary
+		.split(/^(?=\*\*.+\*\*:)/m)
+		.find((block) => block.startsWith("**Submit gate**:"));
+	assert.ok(submitGateEntry, "GLOSSARY: the Submit gate entry is gone");
+	assert.deepEqual(
+		claimEnumeration(submitGateEntry, "destructive calls — ", "GLOSSARY Submit gate entry"),
+		destructive,
+		`GLOSSARY: the confirm-set enumeration is not the oracle's destructive set (${destructive.join(", ")})`,
+	);
+
+	// Example claims: passages that name some destructive tools without
+	// claiming the whole set — every name they carry must still be one.
+	// (These pass vacuously if their passage is deleted; the equality
+	// anchors above cannot — #122's recorded residual.)
+	const cancelBullet = claimEnumeration(skill, "Never call ", "theta-compute poll discipline");
+	const boundsSection = /## The server-side bounds\n([\s\S]*?)(?=\n## )/.exec(skill)?.[1];
+	assert.ok(
+		boundsSection,
+		"theta-compute: the server-side bounds section is gone — the anchor heading changed",
+	);
+	const boundsNames = snakeBackticked(boundsSection);
+	for (const [surface, names] of [
+		["theta-compute poll discipline", cancelBullet],
+		["theta-compute server-side bounds", boundsNames],
+	]) {
+		const notDestructive = names.filter((name) => !destructive.includes(name));
+		assert.deepEqual(
+			notDestructive,
+			[],
+			`${surface}: names tools the oracle does not mark destructive: ${notDestructive.join(", ")}`,
+		);
+	}
+
+	// Composition, pinned: the call-shaped mentions plus the anchored
+	// passages name every oracle row — a new tool reaches the prose in
+	// the same strike it reaches the oracle, or this names it.
+	const named = new Set([...callShaped, ...gateSet, ...monitoringSet, ...cancelBullet, ...boundsNames]);
+	const unnamed = GATEWAY_ANNOTATIONS.map((row) => row.name).filter((name) => !named.has(name));
+	assert.deepEqual(
+		unnamed,
+		[],
+		`oracle rows no enrolled prose names — a new tool joins the prose in the same strike: ${unnamed.join(", ")}`,
+	);
 });
 
 // Tier-2 infra per ADR 0001 / spec #5: K-Dense's compute stack is excluded —
