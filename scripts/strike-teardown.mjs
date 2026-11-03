@@ -18,9 +18,8 @@
 // remove, the branch delete — precedes any refusal: a dead network or an
 // unmerged branch leaves the working tree exactly as it stood.
 
-import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { run } from "./dogfood-gates.mjs";
+import { mainCheckoutRoot, run } from "./dogfood-gates.mjs";
 
 function fail(message) {
 	console.error(`strike-teardown: ${message}`);
@@ -54,12 +53,13 @@ function git(root, args, opts = {}) {
 }
 
 function mainRepoRoot() {
-	const probe = run("git", ["rev-parse", "--git-common-dir"]);
-	if (probe.status !== 0) {
+	// The shared probe lives in dogfood-gates.mjs; this wrapper keeps the
+	// teardown's own failure wording.
+	const root = mainCheckoutRoot();
+	if (root === null) {
 		fail(`${process.cwd()} is not inside a git work tree`);
 	}
-	const commonDir = path.resolve(process.cwd(), probe.stdout.trim());
-	return path.dirname(commonDir);
+	return root;
 }
 
 // The merge-base guard in main() licenses -D: the branch is merged into
