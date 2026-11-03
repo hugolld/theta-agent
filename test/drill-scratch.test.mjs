@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
-import { execFile } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import { existsSync, lstatSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 import { legLines } from "../scripts/drill-scratch.mjs";
 
@@ -13,25 +14,22 @@ import { legLines } from "../scripts/drill-scratch.mjs";
 // worktree and asserts each mechanic; the mutation itself stays
 // per-strike and is not the scaffold's to test.
 
-const script = new URL("../scripts/drill-scratch.mjs", import.meta.url).pathname;
+const script = fileURLToPath(new URL("../scripts/drill-scratch.mjs", import.meta.url));
 
+// The house runner idiom (strike-teardown.test.mjs's runTeardown):
+// spawnSync the script, read status/stdout/stderr at the call site.
 function scaffold(dest) {
-	return new Promise((resolve) => {
-		execFile(
-			process.execPath,
-			[script, dest, "test/skills-library.test.mjs"],
-			{ encoding: "utf8" },
-			(error, stdout, stderr) => resolve({ error, stdout, stderr }),
-		);
+	return spawnSync(process.execPath, [script, dest, "test/skills-library.test.mjs"], {
+		encoding: "utf8",
 	});
 }
 
-test("the scaffold builds a scratch: committed tree, module symlink, leg lines", async () => {
+test("the scaffold builds a scratch: committed tree, module symlink, leg lines", () => {
 	const tmp = mkdtempSync(path.join(tmpdir(), "drill-scratch-"));
 	const dest = path.join(tmp, "scratch");
 	try {
-		const { error, stdout } = await scaffold(dest);
-		if (error) throw new Error(`scaffold failed: ${error.message}\n${stdout}`);
+		const built = scaffold(dest);
+		assert.equal(built.status, 0, `scaffold failed: ${built.stderr}`);
 		// Committed tree only: a tracked file arrives, and the scratch's
 		// git-adjacent untracked state never does (nothing here to copy).
 		assert(existsSync(path.join(dest, "CLAUDE.md")), "committed tree missing CLAUDE.md");
@@ -45,20 +43,20 @@ test("the scaffold builds a scratch: committed tree, module symlink, leg lines",
 		// The legs print with output-to-file and the suite the caller named.
 		const legs = legLines(["test/skills-library.test.mjs"], dest).join("\n");
 		assert(/leg 0 \(baseline\): cd .+ && node --test test\/skills-library\.test\.mjs > leg0\.out/.test(legs));
-		assert(stdout.includes("legs — mutate the scratch, never the branch tree"), "leg preamble missing");
+		assert(built.stdout.includes("legs — mutate the scratch, never the branch tree"), "leg preamble missing");
 	} finally {
 		rmSync(tmp, { recursive: true, force: true });
 	}
 });
 
-test("an existing destination refuses — a drill never reuses a scratch", async () => {
+test("an existing destination refuses — a drill never reuses a scratch", () => {
 	const tmp = mkdtempSync(path.join(tmpdir(), "drill-scratch-"));
 	try {
-		const first = await scaffold(path.join(tmp, "scratch"));
-		if (first.error) throw new Error(`first scaffold failed: ${first.error.message}`);
-		const { error, stderr } = await scaffold(path.join(tmp, "scratch"));
-		assert(error !== null, "the second scaffold exited 0");
-		assert(stderr.includes("never reuses a scratch"), `refusal lost its reason: ${stderr}`);
+		const first = scaffold(path.join(tmp, "scratch"));
+		assert.equal(first.status, 0, `first scaffold failed: ${first.stderr}`);
+		const second = scaffold(path.join(tmp, "scratch"));
+		assert.notEqual(second.status, 0, "the second scaffold exited 0");
+		assert(second.stderr.includes("never reuses a scratch"), `refusal lost its reason: ${second.stderr}`);
 	} finally {
 		rmSync(tmp, { recursive: true, force: true });
 	}

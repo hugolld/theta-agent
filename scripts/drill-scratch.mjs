@@ -24,7 +24,7 @@
 import { existsSync, mkdirSync, symlinkSync, cpSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { run } from "./dogfood-gates.mjs";
+import { mainCheckoutRoot, run } from "./dogfood-gates.mjs";
 
 function fail(message) {
 	console.error(`drill-scratch: ${message}`);
@@ -62,11 +62,10 @@ function main() {
 	}
 	const worktreeRoot = toplevel.stdout.trim();
 	// The main checkout holds the node_modules a worktree only borrows.
-	const commonDir = run("git", ["rev-parse", "--git-common-dir"]);
-	if (commonDir.status !== 0) {
+	const mainRoot = mainCheckoutRoot();
+	if (mainRoot === null) {
 		fail("cannot find the shared git dir");
 	}
-	const mainRoot = path.dirname(path.resolve(process.cwd(), commonDir.stdout.trim()));
 	const checkoutModules = path.join(mainRoot, "node_modules");
 	if (!existsSync(checkoutModules)) {
 		fail(`the main checkout has no node_modules (${checkoutModules}) — npm ci there first`);
@@ -83,7 +82,8 @@ function main() {
 		maxBuffer: 128 * 1024 * 1024,
 	});
 	if (archive.status !== 0) {
-		fail(`git archive failed — nothing extracted\n${archive.stderr}`);
+		// Buffer-encoded stderr interpolates as hex unless stringified.
+		fail(`git archive failed — nothing extracted\n${archive.stderr?.toString() ?? ""}`);
 	}
 	const extract = run("tar", ["-x", "-C", dest], { input: archive.stdout });
 	if (extract.status !== 0) {
