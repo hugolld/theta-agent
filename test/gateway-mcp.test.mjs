@@ -25,6 +25,7 @@ import {
 	throttledReason,
 	unb64,
 } from "./helpers/gateway.mjs";
+import { GATEWAY_ANNOTATIONS } from "./fixtures/gateway/annotations.mjs";
 
 // Offline tests for the theta-compute gateway's seven generic tools (#51
 // tracer, #52), driven at the MCP tool-call boundary against the stub Slurm
@@ -59,9 +60,12 @@ test("tools/list exposes the seven tools with their hints", { skip: skipReason }
 	const gateway = await startGateway(t);
 
 	const result = await gateway.request("tools/list", {});
-	// The MCP wire format names annotation hints in camelCase. Only the
-	// spend-and-destroy pair (submit, cancel) declares destructive; the
-	// read-only quartet stays prompt-free (spec #49).
+	// The MCP wire format names annotation hints in camelCase. The expected
+	// listing projects from the annotation oracle (spec #120) minus its
+	// registry-gated rows — the typed tool is absent from this boot by
+	// construction; the registry-boot fold below wire-pins its row. The
+	// wire side keeps its bit-by-bit projection, tolerant of FastMCP
+	// growing or omitting annotation keys the doctrine does not name.
 	const hint = (tool, key) => tool.annotations?.[key] === true;
 	const listed = result.tools
 		.map((tool) => ({
@@ -70,15 +74,16 @@ test("tools/list exposes the seven tools with their hints", { skip: skipReason }
 			destructive: hint(tool, "destructiveHint"),
 		}))
 		.sort((a, b) => a.name.localeCompare(b.name));
-	assert.deepEqual(listed, [
-		{ name: "cancel_job", read_only: false, destructive: true },
-		{ name: "fetch_artifacts", read_only: true, destructive: false },
-		{ name: "job_logs", read_only: true, destructive: false },
-		{ name: "job_status", read_only: true, destructive: false },
-		{ name: "list_environments", read_only: true, destructive: false },
-		{ name: "stage_files", read_only: false, destructive: false },
-		{ name: "submit_job", read_only: false, destructive: true },
-	]);
+	assert.deepEqual(
+		listed,
+		GATEWAY_ANNOTATIONS.filter((row) => !row.registryGated)
+			.map((row) => ({
+				name: row.name,
+				read_only: row.annotations.readOnlyHint,
+				destructive: row.annotations.destructiveHint,
+			}))
+			.sort((a, b) => a.name.localeCompare(b.name)),
+	);
 });
 
 test("list_environments answers the recorded sinfo rows at the boundary", { skip: skipReason }, async (t) => {
@@ -889,6 +894,52 @@ test("the tool-policy registry drives the wire hints and the bounds' tool sets",
 			!record.annotations.read_only_hint,
 			mutatingListed,
 			`${name}: ${mutatingListed ? "carries" : "omits"} submit_capability per its read-only hint`,
+		);
+	}
+
+	// Record bits ↔ wire bits, all three hints (spec #120): each record's
+	// declared keyword is what the wire reports, an unset bit absent on
+	// both sides — the walker scrapes what the server ships and the
+	// registration serializes it unmangled. This pins fidelity, not values:
+	// a flipped bit in server.py moves record and wire together and stays
+	// green here, so the value pin is the oracle fold below.
+	for (const [name, record] of Object.entries(records)) {
+		const wire = listed.get(name).annotations ?? {};
+		for (const [wireKey, recordKey] of [
+			["readOnlyHint", "read_only_hint"],
+			["destructiveHint", "destructive_hint"],
+			["openWorldHint", "open_world_hint"],
+		]) {
+			assert.equal(
+				record.annotations[recordKey],
+				wire[wireKey],
+				`${name}: record ${recordKey} and wire ${wireKey} disagree`,
+			);
+		}
+	}
+
+	// The oracle fold (spec #120): the wire's names and bits are the
+	// annotation oracle's rows — the one hand-copy the test trees hold, so
+	// a value change in the server crosses this line before any consumer
+	// follows the row. The wire omits bits the server leaves unset, so an
+	// absent bit materializes at the MCP default — false for readOnly and
+	// destructive, true for openWorld — while the row states all three.
+	const oracleByName = new Map(GATEWAY_ANNOTATIONS.map((row) => [row.name, row]));
+	assert.deepEqual(
+		[...listed.keys()].sort(),
+		[...oracleByName.keys()].sort(),
+		"the registered surface is the oracle's rows",
+	);
+	for (const row of GATEWAY_ANNOTATIONS) {
+		const wire = listed.get(row.name).annotations ?? {};
+		assert.deepEqual(
+			{
+				readOnlyHint: wire.readOnlyHint ?? false,
+				destructiveHint: wire.destructiveHint ?? false,
+				openWorldHint: wire.openWorldHint ?? true,
+			},
+			row.annotations,
+			`${row.name}: the wire's bits are its oracle row's`,
 		);
 	}
 
