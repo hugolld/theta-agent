@@ -19,6 +19,7 @@ import {
 	startGatewayExit,
 	toolText,
 } from "./helpers/gateway.mjs";
+import { GATEWAY_ANNOTATIONS } from "./fixtures/gateway/annotations.mjs";
 
 // Offline tests for the typed tool (#53): the template registry and
 // run_alphafold3, driven at the MCP tool-call boundary like the generic
@@ -54,8 +55,12 @@ test("with a template registry configured, tools/list adds run_alphafold3 behind
 	assert.ok(typed, "the typed tool is registered");
 	// It spends GPU time like submit_job — the theta-side submit gate
 	// (S4) confirms it; the destructive hint is what reaches that gate.
-	assert.equal(typed.annotations?.readOnlyHint, false);
-	assert.equal(typed.annotations?.destructiveHint, true);
+	// The two bits read from its oracle row (spec #120): this test pins
+	// the typed tool's registry-boot presence, the oracle holds the
+	// values, wire-pinned by the registry-boot fold.
+	const af3 = GATEWAY_ANNOTATIONS.find((row) => row.name === "run_alphafold3");
+	assert.equal(typed.annotations?.readOnlyHint, af3.annotations.readOnlyHint);
+	assert.equal(typed.annotations?.destructiveHint, af3.annotations.destructiveHint);
 });
 
 test("without a templates directory the typed tool stays unregistered", { skip: skipReason }, async (t) => {

@@ -6,6 +6,7 @@ import { test } from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createJiti } from "jiti";
 import { escapeRegExp } from "./helpers/escape-regexp.mjs";
+import { GATEWAY_ANNOTATIONS } from "./fixtures/gateway/annotations.mjs";
 
 // The submit gate is the package's tool-call-pipeline permission extension
 // (spec #54, ADR 0004), grown into the stacked gate framework by spec #95
@@ -26,23 +27,18 @@ const { createSubmitGate, CONFIRM_SET, GATE_LOG_NAME, GATEWAY_PREFIX, default: r
 // pi actually registers them, or it mirrors a bug instead of the contract.
 const SERVER = "mcp__theta_compute__";
 
-// The annotations the gateway server declares today (gateway/server.py):
-// the four read-only tools, the one transfer tool that is neither
-// (stage_files), and the three destructive ones the gate confirms.
-const gatewayTool = (name, annotations) => ({
-	name: `${SERVER}${name}`,
-	annotations,
+// The stub's annotations are the annotation oracle's rows
+// (test/fixtures/gateway/annotations.mjs, spec #120) — the one copy the
+// test trees hold, wire-pinned by the registry-boot fold in
+// gateway-mcp.test.mjs: the four read-only tools, the one transfer tool
+// that is neither (stage_files), and the three destructive ones the gate
+// confirms. The stub adds only pi's registered prefix here — still pinned
+// by the createMcpToolName test below.
+const gatewayTool = (row) => ({
+	name: `${SERVER}${row.name}`,
+	annotations: row.annotations,
 });
-const TOOL_INFOS = [
-	gatewayTool("list_environments", { readOnlyHint: true, openWorldHint: false }),
-	gatewayTool("job_status", { readOnlyHint: true, openWorldHint: false }),
-	gatewayTool("stage_files", { readOnlyHint: false, openWorldHint: false }),
-	gatewayTool("submit_job", { readOnlyHint: false, destructiveHint: true, openWorldHint: false }),
-	gatewayTool("job_logs", { readOnlyHint: true, openWorldHint: false }),
-	gatewayTool("cancel_job", { readOnlyHint: false, destructiveHint: true, openWorldHint: false }),
-	gatewayTool("fetch_artifacts", { readOnlyHint: true, openWorldHint: false }),
-	gatewayTool("run_alphafold3", { readOnlyHint: false, destructiveHint: true, openWorldHint: false }),
-];
+const TOOL_INFOS = GATEWAY_ANNOTATIONS.map(gatewayTool);
 
 // A stub handler context whose confirm records its arguments and answers
 // with the test's scripted boolean. The sessionManager is absent unless a
@@ -185,9 +181,9 @@ test("a call where the confirm set and the annotations disagree is refused as dr
 	const gate = createSubmitGate({
 		getAllTools: () => [
 			// in the set, no longer declared destructive
-			gatewayTool("submit_job", { readOnlyHint: false, openWorldHint: false }),
+			gatewayTool({ name: "submit_job", annotations: { readOnlyHint: false, openWorldHint: false } }),
 			// declared destructive, not in the set
-			gatewayTool("drop_cache", { readOnlyHint: false, destructiveHint: true, openWorldHint: false }),
+			gatewayTool({ name: "drop_cache", annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false } }),
 		],
 	});
 	for (const [name, phrase] of [
@@ -242,7 +238,7 @@ test("gate log lines carry the decision vocabulary and only the fields that appl
 	await gate(makeEvent(`${SERVER}submit_job`, { run_name: "r" }), stubContext(true)); // approved
 	await gate(makeEvent(`${SERVER}cancel_job`, { job_id: "1851277" }), stubContext(false)); // refused
 	const drifted = createSubmitGate(
-		{ getAllTools: () => [gatewayTool("submit_job", { readOnlyHint: false, openWorldHint: false })] },
+		{ getAllTools: () => [gatewayTool({ name: "submit_job", annotations: { readOnlyHint: false, openWorldHint: false } })] },
 		{ log: (l) => lines.push(l) },
 	);
 	await drifted(makeEvent(`${SERVER}submit_job`), stubContext(true)); // drift
