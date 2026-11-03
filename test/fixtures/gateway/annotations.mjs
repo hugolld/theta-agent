@@ -3,10 +3,13 @@
 // registry (spec #116); every fact here is pinned against the live wire by
 // the registry-boot fold in test/gateway-mcp.test.mjs, so a flip in the
 // server crosses that fold, the fix lands in exactly one row here, and the
-// consumers below follow the row without a mirror of their own: the
-// seven-tool listing projection, run_alphafold3's typed-tool asserts, and
-// the submit gate's TOOL_INFOS stub (whose pin test then holds the literal
-// CONFIRM_SET to the rows). "Annotation oracle" is test-infra vocabulary —
+// consumers follow the row without a mirror of their own: the
+// seven-tool listing projection, run_alphafold3's typed-tool asserts, the
+// submit gate's TOOL_INFOS stub (whose pin test then holds the literal
+// CONFIRM_SET to the rows), and the prose agreement check in
+// test/skills-library.test.mjs — the skill, README, and glossary
+// name-claims follow the rows too (spec #122). "Annotation oracle" is
+// test-infra vocabulary —
 // this module's own word, deliberately not a GLOSSARY headword.
 //
 // Each row holds the wire's camelCase bits with every hint explicit: the
