@@ -107,3 +107,23 @@ _Avoid_: persistent session, background run
 **Tool policy**:
 The compute gateway's per-tool enforcement record — annotations, job-creating, guard — co-located with each tool's definition and read by the audit middleware, the hold and throttle bounds, and the boundary tests; a mismatch between policy and registered surface refuses at boot. Spec #116 ships it.
 _Avoid_: tool set, policy table, tool registry
+
+**Eval suite**:
+The umbrella for Theta's measurement at M6: the keyless, deterministic replay net plus the live-model benchmark suite — a custom harness built on pi primitives (session files, `models.classify()`, the UsageEntry cost ledger), decided because pi ships no eval tooling of its own. ADR 0007 ships it.
+_Avoid_: eval harness, evaluation framework
+
+**Replay net**:
+The eval suite's base layer: a keyless, deterministic regression net over recorded sessions, run host-side in the standard test suite. Its replay is the durable-run entry's transcript replay, applied offline to fixtures — no model, no key — and the net compares normalized recordings against committed snapshots to catch skill-edit and vendored re-sync drift. Fixtures stay in pi's session-file format; the normalization layer is Theta-built.
+_Avoid_: regression suite, replay suite
+
+**Benchmark suite**:
+The eval suite's live layer: graded task suites run against the model, as a new mode of the clean-room rig under its one-key discipline. Single-model first (provider is config); two-tier judging — the campaign provider's classify() for iteration, an independent provider for numbers destined for public surfaces; costs ride pi's native UsageEntry ledger.
+_Avoid_: benchmark harness, live eval
+
+**Workspace-as-oracle**:
+The benchmark suite's grading doctrine: the workspace is the oracle — model prose and tool-result text do not prove an external effect; the graded evidence is the state the run left behind. Subjective tasks are judged by `models.classify()`, adopted under the standing adoption rule.
+_Avoid_: transcript grading, output grading
+
+**Eval capture**:
+A session recording taken deliberately for the eval suite — an eval-shaped scenario run in the clean-room rig — never evidence derived from a dogfood run. A model-visible change (skill text, connector script, orchestrator doctrine, extension code) lands only with a fresh capture. Distinct from session evidence, the dogfood auditor's artifact bundle.
+_Avoid_: evidence reuse, recycled transcript
