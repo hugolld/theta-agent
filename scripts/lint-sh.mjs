@@ -15,23 +15,28 @@ import { pathToFileURL } from "node:url";
 //   /bin/sh is unprobed for pipefail (SSH down, 2026-11-04) — a loud
 //   `set: Illegal option` there breaks every deploy. One probe confirming
 //   pipefail on the cluster retires this exception.
-// - scripts/gateway-probe.sh: every gated step runs unpiped by design.
+// - scripts/gateway-probe.sh: its one real pipeline (req's `printf | curl`)
+//   has a failure-free builtin head; curl, the tail, is the exit observed.
+//   Its multi-step extractions run unpiped one step at a time — the
+//   portable arm (the cluster's /bin/sh is unprobed).
 const SHELL_EXCEPTIONS = new Set(["gateway/deploy.sh", "scripts/gateway-probe.sh"]);
 
 // The textual approximation: a non-comment line carrying `|` (outside the
-// `||` operator) reads as a pipeline. A pipe hidden in a string is a
-// false positive — the approximation is a named residual of #139.
+// `||` operator) reads as a pipeline, and the pipefail scan below reads
+// those same non-comment lines — a comment satisfies neither side. A pipe
+// or a pipefail `set` hidden inside a string stays out of reach — the
+// approximation is a named residual of #139.
 export function pipefailOffenders(sources) {
 	const offenders = [];
 	for (const [path, text] of sources) {
 		if (SHELL_EXCEPTIONS.has(path)) continue;
 		const lines = text.split(/\r?\n/);
-		const pipelines = lines
+		const code = lines
 			.map((line, index) => [line, index])
-			.filter(([line]) => line.trim() !== "" && !line.trim().startsWith("#"))
-			.filter(([line]) => line.replaceAll("||", " ").includes("|"));
+			.filter(([line]) => line.trim() !== "" && !line.trim().startsWith("#"));
+		const pipelines = code.filter(([line]) => line.replaceAll("||", " ").includes("|"));
 		if (pipelines.length === 0) continue;
-		if (!/set\s+[^\n]*pipefail/.test(text)) {
+		if (!code.some(([line]) => /set\s+[^\n]*pipefail/.test(line))) {
 			offenders.push(
 				`${path}: ${pipelines.length} pipeline line(s) (first at line ${pipelines[0][1] + 1}) with no pipefail`,
 			);
@@ -40,11 +45,19 @@ export function pipefailOffenders(sources) {
 	return offenders;
 }
 
-async function shellSurfaces() {
-	const scripts = (await readdir(new URL("../scripts/", import.meta.url)))
-		.filter((name) => name.endsWith(".sh"))
-		.map((name) => `scripts/${name}`);
-	return [...scripts, "gateway/deploy.sh", ".githooks/pre-commit"];
+// Walked surfaces: every .sh under scripts/ and gateway/ — the walk, not a
+// hand list, so a future script cannot join the tree silently unscanned.
+// The hook rides its name: extension-less, a fixed git filename.
+export async function shellSurfaces() {
+	const shUnder = async (dir, prefix) =>
+		(await readdir(new URL(dir, import.meta.url)))
+			.filter((name) => name.endsWith(".sh"))
+			.map((name) => `${prefix}${name}`);
+	return [
+		...(await shUnder("../scripts/", "scripts/")),
+		...(await shUnder("../gateway/", "gateway/")),
+		".githooks/pre-commit",
+	];
 }
 
 async function main() {

@@ -813,7 +813,12 @@ async function adrFiles() {
 // One line, one relation: the coinage shares the line with its `(GLOSSARY)`
 // marker — 0006's Context marks "the Submit gate, a client-side pi
 // permission extension (GLOSSARY)", the marker riding the appositive — so
-// the line, not the marked phrase, is the honest granularity.
+// the line, not the marked phrase, is the honest granularity. What the
+// line-level check cannot see is which phrase on the line carries the
+// marker: an added stray beside a declared coinage is caught by the
+// one-marker-per-line count, a moved marker (marker and coinage trading
+// places on one line) is not — phrase placement stays review-enforced,
+// and domain.md says so.
 function lineMarks(line, coinage) {
 	return line.includes("(GLOSSARY)") && wordPattern(coinage, false).test(line);
 }
@@ -822,6 +827,8 @@ function coinageOffenders(lines, coinages) {
 	const offenders = [];
 	for (const [index, line] of lines.entries()) {
 		if (!line.includes("(GLOSSARY)")) continue;
+		const markers = line.split("(GLOSSARY)").length - 1;
+		if (markers > 1) offenders.push(`line ${index + 1} carries ${markers} markers`);
 		if (!coinages.some((coinage) => lineMarks(line, coinage))) {
 			offenders.push(`line ${index + 1} carries a marker on no declared coinage`);
 		}
@@ -872,12 +879,23 @@ test("every declared coinage is a live glossary headword", () => {
 });
 
 test("a stray marker names its ADR and line", () => {
-	// The green tree never exercises the census's stray branch; this pins
-	// the offender shape against a synthetic ADR, the avoid-term fixture's
-	// pattern. The terms are invented for the same reason.
+	// The green tree never exercises the census's stray branches; this pins
+	// the offender shapes against a synthetic ADR, the avoid-term fixture's
+	// pattern. The terms are invented for the same reason. Line 3 pins the
+	// one-marker-per-line count (the added-stray class); a marker moved
+	// between phrases on a one-marker line stays green here by construction
+	// — phrase placement is review-enforced, not suite-enforced.
 	const offenders = coinageOffenders(
-		["nothing marked here", "a **stray** term (GLOSSARY) sits here"],
+		[
+			"nothing marked here",
+			"a **stray** term (GLOSSARY) sits here",
+			"two markers (GLOSSARY) on one line (GLOSSARY)",
+		],
 		["real coinage"],
 	);
-	assert.deepEqual(offenders, ["line 2 carries a marker on no declared coinage"]);
+	assert.deepEqual(offenders, [
+		"line 2 carries a marker on no declared coinage",
+		"line 3 carries 2 markers",
+		"line 3 carries a marker on no declared coinage",
+	]);
 });

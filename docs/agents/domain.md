@@ -46,7 +46,7 @@ If the concept you need isn't in the glossary yet, that's a signal: either you'r
 
 ## Editing the glossary
 
-New entries append at the end — the file reads milestone-chronological. An ADR marks `(GLOSSARY)` on its central coinage only; other bolded terms stand bare. The suite (`test/skills-library.test.mjs`) enforces the avoid-term, headword-usage, provenance-sentence, and coinage-marker rules; entry ordering alone is review-enforced.
+New entries append at the end — the file reads milestone-chronological. An ADR marks `(GLOSSARY)` on its central coinage only; other bolded terms stand bare. The suite (`test/skills-library.test.mjs`) enforces the avoid-term, headword-usage, provenance-sentence, and coinage-marker-line rules (a declared coinage shares its marker's line; one marker per line); entry ordering and which phrase on the line carries the marker are review-enforced.
 
 ## Flag ADR conflicts
 
