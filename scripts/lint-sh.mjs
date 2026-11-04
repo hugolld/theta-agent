@@ -21,11 +21,15 @@ import { pathToFileURL } from "node:url";
 //   portable arm (the cluster's /bin/sh is unprobed).
 const SHELL_EXCEPTIONS = new Set(["gateway/deploy.sh", "scripts/gateway-probe.sh"]);
 
-// The textual approximation: a non-comment line carrying `|` (outside the
-// `||` operator) reads as a pipeline, and the pipefail scan below reads
-// those same non-comment lines — a comment satisfies neither side. A pipe
-// or a pipefail `set` hidden inside a string stays out of reach — the
-// approximation is a named residual of #139.
+// The textual approximation: a code line carrying `|` (outside the `||`
+// operator) reads as a pipeline, and the pipefail scan below reads those
+// same code lines. Comments are excluded as whole lines only: a trailing
+// comment still satisfies the pipefail scan (`foo | bar # set -o pipefail
+// someday` passes) and a `|` inside one still reads as a pipeline. Stripping
+// trailing comments trades that for a worse miss — a `#` inside a string
+// (`printf 'a # b' | curl`) would hide a real pipeline — so the shape stays
+// a named residual of #139, for review to catch. A pipe or a pipefail `set`
+// hidden inside a string is out of reach the same way.
 export function pipefailOffenders(sources) {
 	const offenders = [];
 	for (const [path, text] of sources) {

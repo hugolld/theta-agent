@@ -33,8 +33,11 @@ test("the lint's surface list covers every .sh under scripts/ and gateway/ on di
 	const found = [];
 	const visit = (rel) => {
 		for (const entry of readdirSync(`${root}${rel}`, { withFileTypes: true })) {
-			if (entry.isDirectory()) visit(`${rel}/${entry.name}`);
-			else if (entry.name.endsWith(".sh")) found.push(`${rel}/${entry.name}`);
+			if (entry.isDirectory()) {
+				// A dev machine's gateway/.venv is environment, not tree —
+				// lint:dups ignores it for the same reason.
+				if (entry.name !== ".venv") visit(`${rel}/${entry.name}`);
+			} else if (entry.name.endsWith(".sh")) found.push(`${rel}/${entry.name}`);
 		}
 	};
 	visit("scripts");
