@@ -109,7 +109,7 @@ The compute gateway's per-tool enforcement record — annotations, job-creating,
 _Avoid_: tool set, policy table, tool registry
 
 **Eval suite**:
-The umbrella for Theta's measurement at M6: the keyless, deterministic replay net plus the live-model benchmark suite — a custom harness built on pi primitives (session files, `models.classify()`, the UsageEntry cost ledger), decided because pi ships no eval tooling of its own. ADR 0007 ships it.
+The umbrella for Theta's measurement at M6: the keyless, deterministic replay net plus the live-model benchmark suite — a custom harness built on pi primitives (session files, `models.classify()`, the UsageEntry cost ledger), decided because pi ships no eval tooling of its own. ADR 0007 decides it.
 _Avoid_: eval harness, evaluation framework
 
 **Replay net**:
