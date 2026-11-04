@@ -495,6 +495,9 @@ const scanSurfaces = [
 	"docs/adr/0005-dogfood-runs-in-a-clean-room-rig.md",
 	// ADR 0006 carries the submit-capability headword (M5's safety gates).
 	"docs/adr/0006-a-server-held-capability-bounds-submits.md",
+	// ADR 0007 carries the M6 eval headwords (eval suite, replay net,
+	// benchmark suite, workspace-as-oracle, eval capture).
+	"docs/adr/0007-the-eval-suite-is-a-custom-two-layer-harness.md",
 	// The gateway README carries the compute headwords' working vocabulary
 	// (compute gateway, audit line) through the M4 strikes.
 	"gateway/README.md",
