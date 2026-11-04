@@ -117,7 +117,7 @@ The eval suite's base layer: a keyless, deterministic regression net over record
 _Avoid_: regression suite, replay suite
 
 **Benchmark suite**:
-The eval suite's live layer: graded task suites run against the model, as a new mode of the clean-room rig under its one-key discipline. Single-model first (provider is config); two-tier judging — the campaign provider's classify() for iteration, an independent provider for numbers destined for public surfaces; costs ride pi's native UsageEntry ledger.
+The eval suite's live layer: graded task suites run against the model, as a new mode of the clean-room rig, carrying only the provider key. Single-model first (provider is config); two-tier judging — the campaign provider's classify() for iteration, an independent provider for numbers destined for public surfaces; costs ride pi's native UsageEntry ledger.
 _Avoid_: benchmark harness, live eval
 
 **Workspace-as-oracle**:
@@ -125,5 +125,5 @@ The benchmark suite's grading doctrine: the workspace is the oracle — model pr
 _Avoid_: transcript grading, output grading
 
 **Eval capture**:
-A session recording taken deliberately for the eval suite — an eval-shaped scenario run in the clean-room rig — never evidence derived from a dogfood run. A model-visible change (skill text, connector script, orchestrator doctrine, extension code) lands only with a fresh capture. Distinct from session evidence, the dogfood auditor's artifact bundle.
+A session recording taken deliberately for the eval suite — an eval-shaped scenario run in the clean-room rig — never evidence derived from a dogfood run. A model-visible change (skill text, connector script, orchestrator doctrine, extension code) lands only with a fresh capture. Distinct from session evidence, the dogfood run's artifact bundle.
 _Avoid_: evidence reuse, recycled transcript
