@@ -632,6 +632,52 @@ test("every glossary headword describes language the docs use", () => {
 	);
 });
 
+// The provenance direction: a headword's definition names the artifact that
+// decided or shipped it — "ADR NNNN decides it." while unshipped, "ships
+// it." once landed (Spec #NNNN and the bare milestone forms are house
+// shapes too). The backlist below predates the convention and only shrinks;
+// a new headword joins the requirement by simply staying off it. The rule
+// stayed judgement-side through #128: two review passes judged "mixed
+// precedent" by anecdote until a census ran — this check is the census,
+// and the failure message is its printout.
+const provenanceGrandfathered = new Set([
+	"Skill tiers",
+	"Vendored skill",
+	"Provenance header",
+	"Orchestrator",
+	"Connector skill",
+	"Re-sync",
+	"Tracer",
+	"Provenance entry",
+	"Evidence item",
+	"Evidence grade",
+	"Attestation leg",
+	"Session evidence",
+	"Command guard",
+	"Staging root",
+	"Template registry",
+	"Gateway skill",
+	"Job record",
+	"Submit gate",
+	"Codemode",
+	"Durable run",
+]);
+
+test("a headword outside the grandfather list carries a provenance sentence", () => {
+	const sentence = /(ADR \d{4}|Spec #\d+|M\d+) (ships|decides) it\b/;
+	const missing = [];
+	for (const headword of glossaryHeadwords(glossary)) {
+		if (provenanceGrandfathered.has(headword)) continue;
+		const entry = new RegExp(`^\\*\\*${escapeRegExp(headword)}\\*\\*:\\n(.+)$`, "m").exec(glossary);
+		if (!entry || !sentence.test(entry[1])) missing.push(headword);
+	}
+	assert.deepEqual(
+		missing,
+		[],
+		`headwords without a provenance sentence (name the deciding artifact — "ADR NNNN decides it." — or grandfather the entry): ${missing.join(", ")}`,
+	);
+});
+
 // The list verifies itself (the S2 retro, #105): prose that carries
 // glossary vocabulary joins the scan in the same strike that lands it.
 // The rule lived as CLAUDE.md prose since the S1 retro and the omission
