@@ -810,16 +810,21 @@ async function adrFiles() {
 	return names.filter((name) => name.endsWith(".md")).sort();
 }
 
-// A marker line: the coinage shares the line with its `(GLOSSARY)` marker —
-// 0006's Context marks "the Submit gate, a client-side pi permission
-// extension (GLOSSARY)", the marker riding the appositive — so the line,
-// not the marked phrase, is the honest granularity.
+// One line, one relation: the coinage shares the line with its `(GLOSSARY)`
+// marker — 0006's Context marks "the Submit gate, a client-side pi
+// permission extension (GLOSSARY)", the marker riding the appositive — so
+// the line, not the marked phrase, is the honest granularity.
+function lineMarks(line, coinage) {
+	return line.includes("(GLOSSARY)") && wordPattern(coinage, false).test(line);
+}
+
 function coinageOffenders(lines, coinages) {
 	const offenders = [];
 	for (const [index, line] of lines.entries()) {
 		if (!line.includes("(GLOSSARY)")) continue;
-		const named = coinages.some((coinage) => wordPattern(coinage, false).test(line));
-		if (!named) offenders.push(`line ${index + 1} carries a marker on no declared coinage`);
+		if (!coinages.some((coinage) => lineMarks(line, coinage))) {
+			offenders.push(`line ${index + 1} carries a marker on no declared coinage`);
+		}
 	}
 	return offenders;
 }
@@ -842,9 +847,7 @@ test("every ADR's (GLOSSARY) markers match its declared coinages", async () => {
 		const lines = text.split(/\r?\n/);
 		for (const offender of coinageOffenders(lines, coinages)) offenders.push(`${name}: ${offender}`);
 		for (const coinage of coinages) {
-			const marked = lines.some(
-				(line) => line.includes("(GLOSSARY)") && wordPattern(coinage, false).test(line),
-			);
+			const marked = lines.some((line) => lineMarks(line, coinage));
 			if (!marked) offenders.push(`${name}: coinage "${coinage}" carries no marker line`);
 		}
 	}

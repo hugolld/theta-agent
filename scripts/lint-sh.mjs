@@ -44,7 +44,7 @@ async function shellSurfaces() {
 	const scripts = (await readdir(new URL("../scripts/", import.meta.url)))
 		.filter((name) => name.endsWith(".sh"))
 		.map((name) => `scripts/${name}`);
-	return [...new Set([...scripts, "gateway/deploy.sh", ".githooks/pre-commit"])];
+	return [...scripts, "gateway/deploy.sh", ".githooks/pre-commit"];
 }
 
 async function main() {

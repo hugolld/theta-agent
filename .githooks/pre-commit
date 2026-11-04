@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 # Local guardrail mirroring the verify workflow: block commits on a stale
 # gateway lock, a red suite, or red lint (JS via eslint, self-authored
 # Python via ruff — vendored skill trees stay verbatim and out of scope).
