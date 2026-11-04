@@ -399,9 +399,7 @@ test("the gateway tool names in prose agree with the annotation oracle", async (
 	);
 
 	const glossary = await readFile(new URL("../GLOSSARY.md", import.meta.url), "utf8");
-	const submitGateEntry = glossary
-		.split(/^(?=\*\*.+\*\*:)/m)
-		.find((block) => block.startsWith("**Submit gate**:"));
+	const submitGateEntry = glossaryEntry(glossary, "Submit gate");
 	assert.ok(submitGateEntry, "GLOSSARY: the Submit gate entry is gone");
 	assert.deepEqual(
 		claimEnumeration(submitGateEntry, "destructive calls — ", "GLOSSARY Submit gate entry"),
@@ -535,9 +533,11 @@ function wordPattern(core, hyphenGuarded) {
 	return new RegExp(`${start}${escaped}s?${end}`, "i");
 }
 
-// The glossary's headwords, one parse shared by both directions of the
-// discipline: usage (every headword describes language the docs use) and
-// coverage (every prose file carrying a headword is a scan surface).
+// The glossary's headwords, one parse shared by all three directions of
+// the discipline: usage (every headword describes language the docs use),
+// coverage (every prose file carrying a headword is a scan surface), and
+// provenance (every non-grandfathered headword names its deciding
+// artifact).
 function glossaryHeadwords(markdown) {
 	const headwords = [];
 	for (const line of markdown.split(/\r?\n/)) {
@@ -545,6 +545,15 @@ function glossaryHeadwords(markdown) {
 		if (match) headwords.push(match[1]);
 	}
 	return headwords;
+}
+
+// The whole entry block — headword line, definition, _Avoid_ line — for
+// one headword, or undefined. The Submit gate enumeration and the
+// provenance direction both read from it.
+function glossaryEntry(markdown, headword) {
+	return markdown
+		.split(/^(?=\*\*.+\*\*:)/m)
+		.find((block) => block.startsWith(`**${headword}**:`));
 }
 
 function glossaryAvoidTerms(markdown) {
@@ -629,6 +638,65 @@ test("every glossary headword describes language the docs use", () => {
 		unused,
 		[],
 		`glossary headword words with no usage in self-authored docs: ${unused.join(", ")}`,
+	);
+});
+
+// The provenance direction: a headword's definition names the artifact that
+// decided or shipped it — "ADR NNNN decides it." while unshipped, "ships
+// it." once landed (Spec #NNNN and the bare milestone forms are house
+// shapes too). The grandfather list below predates the convention and only
+// shrinks: a new headword joins the requirement by staying off it, and the
+// converse test makes the list verify itself (#105's shape) — an entry
+// that gains a sentence must leave. The rule stayed judgement-side through
+// #128: two review passes judged "mixed precedent" by anecdote until a
+// census ran — this check is the census, and the failure message is its
+// printout.
+const provenanceSentence = /(ADR \d{4}|Spec #\d+|M\d+) (ships|decides) it\b/;
+const provenanceGrandfathered = new Set([
+	"Skill tiers",
+	"Vendored skill",
+	"Provenance header",
+	"Orchestrator",
+	"Connector skill",
+	"Re-sync",
+	"Tracer",
+	"Provenance entry",
+	"Evidence item",
+	"Evidence grade",
+	"Attestation leg",
+	"Session evidence",
+	"Command guard",
+	"Staging root",
+	"Template registry",
+	"Gateway skill",
+	"Job record",
+	"Submit gate",
+	"Codemode",
+	"Durable run",
+]);
+
+function hasProvenanceSentence(headword) {
+	const entry = glossaryEntry(glossary, headword);
+	return Boolean(entry) && provenanceSentence.test(entry.split(/\r?\n/)[1]);
+}
+
+test("a headword outside the grandfather list carries a provenance sentence", () => {
+	const missing = glossaryHeadwords(glossary).filter(
+		(headword) => !provenanceGrandfathered.has(headword) && !hasProvenanceSentence(headword),
+	);
+	assert.deepEqual(
+		missing,
+		[],
+		`headwords without a provenance sentence (name the deciding artifact — "ADR NNNN decides it." — or grandfather the entry): ${missing.join(", ")}`,
+	);
+});
+
+test("a grandfathered headword stays sentence-free until it leaves the list", () => {
+	const stale = [...provenanceGrandfathered].filter(hasProvenanceSentence);
+	assert.deepEqual(
+		stale,
+		[],
+		`grandfathered headwords now carry a provenance sentence — remove them from the list: ${stale.join(", ")}`,
 	);
 });
 
