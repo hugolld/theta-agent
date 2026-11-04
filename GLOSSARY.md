@@ -113,17 +113,17 @@ The umbrella for Theta's measurement at M6: the keyless, deterministic replay ne
 _Avoid_: eval harness, evaluation framework
 
 **Replay net**:
-The eval suite's base layer: a keyless, deterministic regression net over recorded sessions, run host-side in the standard test suite. Its replay is the durable-run entry's transcript replay, applied offline to fixtures — no model, no key — and the net compares normalized recordings against committed snapshots to catch skill-edit and vendored re-sync drift. Fixtures stay in pi's session-file format; the normalization layer is Theta-built.
+The eval suite's base layer: a keyless, deterministic regression net over recorded sessions, run host-side in the standard test suite. Its replay is the durable-run entry's transcript replay, applied offline to fixtures — no model, no key — and the net compares normalized recordings against committed snapshots to catch skill-edit and vendored re-sync drift. Fixtures stay in pi's session-file format; the normalization layer is Theta-built. ADR 0007 decides it.
 _Avoid_: regression suite, replay suite
 
 **Benchmark suite**:
-The eval suite's live layer: graded task suites run against the model, as a new mode of the clean-room rig, carrying only the provider key. Single-model first (provider is config); two-tier judging — the campaign provider's classify() for iteration, an independent provider for numbers destined for public surfaces; costs ride pi's native UsageEntry ledger.
+The eval suite's live layer: graded task suites run against the model, as a new mode of the clean-room rig, carrying only the provider key. Single-model first (provider is config); two-tier judging — the campaign provider's classify() for iteration, an independent provider for numbers destined for public surfaces; costs ride pi's native UsageEntry ledger. ADR 0007 decides it.
 _Avoid_: benchmark harness, live eval
 
 **Workspace-as-oracle**:
-The benchmark suite's grading doctrine: the workspace is the oracle — model prose and tool-result text do not prove an external effect; the graded evidence is the state the run left behind. Subjective tasks are judged by `models.classify()`, adopted under the standing adoption rule.
+The benchmark suite's grading doctrine: the workspace is the oracle — model prose and tool-result text do not prove an external effect; the graded evidence is the state the run left behind. Subjective tasks are judged by `models.classify()`, adopted under the standing adoption rule. ADR 0007 decides it.
 _Avoid_: transcript grading, output grading
 
 **Eval capture**:
-A session recording taken deliberately for the eval suite — an eval-shaped scenario run in the clean-room rig — never evidence derived from a dogfood run. A model-visible change (skill text, connector script, orchestrator doctrine, extension code) lands only with a fresh capture. Distinct from session evidence, the dogfood run's artifact bundle.
+A session recording taken deliberately for the eval suite — an eval-shaped scenario run in the clean-room rig — never evidence derived from a dogfood run. A model-visible change (skill text, connector script, orchestrator doctrine, extension code) lands only with a fresh capture. Distinct from session evidence, the dogfood run's artifact bundle. ADR 0007 decides it.
 _Avoid_: evidence reuse, recycled transcript
