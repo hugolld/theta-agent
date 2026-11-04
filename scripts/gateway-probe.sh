@@ -22,7 +22,9 @@
 # fixtures. An in-200 error (isError: true) exits 3, the connector-script
 # contract. Multi-step extractions run one unpiped step at a time: the
 # exit-status rule this script is the first consumer of says unpiped or
-# pipefail, and /bin/sh offers only the former.
+# pipefail — this script takes the unpiped arm for portability: the
+# cluster's /bin/sh is unprobed, and the unpiped form runs under any sh.
+# lint:sh (#139) carries the disjunction.
 set -eu
 
 OUT=${1:-}

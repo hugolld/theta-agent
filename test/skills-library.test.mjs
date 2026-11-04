@@ -787,3 +787,115 @@ test("the _Avoid_ ban covers every walked prose file", async () => {
 		`_Avoid_ terms found in self-authored files: ${offenders.join("; ")}`,
 	);
 });
+
+// The coinage direction (#139, from #128's retro): an ADR marks `(GLOSSARY)`
+// on its central coinage only; other bolded terms stand bare. The rule lived
+// as domain.md prose and the #128 author misread it with the file in context
+// — a sub-agent's exemplar walk recovered the marker — so the census moves
+// suite-side beside its siblings. The map is the census: ADR number → the
+// coinages it marks. 0001 predates the discipline and carries no marker —
+// the argued exception, named here like PROSE_EXCEPTIONS above.
+const ADR_COINAGE_EXCEPTIONS = new Set(["0001"]);
+const ADR_COINAGES = new Map([
+	["0002", ["connector skill"]],
+	["0003", ["project notebook"]],
+	["0004", ["compute gateway"]],
+	["0005", ["clean-room rig"]],
+	["0006", ["Submit gate", "submit capability"]],
+	["0007", ["eval suite"]],
+]);
+
+async function adrFiles() {
+	const names = await readdir(new URL("../docs/adr/", import.meta.url));
+	return names.filter((name) => name.endsWith(".md")).sort();
+}
+
+// One line, one relation: the coinage shares the line with its `(GLOSSARY)`
+// marker — 0006's Context marks "the Submit gate, a client-side pi
+// permission extension (GLOSSARY)", the marker riding the appositive — so
+// the line, not the marked phrase, is the honest granularity. What the
+// line-level check cannot see is which phrase on the line carries the
+// marker: an added stray beside a declared coinage is caught by the
+// one-marker-per-line count, a moved marker (marker and coinage trading
+// places on one line) is not — phrase placement stays review-enforced,
+// and domain.md says so.
+function lineMarks(line, coinage) {
+	return line.includes("(GLOSSARY)") && wordPattern(coinage, false).test(line);
+}
+
+function coinageOffenders(lines, coinages) {
+	const offenders = [];
+	for (const [index, line] of lines.entries()) {
+		if (!line.includes("(GLOSSARY)")) continue;
+		const markers = line.split("(GLOSSARY)").length - 1;
+		if (markers > 1) offenders.push(`line ${index + 1} carries ${markers} markers`);
+		if (!coinages.some((coinage) => lineMarks(line, coinage))) {
+			offenders.push(`line ${index + 1} carries a marker on no declared coinage`);
+		}
+	}
+	return offenders;
+}
+
+test("every ADR's (GLOSSARY) markers match its declared coinages", async () => {
+	const offenders = [];
+	const files = await adrFiles();
+	for (const name of files) {
+		const number = name.slice(0, 4);
+		const text = await readFile(new URL(`../docs/adr/${name}`, import.meta.url), "utf8");
+		if (ADR_COINAGE_EXCEPTIONS.has(number)) {
+			if (text.includes("(GLOSSARY)")) offenders.push(`${name}: an excepted ADR carries a marker`);
+			continue;
+		}
+		const coinages = ADR_COINAGES.get(number);
+		if (!coinages) {
+			offenders.push(`${name}: not in the coinage map and not an argued exception`);
+			continue;
+		}
+		const lines = text.split(/\r?\n/);
+		for (const offender of coinageOffenders(lines, coinages)) offenders.push(`${name}: ${offender}`);
+		for (const coinage of coinages) {
+			const marked = lines.some((line) => lineMarks(line, coinage));
+			if (!marked) offenders.push(`${name}: coinage "${coinage}" carries no marker line`);
+		}
+	}
+	for (const number of ADR_COINAGES.keys()) {
+		if (!files.some((name) => name.slice(0, 4) === number)) {
+			offenders.push(`coinage map names ADR ${number}, which does not exist on disk`);
+		}
+	}
+	assert.deepEqual(offenders, [], `ADR coinage-marker census: ${offenders.join("; ")}`);
+});
+
+test("every declared coinage is a live glossary headword", () => {
+	const headwords = new Set(glossaryHeadwords(glossary).map((headword) => headword.toLowerCase()));
+	const stale = [...ADR_COINAGES.values()]
+		.flat()
+		.filter((coinage) => !headwords.has(coinage.toLowerCase()));
+	assert.deepEqual(
+		stale,
+		[],
+		`coinage map terms that are not glossary headwords: ${stale.join(", ")}`,
+	);
+});
+
+test("a stray marker names its ADR and line", () => {
+	// The green tree never exercises the census's stray branches; this pins
+	// the offender shapes against a synthetic ADR, the avoid-term fixture's
+	// pattern. The terms are invented for the same reason. Line 3 pins the
+	// one-marker-per-line count (the added-stray class); a marker moved
+	// between phrases on a one-marker line stays green here by construction
+	// — phrase placement is review-enforced, not suite-enforced.
+	const offenders = coinageOffenders(
+		[
+			"nothing marked here",
+			"a **stray** term (GLOSSARY) sits here",
+			"two markers (GLOSSARY) on one line (GLOSSARY)",
+		],
+		["real coinage"],
+	);
+	assert.deepEqual(offenders, [
+		"line 2 carries a marker on no declared coinage",
+		"line 3 carries 2 markers",
+		"line 3 carries a marker on no declared coinage",
+	]);
+});
