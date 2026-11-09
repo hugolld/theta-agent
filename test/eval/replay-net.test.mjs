@@ -20,14 +20,12 @@
 import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 import { buildSessionContext, parseSessionEntries } from "@earendil-works/pi-coding-agent";
+import { REPO_ROOT as repoRoot } from "../helpers/repo-root.mjs";
 import { contextHash, normalizeTree } from "./normalize.mjs";
 import { SCENARIOS } from "./scenarios.mjs";
 import { surfaceDigest } from "./surfaces.mjs";
-
-const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const fixtureFile = (scenario) => path.join(repoRoot, "test/eval/fixtures", scenario.id, "session.jsonl");
 const manifestFile = (scenario) => path.join(repoRoot, "test/eval/fixtures", scenario.id, "provenance.json");
 const snapshotFile = (scenario) => path.join(repoRoot, "test/eval/snapshots", `${scenario.id}.json`);

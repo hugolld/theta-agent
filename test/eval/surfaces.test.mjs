@@ -1,22 +1,25 @@
 // Unit tests for the provenance surfaces (spec #133): the digest-scope
 // decision is pinned here — one digest per model-visible surface class,
-// the registry exactly advertisement / skill / extensions — together with
-// the digest properties the provenance pin leans on: determinism,
-// machine-independence (relative paths, hashed bytes), and sensitivity to
-// a one-byte change.
+// the registry exactly advertisement / skill / extensions /
+// project-context — together with the digest properties the provenance
+// pin leans on: determinism, machine-independence (relative paths, hashed
+// bytes), and sensitivity to a one-byte change.
 
 import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync, cpSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
-import { fileURLToPath } from "node:url";
+import { REPO_ROOT as repoRoot } from "../helpers/repo-root.mjs";
 import { advertisementBytes, fileTreeDigest, SURFACE_CLASSES, surfaceDigest } from "./surfaces.mjs";
 
-const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
-
 test("the surface registry is exactly the decided digest scope: one digest per model-visible surface class", () => {
-	assert.deepEqual(Object.keys(SURFACE_CLASSES), ["advertisement", "skill", "extensions"]);
+	assert.deepEqual(Object.keys(SURFACE_CLASSES), [
+		"advertisement",
+		"skill",
+		"extensions",
+		"project-context",
+	]);
 });
 
 test("an unknown surface class refuses loudly", () => {
@@ -79,8 +82,15 @@ test("every surface class the connector scenario declares digests over the live 
 	// The tracer's fixture #1 binding, exercised end-to-end against the
 	// real tree: each declared class resolves to a sha256 hex digest. The
 	// pinned values live in the fixture's provenance manifest, compared by
-	// the net itself.
-	for (const surfaceClass of ["advertisement", "skill:theta-lit-search", "extensions"]) {
+	// the net itself. project-context is the review round's addition: pi
+	// embeds CLAUDE.md as the system record's <project_instructions>, so
+	// its bytes are as model-visible as the advertisement.
+	for (const surfaceClass of [
+		"advertisement",
+		"skill:theta-lit-search",
+		"extensions",
+		"project-context",
+	]) {
 		assert.match(surfaceDigest(surfaceClass, repoRoot), /^[0-9a-f]{64}$/);
 	}
 });

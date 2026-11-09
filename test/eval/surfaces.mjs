@@ -10,6 +10,11 @@
 //                  content-addressed
 //   extensions     the extension sources under extensions/,
 //                  content-addressed
+//   project-context  the project-instruction bytes pi loads into the
+//                  system prompt — CLAUDE.md at the repo root, embedded
+//                  as the <project_instructions> block every session
+//                  carries (spec #133's review round: the connector
+//                  capture demonstrably included this surface)
 //
 // A fixture's provenance manifest declares one digest per class its
 // session's model-visible context included; the net recomputes each from
@@ -17,11 +22,14 @@
 // stale, and the eval-capture doctrine (ADR 0007) says a model-visible
 // change lands only with a fresh capture. Scoping is per session, honest
 // to what the model actually saw: a connector capture binds the
-// advertisement (every session sees every skill's advertisement line) and
-// the connector's own tree, but not another skill's body — its bytes were
-// never model-visible in that session. The class registry is open: a
-// later strike adds a class when a scenario's surface demands one, and
-// the registry pin forces that to be a decision, not an accident.
+// advertisement (every session sees every skill's advertisement line), the
+// project context, and the connector's own tree, but not another skill's
+// body — its bytes were never model-visible in that session. Pi-owned
+// sections (preamble, tools, rules, docs) stay out: they are the
+// installed pi's bytes, pinned by the rig image, not this repo's. The
+// class registry is open: a later strike adds a class when a scenario's
+// surface demands one, and the registry pin forces that to be a decision,
+// not an accident.
 
 import { createHash } from "node:crypto";
 import { readdirSync, readFileSync } from "node:fs";
@@ -33,6 +41,8 @@ export const SURFACE_CLASSES = Object.freeze({
 		"the <available_skills> bytes every session carries, derived from every skill's frontmatter name, description, and repo-relative location, in inventory order",
 	skill: "one skill's whole tree under skills/<name>, content-addressed",
 	extensions: "the extension sources under extensions/, content-addressed",
+	"project-context":
+		"the project-instruction bytes pi loads into the system prompt — CLAUDE.md at the repo root",
 });
 
 function sha256Bytes(bytes) {
@@ -101,6 +111,11 @@ export function surfaceDigest(surfaceClass, repoRoot) {
 	}
 	if (surfaceClass === "extensions") {
 		return fileTreeDigest(path.join(repoRoot, "extensions"));
+	}
+	if (surfaceClass === "project-context") {
+		// The single file pi embeds as <project_instructions>; hashed as
+		// bytes, like every surface.
+		return sha256Bytes(readFileSync(path.join(repoRoot, "CLAUDE.md")));
 	}
 	throw new Error(`unknown model-visible surface class: ${surfaceClass}`);
 }

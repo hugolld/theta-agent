@@ -29,15 +29,14 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { pathToFileURL } from "node:url";
 import { parseSessionEntries } from "@earendil-works/pi-coding-agent";
 import { run } from "../../scripts/dogfood-gates.mjs";
 import { readSessionEvidence } from "../../scripts/session-evidence.mjs";
+import { REPO_ROOT as repoRoot } from "../helpers/repo-root.mjs";
 import { normalizeTree } from "./normalize.mjs";
 import { SCENARIOS } from "./scenarios.mjs";
 import { surfaceDigest } from "./surfaces.mjs";
-
-const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 
 function fail(message) {
 	console.error(`eval-capture: ${message}`);
