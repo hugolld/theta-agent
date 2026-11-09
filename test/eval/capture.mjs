@@ -34,7 +34,12 @@
 export function assertSurfacesUnmoved(treeRoot, preHead) {
 	const surfacePaths = ["skills", "extensions", "CLAUDE.md"];
 	const committed = run("git", ["-C", treeRoot, "diff", "--name-only", preHead, "HEAD", "--", ...surfacePaths]);
+	// core.ignorecase (macOS default true) hides case-only renames from
+	// status under a pathspec; the digests walk readdirSync names, so the
+	// probe must not share the blindness.
 	const dirty = run("git", [
+		"-c",
+		"core.ignorecase=false",
 		"-C",
 		treeRoot,
 		"status",

@@ -47,6 +47,7 @@ import {
 	readSessionEvidence,
 } from "../scripts/session-evidence.mjs";
 import { escapeRegExp } from "./helpers/escape-regexp.mjs";
+import { initHardenedGitRepo } from "./helpers/git-repo.mjs";
 
 test("ge enforces the pi and node version floors", () => {
 	assert.equal(ge("1.4.2", "1.4"), true);
@@ -184,11 +185,7 @@ function initFixtureRepo(repo, expectedSkills) {
 		JSON.stringify({ pi: { skills: ["./skills"] } }),
 	);
 	const run = (cmd) => execSync(cmd, { cwd: repo }).toString();
-	run("git init -q");
-	run("git config user.email test@example.com");
-	run("git config user.name test");
-	run("git config commit.gpgsign false");
-	run("git config core.hooksPath /dev/null");
+	initHardenedGitRepo(repo);
 	run("git add -A");
 	run("git -c commit.gpgsign=false commit -qm init");
 	// Canonical from birth: mount aliases (/var vs /private/var on macOS)
