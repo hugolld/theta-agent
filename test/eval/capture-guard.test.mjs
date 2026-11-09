@@ -62,23 +62,18 @@ test("an untracked file under a surface path refuses", () => {
 	rmSync(path.join(scratch, "skills/demo/stray.txt"));
 });
 
-test("a case-only rename under a skill tree refuses under core.ignorecase", () => {
-	// macOS default core.ignorecase=true: git status with a pathspec
-	// reports nothing after a case-only rename on disk, yet
-	// fileTreeDigest walks readdirSync names — the guard must not share
-	// the blindness (reviewer probe: -c core.ignorecase=false then
-	// reports the renamed path). The tracked path is skills/demo/SKILL.md;
-	// the disk file becomes skill.md.
+test("a case-only rename under a skill tree refuses", () => {
+	// Under macOS's default core.ignorecase=true, plain `git status` with a
+	// pathspec reports nothing after a case-only rename on disk, while
+	// fileTreeDigest walks readdirSync names — the guard's
+	// -c core.ignorecase=false probe must not share that blindness. On a
+	// case-sensitive filesystem (Linux CI) plain status sees the rename
+	// anyway, so the pin asserts only the contract: the guard refuses.
 	renameSync(
 		path.join(scratch, "skills/demo/SKILL.md"),
 		path.join(scratch, "skills/demo/skill.md"),
 	);
 	assert.throws(() => assertSurfacesUnmoved(scratch, preHead), /changed since the session's HEAD/);
-	// the guard's own probe must see what plain -uall cannot
-	assert.equal(
-		run("git", ["-C", scratch, "status", "--porcelain", "-uall", "--", "skills"]).stdout.trim(),
-		"",
-	);
 	renameSync(
 		path.join(scratch, "skills/demo/skill.md"),
 		path.join(scratch, "skills/demo/SKILL.md"),
