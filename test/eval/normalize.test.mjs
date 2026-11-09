@@ -19,13 +19,16 @@ test("the rewrite registry is exactly the five decided classes", () => {
 	}
 });
 
-test("absolute paths standing alone become <path>; URL interiors and placeholder roots survive", () => {
+test("absolute paths standing alone become <path>; URL interiors, placeholder roots, and XML closing tags survive", () => {
 	const normalized = normalizeTree({
 		cwd: "/home/theta/theta",
 		command: "cd /home/theta/theta && python3 /usr/local/bin/python3 --help",
 		url: "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=pubmed",
 		placeholder: "__REPO__/skills/theta-lit-search/SKILL.md",
 		relative: "skills/theta-lit-search/scripts/pubmed.py",
+		// the system sections carry XML; a closing tag's name is structure
+		tools: "<tools>\n- read: Read file contents\n</tools>",
+		skills: "<skill>\n  <name>theta-lit-search</name>\n</skill>",
 	});
 	assert.deepEqual(normalized, {
 		cwd: "<path>",
@@ -33,6 +36,8 @@ test("absolute paths standing alone become <path>; URL interiors and placeholder
 		url: "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=pubmed",
 		placeholder: "__REPO__/skills/theta-lit-search/SKILL.md",
 		relative: "skills/theta-lit-search/scripts/pubmed.py",
+		tools: "<tools>\n- read: Read file contents\n</tools>",
+		skills: "<skill>\n  <name>theta-lit-search</name>\n</skill>",
 	});
 });
 

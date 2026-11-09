@@ -51,9 +51,11 @@ const MODEL_KEYS = new Set(["model", "modelId"]);
 // A path stands on its own when nothing glues onto its left edge: not a
 // word character (a URL host, or the __REPO__ placeholder a sanitized
 // fixture carries), not a dot or colon (a scheme), not another slash (a
-// // authority). URL interiors and relative paths survive untouched —
-// they are behavior.
-const ABSOLUTE_PATH = /(?<![\w.:@/$-])(?:\/[A-Za-z0-9._+-]+)+\/?/g;
+// // authority), not `<` (an XML closing tag — the system sections carry
+// `</tools>`, `</skill>`, and their kin, and a tag's name is structure,
+// not a path). URL interiors and relative paths survive untouched — they
+// are behavior.
+const ABSOLUTE_PATH = /(?<![\w.:@/$<-])(?:\/[A-Za-z0-9._+-]+)+\/?/g;
 const ISO_INSTANT =
 	/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:?\d{2})?/g;
 

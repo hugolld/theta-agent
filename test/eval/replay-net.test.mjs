@@ -32,11 +32,17 @@ const fixtureFile = (scenario) => path.join(repoRoot, "test/eval/fixtures", scen
 const manifestFile = (scenario) => path.join(repoRoot, "test/eval/fixtures", scenario.id, "provenance.json");
 const snapshotFile = (scenario) => path.join(repoRoot, "test/eval/snapshots", `${scenario.id}.json`);
 
-// The presence pin — every scenario in the checked-in list has a committed
-// fixture + provenance + snapshot — lands with the strike's first fixture
-// commit (a scenario list without its capture is dead doctrine, and the
-// pin says so); the hook-green machinery commit carries the per-fixture
-// pins only.
+test("every scenario in the checked-in list has a committed fixture", () => {
+	const missing = SCENARIOS.filter(
+		(s) =>
+			!existsSync(fixtureFile(s)) || !existsSync(manifestFile(s)) || !existsSync(snapshotFile(s)),
+	).map((s) => s.id);
+	assert.deepEqual(
+		missing,
+		[],
+		`scenarios without a committed fixture + provenance + snapshot (capture them, docs/agents/eval.md): ${missing.join(", ")}`,
+	);
+});
 
 // Index a session's tool calls and results once for the shape checks: the
 // call map is keyed by tool-call id, the result map by the toolCallId the
@@ -94,11 +100,14 @@ for (const scenario of SCENARIOS) {
 
 	test(`shape — ${scenario.id}: the recording matches the scenario's expected shape`, () => {
 		const { shape } = scenario;
+		// pi advertises with pretty-printed XML — whitespace between the
+		// tags varies, the structure does not.
+		const skillRecord = new RegExp(`<skill>\\s*<name>${shape.advertisesSkill}</name>`);
 		const advertised = entries.some(
 			(entry) =>
 				entry.message?.role === "system" &&
 				typeof entry.message.sections?.skills === "string" &&
-				entry.message.sections.skills.includes(`<skill><name>${shape.advertisesSkill}</name>`),
+				skillRecord.test(entry.message.sections.skills),
 		);
 		assert.ok(advertised, `the system record never advertised skill ${shape.advertisesSkill}`);
 
@@ -114,14 +123,20 @@ for (const scenario of SCENARIOS) {
 
 		// Containment only: the capture-time auditor leg owns the full
 		// execution grammar; the net pins that the session ran the
-		// connector's helper at all.
+		// connector's helper at all — spelled in full, or cd-anchored into
+		// the skill tree (the shape real sessions use).
+		const scriptFile = shape.runsScript.split("/").pop();
+		const skillRoot = shape.runsScript.split("/").slice(0, 2).join("/");
 		const ran = [...calls.values()].some(
 			(call) =>
 				call.name === "bash" &&
 				typeof call.arguments?.command === "string" &&
-				call.arguments.command.includes(shape.runsScript),
+				(call.arguments.command.includes(shape.runsScript) ||
+					(call.arguments.command.includes("cd ") &&
+						call.arguments.command.includes(skillRoot) &&
+						call.arguments.command.includes(scriptFile))),
 		);
-		assert.ok(ran, `no bash call names ${shape.runsScript}`);
+		assert.ok(ran, `no bash call runs ${shape.runsScript} (directly or cd-anchored)`);
 
 		const last = entries.at(-1);
 		assert.ok(
