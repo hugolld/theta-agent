@@ -26,15 +26,32 @@
 // manifest's digests must name the bytes the session actually saw, and an
 // eval capture binds surfaces, not HEAD (ADR 0007) — a test-tree-only
 // commit after the capture changes nothing the model saw. The check is
-// mechanical: no surface path differs between the session's pre-head and
-// this tree, committed or not, so the digests land computes are provably
-// the session's.
-function assertSurfacesUnmoved(preHead) {
+// mechanical and filesystem-exact: no surface path differs between the
+// session's pre-head and this tree — committed, uncommitted, or ignored
+// (`--ignored=matching`: the surface digests walk the raw filesystem, so
+// an ignored __pycache__ under a skill tree rides a tree digest exactly
+// like an edit would). Throws; the CLI maps the message to its refusal.
+export function assertSurfacesUnmoved(treeRoot, preHead) {
 	const surfacePaths = ["skills", "extensions", "CLAUDE.md"];
-	const committed = run("git", ["-C", repoRoot, "diff", "--name-only", preHead, "HEAD", "--", ...surfacePaths]);
-	const dirty = run("git", ["-C", repoRoot, "status", "--porcelain", "--untracked-files=all", "--", ...surfacePaths]);
+	const committed = run("git", ["-C", treeRoot, "diff", "--name-only", preHead, "HEAD", "--", ...surfacePaths]);
+	const dirty = run("git", [
+		"-C",
+		treeRoot,
+		"status",
+		"--porcelain",
+		"--untracked-files=all",
+		"--ignored=matching",
+		"--",
+		...surfacePaths,
+	]);
+	if (committed.status !== 0 || dirty.status !== 0) {
+		throw new Error(
+			`the land guard's git probe failed (diff exit ${committed.status}, status exit ${dirty.status}) — ` +
+				"check the evidence dir's pre-head against this tree",
+		);
+	}
 	if (committed.stdout.trim() !== "" || dirty.stdout.trim() !== "") {
-		fail(
+		throw new Error(
 			`the capture-bound surfaces changed since the session's HEAD (${preHead.slice(0, 7)}) — ` +
 				"landing here would bind digests the session never saw; recapture",
 		);
@@ -126,7 +143,11 @@ function land(scenario, evidenceDir) {
 		fail("the recorded prompt is not the scenario's prompt — captures read their prompt from the checked-in list");
 	}
 	const head = run("git", ["-C", repoRoot, "rev-parse", "HEAD"]).stdout.trim();
-	assertSurfacesUnmoved(evidence.preHeadRaw.trim());
+	try {
+		assertSurfacesUnmoved(repoRoot, evidence.preHeadRaw.trim());
+	} catch (error) {
+		fail(error.message);
+	}
 
 	// Sanitization, the golden-fixture recipe: the session's checkout root
 	// becomes __REPO__ everywhere (structure survives, machine roots do
