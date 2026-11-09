@@ -2,9 +2,10 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { readdir, readFile } from "node:fs/promises";
 import { test } from "node:test";
-import { parse as parseYaml, YAMLParseError } from "yaml";
+import { YAMLParseError } from "yaml";
 import { GATEWAY_ANNOTATIONS } from "./fixtures/gateway/annotations.mjs";
 import { escapeRegExp } from "./helpers/escape-regexp.mjs";
+import { parseFrontmatter } from "./helpers/frontmatter.mjs";
 
 // Seam guard for the shipped skills library (see test/manifest.test.mjs for
 // the same philosophy): if these break, pi loads a skill wrong or the library
@@ -24,12 +25,9 @@ const expected = JSON.parse(
 // failing the suite loudly. That throw is the point
 // of the seam (#22): pi's own failure mode is the silent one — it drops a
 // skill whose frontmatter it cannot parse — so a construct the engine
-// rejects must never reach a shipped SKILL.md.
-function parseFrontmatter(markdown) {
-	const match = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/.exec(markdown);
-	if (!match) throw new Error("SKILL.md has no frontmatter block");
-	return parseYaml(match[1]);
-}
+// rejects must never reach a shipped SKILL.md. The parser itself lives at
+// its shared home, test/helpers/frontmatter.mjs, since the replay net's
+// surface digests became the second caller.
 
 test("invalid frontmatter fails loudly under the real YAML engine", async () => {
 	// The shape-contest hole (#22): a plain scalar with a `: ` sequence was
@@ -506,6 +504,9 @@ const scanSurfaces = [
 	// dogfood.md carries the Attestation leg headword — the auditor's legs
 	// and their registry are its working vocabulary.
 	"docs/agents/dogfood.md",
+	// eval.md carries the replay-net working vocabulary (eval suite, replay
+	// net, eval capture, benchmark suite) since the M6 tracer.
+	"docs/agents/eval.md",
 	// pi-transcript-schema.md carries the Codemode headword's working
 	// vocabulary since the M5 S2 nestedCalls strike.
 	"docs/agents/pi-transcript-schema.md",
