@@ -18,8 +18,10 @@ export const SCENARIOS = Object.freeze([
 		prompt:
 			"Survey the recent literature on off-target effects of CRISPR base editors. Find three primary research papers from 2025 or 2026, each with a DOI, using the scholarly search tooling this environment provides. Before you rely on any instruction or reference file, read it whole in a single call, with a limit larger than its line count -- never an exact-count or fragmented read. Run the search through the command-line helper that tooling ships, and report for each paper the title, first author, journal, year, and DOI, quoting the structured search output you relied on.",
 		// The model-visible surface classes this capture binds — one digest
-		// per class, the digest-scope decision (test/eval/surfaces.mjs).
-		surfaces: ["advertisement", "skill:theta-lit-search", "extensions"],
+		// per class, the digest-scope decision (test/eval/surfaces.mjs):
+		// the advertisement and project context every session carries, the
+		// connector's own tree, and the extension tool declarations.
+		surfaces: ["advertisement", "skill:theta-lit-search", "extensions", "project-context"],
 		// Capture-time expectation: the auditor legs the rig run passes.
 		legs: [
 			"skills/theta-lit-search/SKILL.md",
