@@ -89,14 +89,19 @@ export function ciChecks(output) {
 // ("reviewed the diff") matches nothing, and "unreviewed:" does not match
 // — the literal must start the token. More than one range per line does
 // not parse (one line per round): under-covering fails loudly at the
-// set-difference half, never silently.
+// set-difference half, never silently. Fenced code blocks are stripped
+// first: a body that documents the syntax with real shas is an example,
+// not a disclosure. Hex shas are canonical lowercase in git; the
+// case-insensitive match accepts what a hand writes, and the capture
+// normalizes so resolution against rev-list's lowercase output holds.
 const REVIEWED_LINE =
 	/^[^\S\n]*(?:[-*+]\s+|>\s+)?reviewed:?\s+([0-9a-f]{7,40})(?:\.\.([0-9a-f]{7,40}))?\b/gim;
 
 export function disclosedRanges(prBody) {
-	return [...`${prBody ?? ""}`.matchAll(REVIEWED_LINE)].map((m) => ({
-		base: m[2] === undefined ? null : m[1],
-		head: m[2] === undefined ? m[1] : m[2],
+	const unfenced = `${prBody ?? ""}`.replace(/```[\s\S]*?```/g, "");
+	return [...unfenced.matchAll(REVIEWED_LINE)].map((m) => ({
+		base: m[2] === undefined ? null : m[1].toLowerCase(),
+		head: (m[2] === undefined ? m[1] : m[2]).toLowerCase(),
 	}));
 }
 
@@ -185,7 +190,20 @@ function main(argv) {
 		run("git symbolic-ref --short refs/remotes/origin/HEAD").trim().replace(/^origin\//, "") ||
 		"main"
 	);
-	const prBody = run(`gh pr view --repo ${repo} ${branch} --json body --jq .body`);
+	// One gh call for both PR reads (body, draft state — the review-round
+	// gate below needs the same PR): a second probe could fail transiently
+	// after this one succeeded and misread a live PR as "no PR available".
+	const prJson = run(`gh pr view --repo ${repo} ${branch} --json body,isDraft`);
+	let prBody = "";
+	let isDraft = "";
+	try {
+		const parsed = JSON.parse(prJson);
+		prBody = typeof parsed.body === "string" ? parsed.body : "";
+		isDraft = parsed.isDraft === true ? "true" : parsed.isDraft === false ? "false" : "";
+	} catch {
+		// gh failed or printed nothing: no PR (or no network) — the gates
+		// below read their own hasPr/isDraft and skip with their notes.
+	}
 	const head = run("git rev-parse HEAD").trim();
 	const freshness = evidenceFreshness(prBody, head);
 	if (freshness.verdict === "stale") {
@@ -220,7 +238,6 @@ function main(argv) {
 	// construction. Singles and ranges resolve to full shas against the
 	// branch (prefix match; ranges via rev-list), and a disclosure that
 	// resolves to nothing is a typo, red, not silently empty coverage.
-	const isDraft = run(`gh pr view --repo ${repo} ${branch} --json isDraft --jq .isDraft`).trim();
 	const hasPr = isDraft === "true" || isDraft === "false";
 	if (hasPr && isDraft === "true") {
 		console.log(

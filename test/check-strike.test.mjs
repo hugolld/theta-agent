@@ -125,6 +125,30 @@ test("prose may follow the shas; one range per line", () => {
 	assert.deepEqual(disclosedRanges(body), [{ base: "c053b8d1", head: "dae69881" }]);
 });
 
+test("fenced example lines are not disclosures", () => {
+	// A body that documents the syntax with real shas inside a code fence
+	// is an example, not a round — parsing it would silently over-cover
+	// (the review round caught the fence gap).
+	const body = [
+		"Disclose rounds like this:",
+		"",
+		"```",
+		"reviewed: c053b8d1..dae69881",
+		"```",
+		"",
+		"- reviewed: 903c1fd1",
+	].join("\n");
+	assert.deepEqual(disclosedRanges(body), [{ base: null, head: "903c1fd1" }]);
+});
+
+test("uppercase shas normalize to git's canonical lowercase", () => {
+	// The match is case-insensitive (a hand writes what it writes); the
+	// capture normalizes so resolution against rev-list's lowercase output
+	// holds — an uppercase disclosure must not red as a false typo.
+	const body = "reviewed: C053B8D1..DAE69881";
+	assert.deepEqual(disclosedRanges(body), [{ base: "c053b8d1", head: "dae69881" }]);
+});
+
 test("uncoveredCommits names branch commits no range covers, in branch order", () => {
 	const branch = [R1, R2, R3];
 	assert.deepEqual(uncoveredCommits(branch, [R1, R3]), [R2]);
