@@ -15,11 +15,21 @@
 // at merge time by habit, not by a gate. Pending counts as not green: the
 // gate runs at ready/merge time, where pending means wait.
 //
+// Review coverage (#133 retro): a ready PR's review rounds must cover the
+// branch. The body carries one `reviewed: <base>..<head>` line per round
+// (hex shas, base exclusive; a lone sha names one commit), and any branch
+// commit no disclosed range covers reds the gate. #133 merged a fix range
+// with no review on it and paid a post-merge triage round; the gate moves
+// that catch to ready time. Draft PRs skip with a note — the final pass
+// precedes ready, by construction.
+//
 // Usage: node scripts/check-strike.mjs <spec-issue-number>
 // A childless issue is a maintenance strike: no children to land, and the
-// evidence-freshness and CI-green gates still run (#46 retro).
+// evidence-freshness, review-coverage, and CI-green gates still run
+// (#46 retro).
 // Exit 0 = complete (or only expected exceptions remain); 1 = a child is
-// open with no branch commit, attested evidence is stale, or a PR check is
+// open with no branch commit, attested evidence is stale, a ready PR's
+// review disclosure leaves branch commits uncovered, or a PR check is
 // non-pass; 2 = usage or tracker error.
 import { execSync } from "node:child_process";
 import path from "node:path";
@@ -70,6 +80,31 @@ export function ciChecks(output) {
 		verdict: rows.length === 0 ? "none" : offenders.length === 0 ? "green" : "red",
 		offenders,
 	};
+}
+
+// The pure half of the review-coverage gate: parse the body's review-round
+// disclosures. One line per round — `reviewed: <base>..<head>` (hex shas,
+// base exclusive) or `reviewed: <head>` (a lone sha names one commit).
+// List markers and trailing prose ride along; prose without a hex token
+// ("reviewed the diff") matches nothing, and "unreviewed:" does not match
+// — the literal must start the token. More than one range per line does
+// not parse (one line per round): under-covering fails loudly at the
+// set-difference half, never silently.
+const REVIEWED_LINE =
+	/^[^\S\n]*(?:[-*+]\s+|>\s+)?reviewed:?\s+([0-9a-f]{7,40})(?:\.\.([0-9a-f]{7,40}))?\b/gim;
+
+export function disclosedRanges(prBody) {
+	return [...`${prBody ?? ""}`.matchAll(REVIEWED_LINE)].map((m) => ({
+		base: m[2] === undefined ? null : m[1],
+		head: m[2] === undefined ? m[1] : m[2],
+	}));
+}
+
+// The pure half of the set difference: branch commits no resolved range
+// covers, in branch order (rev-list's newest-first).
+export function uncoveredCommits(branchCommits, covered) {
+	const coveredSet = new Set(covered);
+	return branchCommits.filter((sha) => !coveredSet.has(sha));
 }
 
 function main(argv) {
@@ -177,6 +212,77 @@ function main(argv) {
 		console.log(
 			"\nno PR body available (no PR, empty body, or detached HEAD) — freshness check skipped.",
 		);
+	}
+
+	// Review coverage (#133 retro): at ready time every branch commit must
+	// sit under a disclosed `reviewed: <base>..<head>` range. A draft PR
+	// skips with a note — the final pass discloses before ready, by
+	// construction. Singles and ranges resolve to full shas against the
+	// branch (prefix match; ranges via rev-list), and a disclosure that
+	// resolves to nothing is a typo, red, not silently empty coverage.
+	const isDraft = run(`gh pr view --repo ${repo} ${branch} --json isDraft --jq .isDraft`).trim();
+	const hasPr = isDraft === "true" || isDraft === "false";
+	if (hasPr && isDraft === "true") {
+		console.log(
+			"\nreview coverage: skipped while the PR is draft — the final pass discloses before ready.",
+		);
+	} else if (hasPr) {
+		const branchCommits = run("git rev-list origin/main..HEAD")
+			.split("\n")
+			.map((s) => s.trim())
+			.filter(Boolean);
+		const ranges = disclosedRanges(prBody);
+		const covered = new Set();
+		const unresolved = [];
+		for (const r of ranges) {
+			if (r.base === null) {
+				const full = branchCommits.find((c) => c.startsWith(r.head));
+				if (full) {
+					covered.add(full);
+				} else {
+					unresolved.push(r.head);
+				}
+				continue;
+			}
+			const resolved = run(`git rev-list ${r.head} --not ${r.base}`)
+				.split("\n")
+				.map((s) => s.trim())
+				.filter(Boolean);
+			if (resolved.length === 0) {
+				unresolved.push(`${r.base}..${r.head}`);
+				continue;
+			}
+			for (const c of resolved) covered.add(c);
+		}
+		if (unresolved.length > 0) {
+			console.error(
+				`\nreview coverage: disclosed range(s) ${unresolved.join(", ")} do not resolve on this branch — ` +
+					"fix the disclosure (one line per round: `reviewed: <base>..<head>`).",
+			);
+			return 1;
+		}
+		const uncovered = uncoveredCommits(branchCommits, [...covered]);
+		if (uncovered.length > 0) {
+			const named = run(`git log --no-walk --format='%h %s' ${uncovered.join(" ")}`).trim();
+			console.error(
+				`\nreview coverage: ${uncovered.length} commit(s) not under any disclosed ` +
+					"`reviewed:` range —\n" +
+					`${named}\n` +
+					"disclose each review round in the PR body as `reviewed: <base>..<head>` " +
+					"(hex shas, base exclusive) and rerun.",
+			);
+			return 1;
+		}
+		console.log(
+			`\nreview coverage: every branch commit sits under a disclosed reviewed range (${ranges.length} disclosed).`,
+		);
+	} else if (branch === defaultBranch) {
+		console.log(
+			`\nno PR on the default branch (${branch}) — the coverage gate reads the strike's PR; ` +
+				"run it from the strike worktree.",
+		);
+	} else {
+		console.log("\nreview coverage: no PR available (no PR yet) — skipped.");
 	}
 
 	// CI green: every check the PR reports must pass at this HEAD. gh's exit
