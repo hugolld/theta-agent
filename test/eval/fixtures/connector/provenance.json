@@ -1,13 +1,13 @@
 {
 	"scenario": "connector",
-	"sessionPreHead": "621fd0ec5da68b83c20bddac057a6f878ef1e83f",
-	"landedHead": "7a102a2af3b7551c0edaa0af52be341b0772b4e8",
+	"sessionPreHead": "d3550ff6ea3099f5f99776fddbe4b158d826bf5a",
+	"landedHead": "d3550ff6ea3099f5f99776fddbe4b158d826bf5a",
 	"piVersion": "1.4.0",
 	"nodeVersion": "v22.23.4",
 	"surfaces": {
 		"advertisement": "68bc19e716f8a6aa44b92e7f27995fc82b614e3b4e43c1bb78b24d6711493234",
 		"skill:theta-lit-search": "b73e465aee812ab2981751739bd5cf60aad0d3d7eedd74b21620499fc420b3b5",
 		"extensions": "3b5142c834efd80d698daac69f8046ede8401bfc10afcef4ba7c91aaddada4ff",
-		"project-context": "75ee777b26c8f0f0c1f8478935e1fa4fd22bc62a22e6f75260bb67dcbb609ac3"
+		"project-context": "3d4dc4760a46a75f2a33362a8f0930731c41bdd5077307b4a1a25db5558b66a9"
 	}
 }
