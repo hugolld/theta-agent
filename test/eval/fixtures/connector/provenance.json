@@ -1,6 +1,7 @@
 {
 	"scenario": "connector",
-	"capturedHead": "d96685bf20dd280ea06e617563514e8afa312ac7",
+	"sessionPreHead": "621fd0ec5da68b83c20bddac057a6f878ef1e83f",
+	"landedHead": "7a102a2af3b7551c0edaa0af52be341b0772b4e8",
 	"piVersion": "1.4.0",
 	"nodeVersion": "v22.23.4",
 	"surfaces": {
