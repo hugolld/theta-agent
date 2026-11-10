@@ -19,7 +19,8 @@
 //     key must be absent — the operator reviews payload redaction before
 //     the per-capture sign-off the PR body records), then write the
 //     fixture, its provenance manifest (one digest per model-visible
-//     surface class, computed against the capture's tree), and the
+//     surface class, computed against the landing tree the guard proves
+//     identical to the capture's on every surface path), and the
 //     committed snapshot.
 //
 // The land step refuses evidence whose capture-bound surfaces moved: the
@@ -32,7 +33,7 @@
 // an ignored __pycache__ under a skill tree rides a tree digest exactly
 // like an edit would). Throws; the CLI maps the message to its refusal.
 export function assertSurfacesUnmoved(treeRoot, preHead) {
-	const surfacePaths = ["skills", "extensions", "CLAUDE.md"];
+	const surfacePaths = surfaceProbePaths();
 	const committed = run("git", ["-C", treeRoot, "diff", "--name-only", preHead, "HEAD", "--", ...surfacePaths]);
 	// core.ignorecase (macOS default true) hides case-only renames from
 	// status under a pathspec; the digests walk readdirSync names, so the
@@ -71,9 +72,10 @@ import { parseSessionEntries } from "@earendil-works/pi-coding-agent";
 import { run } from "../../scripts/dogfood-gates.mjs";
 import { readSessionEvidence } from "../../scripts/session-evidence.mjs";
 import { REPO_ROOT as repoRoot } from "../helpers/repo-root.mjs";
+import { machinePathPrefixes } from "../helpers/machine-paths.mjs";
 import { normalizeTree } from "./normalize.mjs";
 import { SCENARIOS } from "./scenarios.mjs";
-import { surfaceDigest } from "./surfaces.mjs";
+import { surfaceDigest, surfaceProbePaths } from "./surfaces.mjs";
 
 function fail(message) {
 	console.error(`eval-capture: ${message}`);
@@ -112,11 +114,12 @@ function runRig(scenario) {
 	console.log(`eval-capture: land it with: node test/eval/capture.mjs land ${scenario.id} ${evidenceDir}`);
 }
 
-// The credential guard: every string the provider's config entry carries
-// (URLs excepted) must be absent from the sanitized transcript. The
-// values are never printed — only the field name that leaked. Connector
-// scripts redact their own outputs (ADR 0002); this is the net's belt
-// under that suspenders, checked once per capture.
+// The credential guard: every string every provider's config entry carries
+// (URLs excepted) must be absent from the sanitized transcript — whichever
+// provider the session ran on. The values are never printed — only the
+// provider and field name that leaked. Connector scripts redact their own
+// outputs (ADR 0002); this is the net's belt under that suspenders,
+// checked once per capture.
 function assertNoProviderKey(text) {
 	let config;
 	try {
@@ -124,14 +127,17 @@ function assertNoProviderKey(text) {
 	} catch {
 		fail("cannot read ~/.pi/agent/models.json — the credential guard refuses to run blind");
 	}
-	const entry = config?.providers?.["zai-coding-cn"];
-	if (entry === null || typeof entry !== "object") {
-		fail("no zai-coding-cn provider entry — the credential guard has nothing to check");
+	const providers = Object.entries(config?.providers ?? {});
+	if (providers.length === 0) {
+		fail("no provider entries in ~/.pi/agent/models.json — the credential guard has nothing to check");
 	}
-	for (const [field, value] of Object.entries(entry)) {
-		if (typeof value !== "string" || /^https?:\/\//.test(value) || value.length < 8) continue;
-		if (text.includes(value)) {
-			fail(`the sanitized transcript contains the provider entry's ${field} value — the capture leaked a credential`);
+	for (const [provider, entry] of providers) {
+		if (entry === null || typeof entry !== "object") continue;
+		for (const [field, value] of Object.entries(entry)) {
+			if (typeof value !== "string" || /^https?:\/\//.test(value) || value.length < 8) continue;
+			if (text.includes(value)) {
+				fail(`the sanitized transcript contains provider ${provider}'s ${field} value — the capture leaked a credential`);
+			}
 		}
 	}
 }
@@ -164,7 +170,7 @@ function land(scenario, evidenceDir) {
 	}
 	const sanitized = evidence.transcriptText.replaceAll(session.cwd, "__REPO__");
 	assertNoProviderKey(sanitized);
-	for (const machine of [homedir(), "/Users/"]) {
+	for (const machine of machinePathPrefixes()) {
 		if (sanitized.includes(machine)) {
 			fail(`the sanitized transcript still contains a host machine path (${machine.slice(0, 8)}…) — sanitize before committing`);
 		}
@@ -182,7 +188,11 @@ function land(scenario, evidenceDir) {
 		`${JSON.stringify(
 			{
 				scenario: scenario.id,
-				capturedHead: head,
+				// The binding pair: the capture session's anchor, and the
+				// tree the digests were computed against — the guard above
+				// proves the surfaces identical between the two.
+				sessionPreHead: evidence.preHeadRaw.trim(),
+				landedHead: head,
 				piVersion: evidence.piVersionRaw.trim(),
 				nodeVersion: evidence.nodeVersionRaw.trim(),
 				surfaces,

@@ -48,6 +48,7 @@ import {
 } from "../scripts/session-evidence.mjs";
 import { escapeRegExp } from "./helpers/escape-regexp.mjs";
 import { initHardenedGitRepo } from "./helpers/git-repo.mjs";
+import { MACHINE_PATH_PREFIXES } from "./helpers/machine-paths.mjs";
 
 test("ge enforces the pi and node version floors", () => {
 	assert.equal(ge("1.4.2", "1.4"), true);
@@ -187,7 +188,7 @@ function initFixtureRepo(repo, expectedSkills) {
 	const run = (cmd) => execSync(cmd, { cwd: repo }).toString();
 	initHardenedGitRepo(repo);
 	run("git add -A");
-	run("git -c commit.gpgsign=false commit -qm init");
+	run("git commit -qm init");
 	// Canonical from birth: mount aliases (/var vs /private/var on macOS)
 	// must not leak lexical paths into containment comparisons.
 	return fs.realpathSync(repo);
@@ -225,13 +226,25 @@ const repoHead = (repo) =>
 	execSync("git rev-parse HEAD", { cwd: repo }).toString().trim();
 
 // Golden fixture bytes must never carry machine-specific absolute paths —
-// one guard wherever a fixture enters the tree (the same shape appeared
-// twice before it got this home).
+// one guard wherever a fixture enters the tree, sourced from the shared
+// machine-path vocabulary (test/helpers/machine-paths.mjs), where the eval
+// capture's sanitizer is the second caller of the shape.
+const machinePathPattern = new RegExp(MACHINE_PATH_PREFIXES.map(escapeRegExp).join("|"));
 function assertNoMachinePaths(text) {
-	if (/\/Users\/|\/opt\/homebrew/.test(text)) {
+	if (machinePathPattern.test(text)) {
 		throw new Error("golden fixture contains machine-specific absolute paths");
 	}
 }
+
+test("the machine-path guard refuses every prefix in the shared vocabulary", () => {
+	for (const prefix of MACHINE_PATH_PREFIXES) {
+		assert.throws(
+			() => assertNoMachinePaths(`read ${prefix}someone/skills/a/SKILL.md`),
+			/machine-specific absolute paths/,
+		);
+	}
+	assert.doesNotThrow(() => assertNoMachinePaths("__REPO__/skills/a/SKILL.md"));
+});
 
 // The binding pair: evidence binds to a tree at write time, and the audit
 // refuses when either moved afterwards. `preHead` overrides the recorded
@@ -1160,7 +1173,7 @@ test("auditSession flags a checkout skill symlinked outside the repo", (t) => {
 	// a real checkout would have the committed symlink; commit so the
 	// clean-tree gate passes and the canonicalization checks are exercised
 	execSync("git add -A", { cwd: repo });
-	execSync("git -c commit.gpgsign=false commit -qm rogue", { cwd: repo });
+	execSync("git commit -qm rogue", { cwd: repo });
 	const dir = buildSession(t, repo, { advertisedNames: ["literature-review", "rogue"] });
 	assert.throws(
 		() => auditIn(repo, () => auditSession(dir, repo)),
@@ -2525,7 +2538,7 @@ function addNotebookSkill(repo) {
 	);
 	fs.writeFileSync(path.join(repo, ".gitignore"), ".theta/\n");
 	execSync("git add -A", { cwd: repo });
-	execSync("git -c commit.gpgsign=false commit -qm notebook", { cwd: repo });
+	execSync("git commit -qm notebook", { cwd: repo });
 	return repo;
 }
 

@@ -23,8 +23,3 @@ export function initHardenedGitRepo(dir) {
 	for (const [key, value] of HARDENED_CONFIG) git(["config", key, value]);
 	return dir;
 }
-
-// The -c overrides for later commits in an already-initialized repo
-// (gpgsign is the one setting that can leak from global config into a
-// plain `git commit`).
-export const COMMIT_SIGNOFF_OVERRIDE = ["-c", "commit.gpgsign=false"];

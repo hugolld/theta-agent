@@ -11,7 +11,13 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { REPO_ROOT as repoRoot } from "../helpers/repo-root.mjs";
-import { advertisementBytes, fileTreeDigest, SURFACE_CLASSES, surfaceDigest } from "./surfaces.mjs";
+import {
+	advertisementBytes,
+	fileTreeDigest,
+	SURFACE_CLASSES,
+	surfaceDigest,
+	surfaceProbePaths,
+} from "./surfaces.mjs";
 
 test("the surface registry is exactly the decided digest scope: one digest per model-visible surface class", () => {
 	assert.deepEqual(Object.keys(SURFACE_CLASSES), [
@@ -20,6 +26,14 @@ test("the surface registry is exactly the decided digest scope: one digest per m
 		"extensions",
 		"project-context",
 	]);
+});
+
+test("the land guard's probe paths derive from the registry — every class resolves a root", () => {
+	// The digests are computed at land time against the landing tree, so the
+	// probe set is the capture binding: it must cover every registry class's
+	// root. A class added without a root reds here (surfaceProbePaths
+	// refuses), not as a silently unprobed path at the next capture.
+	assert.deepEqual(surfaceProbePaths(), ["CLAUDE.md", "extensions", "skills"]);
 });
 
 test("an unknown surface class refuses loudly", () => {

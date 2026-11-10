@@ -42,6 +42,21 @@ test("every scenario in the checked-in list has a committed fixture", () => {
 	);
 });
 
+test("scenario shape paths are auditor legs the capture attested", () => {
+	// The net-time shape expectations carry the same paths as the
+	// capture-time auditor legs; this pin keeps a path edit from moving one
+	// list without the other. advertisesSkill is a name, not a path, and
+	// stays out.
+	for (const scenario of SCENARIOS) {
+		for (const shapePath of [scenario.shape.opensSkill, scenario.shape.runsScript]) {
+			assert.ok(
+				scenario.legs.includes(shapePath),
+				`${scenario.id}: shape path ${shapePath} is not one of its auditor legs`,
+			);
+		}
+	}
+});
+
 // Index a session's tool calls and results once for the shape checks: the
 // call map is keyed by tool-call id, the result map by the toolCallId the
 // result record carries — the pairing the shape assertions lean on.

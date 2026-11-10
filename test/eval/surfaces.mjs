@@ -35,6 +35,7 @@ import { createHash } from "node:crypto";
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { parseFrontmatter } from "../helpers/frontmatter.mjs";
+import { sortedTreeFiles } from "../helpers/tree-walk.mjs";
 
 export const SURFACE_CLASSES = Object.freeze({
 	advertisement:
@@ -45,6 +46,29 @@ export const SURFACE_CLASSES = Object.freeze({
 		"the project-instruction bytes pi loads into the system prompt — CLAUDE.md at the repo root",
 });
 
+// The root pathspec each class's bytes live under. The land guard's probe
+// set is the union over this table, so a class added to the registry widens
+// the probe automatically, and a registry key without a root refuses here
+// instead of escaping the guard (the digests are computed at land time
+// against the landing tree — the probe is what binds them to the capture).
+const SURFACE_ROOTS = Object.freeze({
+	advertisement: "skills",
+	skill: "skills",
+	extensions: "extensions",
+	"project-context": "CLAUDE.md",
+});
+
+export function surfaceProbePaths() {
+	const roots = Object.keys(SURFACE_CLASSES).map((surfaceClass) => {
+		const root = SURFACE_ROOTS[surfaceClass];
+		if (root === undefined) {
+			throw new Error(`surface class has no probe root: ${surfaceClass}`);
+		}
+		return root;
+	});
+	return [...new Set(roots)].sort();
+}
+
 function sha256Bytes(bytes) {
 	return createHash("sha256").update(bytes).digest("hex");
 }
@@ -53,21 +77,10 @@ function sha256Bytes(bytes) {
 // `path\0sha256\n` line per file — file bytes hashed, never embedded, so
 // the digest is machine-independent and a moved or renamed file is a
 // change. An empty tree refuses: a surface class that resolves to nothing
-// is a typo in the class, not a digest.
+// is a typo in the class, not a digest. The sorted walk is the shared
+// helper's (test/helpers/tree-walk.mjs).
 export function fileTreeDigest(rootAbs) {
-	const files = [];
-	const walk = (dir, prefix) => {
-		for (const entry of readdirSync(dir, { withFileTypes: true }).sort((a, b) =>
-			a.name < b.name ? -1 : 1,
-		)) {
-			if (entry.isDirectory()) {
-				walk(path.join(dir, entry.name), `${prefix}${entry.name}/`);
-			} else {
-				files.push(`${prefix}${entry.name}`);
-			}
-		}
-	};
-	walk(rootAbs, "");
+	const files = sortedTreeFiles(rootAbs);
 	if (files.length === 0) throw new Error(`surface tree is empty: ${rootAbs}`);
 	const canonical = files
 		.map((rel) => `${rel}\0${sha256Bytes(readFileSync(path.join(rootAbs, rel)))}\n`)
