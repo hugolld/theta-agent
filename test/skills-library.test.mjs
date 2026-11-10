@@ -1,10 +1,14 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { readdir, readFile } from "node:fs/promises";
 import { test } from "node:test";
-import { parse as parseYaml, YAMLParseError } from "yaml";
+import { fileURLToPath } from "node:url";
+import { YAMLParseError } from "yaml";
 import { GATEWAY_ANNOTATIONS } from "./fixtures/gateway/annotations.mjs";
 import { escapeRegExp } from "./helpers/escape-regexp.mjs";
+import { parseFrontmatter } from "./helpers/frontmatter.mjs";
+import { sortedTreeFiles } from "./helpers/tree-walk.mjs";
 
 // Seam guard for the shipped skills library (see test/manifest.test.mjs for
 // the same philosophy): if these break, pi loads a skill wrong or the library
@@ -24,12 +28,9 @@ const expected = JSON.parse(
 // failing the suite loudly. That throw is the point
 // of the seam (#22): pi's own failure mode is the silent one — it drops a
 // skill whose frontmatter it cannot parse — so a construct the engine
-// rejects must never reach a shipped SKILL.md.
-function parseFrontmatter(markdown) {
-	const match = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/.exec(markdown);
-	if (!match) throw new Error("SKILL.md has no frontmatter block");
-	return parseYaml(match[1]);
-}
+// rejects must never reach a shipped SKILL.md. The parser itself lives at
+// its shared home, test/helpers/frontmatter.mjs, since the replay net's
+// surface digests became the second caller.
 
 test("invalid frontmatter fails loudly under the real YAML engine", async () => {
 	// The shape-contest hole (#22): a plain scalar with a `: ` sequence was
@@ -96,23 +97,29 @@ test("every skill carries a parseable SKILL.md with a valid name and description
 
 // Digest of a whole skill directory: sha256 over the sorted manifest of
 // "relative-path file-digest" lines, recursing into subdirectories. Any byte
-// change anywhere in a vendored tree moves this value.
-async function treeDigest(dirUrl) {
-	const entries = (await readdir(dirUrl, { withFileTypes: true })).sort((a, b) =>
-		a.name < b.name ? -1 : 1,
-	);
-	const manifest = [];
-	for (const entry of entries) {
-		if (entry.isDirectory()) {
-			manifest.push(`${entry.name}/ ${await treeDigest(new URL(`${entry.name}/`, dirUrl))}`);
-		} else {
-			const fileDigest = createHash("sha256")
-				.update(await readFile(new URL(entry.name, dirUrl)))
-				.digest("hex");
-			manifest.push(`${entry.name} ${fileDigest}`);
+// change anywhere in a vendored tree moves this value. Built on the shared
+// sorted walk (test/helpers/tree-walk.mjs): the flat file list regroups
+// into the same nested per-directory manifests, values unchanged.
+function treeDigest(dirUrl) {
+	const files = sortedTreeFiles(fileURLToPath(dirUrl));
+	const digestOf = (prefix) => {
+		// Children of `prefix`, name-sorted with files and directories
+		// interleaved — the order the shared walk guarantees.
+		const children = new Map();
+		for (const rel of files) {
+			if (!rel.startsWith(prefix)) continue;
+			const rest = rel.slice(prefix.length);
+			const slash = rest.indexOf("/");
+			children.set(rest.slice(0, slash === -1 ? rest.length : slash), slash === -1);
 		}
-	}
-	return createHash("sha256").update(manifest.join("\n")).digest("hex");
+		const manifest = [...children.keys()].sort((a, b) => (a < b ? -1 : 1)).map((name) =>
+			children.get(name)
+				? `${name} ${createHash("sha256").update(readFileSync(new URL(`${prefix}${name}`, dirUrl))).digest("hex")}`
+				: `${name}/ ${digestOf(`${prefix}${name}/`)}`,
+		);
+		return createHash("sha256").update(manifest.join("\n")).digest("hex");
+	};
+	return digestOf("");
 }
 
 test("vendored skills carry full provenance and are hash-pinned", async () => {
@@ -135,7 +142,7 @@ test("vendored skills carry full provenance and are hash-pinned", async () => {
 		// Content pin over the whole tree (SKILL.md, references, scripts,
 		// assets): any edit fails CI; a re-sync updates the pin with the
 		// provenance header.
-		const digest = await treeDigest(new URL(`${skill.name}/`, skillsRoot));
+		const digest = treeDigest(new URL(`${skill.name}/`, skillsRoot));
 		assert.match(
 			skill["tree-sha256"],
 			/^[0-9a-f]{64}$/,
@@ -506,6 +513,9 @@ const scanSurfaces = [
 	// dogfood.md carries the Attestation leg headword — the auditor's legs
 	// and their registry are its working vocabulary.
 	"docs/agents/dogfood.md",
+	// eval.md carries the replay-net working vocabulary (eval suite, replay
+	// net, eval capture, benchmark suite) since the M6 tracer.
+	"docs/agents/eval.md",
 	// pi-transcript-schema.md carries the Codemode headword's working
 	// vocabulary since the M5 S2 nestedCalls strike.
 	"docs/agents/pi-transcript-schema.md",
