@@ -12,6 +12,8 @@ Every fixture under `test/eval/fixtures/<scenario-id>/` is a sanitized pi sessio
 
 A fourth check rides along: the scenario's expected shape (`test/eval/scenarios.mjs`), asserted structurally against the recording — the skill was advertised, its SKILL.md opened with a paired non-error result, the connector helper ran, the session ended in final assistant text. The capture-time half of that expectation is the auditor legs the rig run passes live.
 
+A pin asserts the contract — the refusal, the red — never one platform's rendering of it: dev runs macOS, CI runs Linux, and git's defaults differ (`core.ignorecase` hides a case-only rename from a pathspec status under macOS's default and not under Linux's). The #133 strike paid one CI round-trip for a pin that asserted the macOS blindness beside the refusal; the refusal alone is the pin, and the blindness is the comment that explains when the override is doing the work.
+
 ## The digest-scope decision
 
 One digest per model-visible surface class. The classes live in `test/eval/surfaces.mjs` and are pinned by test:
@@ -40,6 +42,10 @@ npm test                                           # the net must be green befor
 ```
 
 The rig leg drives `test/rig/run.mjs` with the scenario's own prompt and legs, so the capture is deliberate, prompt for prompt; the auditor attests the live session (skill opened, script executed). The land step sanitizes by the golden-fixture recipe — the session's checkout root becomes `__REPO__` (structure survives, machine roots do not), host machine paths (the shared prefix vocabulary in `test/helpers/machine-paths.mjs`, plus the operator's live home) and every provider entry's credential bytes must be absent (both guarded mechanically) — then writes the fixture, the provenance manifest, and the regenerated snapshot. The manifest anchors both ends of the binding: `sessionPreHead` is the capture session's HEAD, `landedHead` the tree the digests were computed against — the guard proves the surfaces identical between the two.
+
+Ordering: the scenario list and machinery commit first; the capture runs against that clean tree; the fixture, its presence pin, and its snapshot land in one later commit. The presence pin is red until its fixture exists, and the pre-commit hook tests the working tree — a pin authored early keeps every commit refused, so the pin ships with the fixture it enforces. The PR opens at the fixture's commit, and the body discloses the bend from draft-on-first-commit.
+
+Recapturing after a surface edit: a change to a capture-bound surface reds the landed fixture's provenance pin, and the red closes a topological cycle — the pre-commit hook tests the working tree, so no commit passes while the pin is red; the rig gates on a clean committed tree and the container clones committed HEAD, so a capture never sees uncommitted surface bytes. The seam is one hook-bypassed commit — `git commit --no-verify`, the surface edit alone — disclosed in the landing PR body; the capture runs against that commit, and the next commit carries the re-landed fixture and snapshot with the hook green again. The branch pushes once, after that commit: CI never sees the red intermediate.
 
 Payload redaction beyond paths is a per-capture judgment: the operator reads the sanitized transcript before it enters the public repo (bibliographic payloads from public APIs have shipped verbatim; node lists and job names would be redacted as `__HOST_*__` placeholders, the dogfood golden-fixture recipe). Every capture carries the owner's per-capture sign-off, recorded in the landing PR body — GitHub keeps body edit history, so a scrub-after is not undo.
 

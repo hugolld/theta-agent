@@ -17,4 +17,10 @@ npm run lint:py --silent
 out=$(npm test --silent)
 status=$?
 printf '%s\n' "$out" | tail -n 12
+if [ "$status" -ne 0 ]; then
+	# The hook runs the suite against the working tree, not the staged index
+	# (the #133 retro): a partially-staged commit refused and the cause was
+	# re-derived from scratch. Name it where the failure lands.
+	echo "pre-commit: the hook tests the working tree, not the staged index — an unstaged red file refuses a commit whose staged content is green" >&2
+fi
 exit $status

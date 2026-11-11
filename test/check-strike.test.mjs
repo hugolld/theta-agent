@@ -2,10 +2,16 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 // Unit tests for the pure halves of scripts/check-strike.mjs (the evidence-
-// freshness gate, #27, and the CI-green gate, #41 retro). The gh/git
-// orchestration around them stays untested — same seam split as
-// audit-dogfood.mjs.
-import { ciChecks, declaredParent, evidenceFreshness } from "../scripts/check-strike.mjs";
+// freshness gate, #27, the CI-green gate, #41 retro, and the review-
+// coverage gate, #133 retro). The gh/git orchestration around them stays
+// untested — same seam split as audit-dogfood.mjs.
+import {
+	ciChecks,
+	declaredParent,
+	disclosedRanges,
+	evidenceFreshness,
+	uncoveredCommits,
+} from "../scripts/check-strike.mjs";
 
 const HEAD = "ac77fef6a3f0764f9c07346c8654e1eca275184f";
 const STALE = "243bd05f4b9c5e404c5e0259b8b9f94f1edd37c9";
@@ -86,4 +92,66 @@ test("a bare mention is not a parent claim — the #61 ready-gate false positive
 	// an unlanded child.
 	const body = ["## Parent", "", "#49", "", "- #51 (S1 — tracer skeleton)"].join("\n");
 	assert.equal(declaredParent(body), "#49");
+});
+
+const R1 = "c053b8d1234567890abcdef1234567890abcdef1";
+const R2 = "dae6988123456789abcdef1234567890abcdef12";
+const R3 = "903c1fd1234567890abcdef1234567890abcdef1";
+
+test("a reviewed line parses as a range; list markers and prose ride along", () => {
+	const body = [
+		"## Disclosures",
+		"",
+		"- Reviewed: c053b8d1..dae69881 (delta round)",
+		"  - reviewed: 903c1fd1",
+	].join("\n");
+	assert.deepEqual(disclosedRanges(body), [
+		{ base: "c053b8d1", head: "dae69881" },
+		{ base: null, head: "903c1fd1" },
+	]);
+});
+
+test("prose without a hex token and negated spellings match nothing", () => {
+	// "reviewed the diff" carries no sha; "unreviewed:" must not match —
+	// the literal must start the token after the optional marker.
+	assert.deepEqual(disclosedRanges("reviewed the whole diff today"), []);
+	assert.deepEqual(disclosedRanges("- unreviewed: c053b8d1..dae69881"), []);
+	assert.deepEqual(disclosedRanges("the capture at c053b8d1 is fresh"), []);
+	assert.deepEqual(disclosedRanges(undefined), []);
+});
+
+test("prose may follow the shas; one range per line", () => {
+	const body = "reviewed: c053b8d1..dae69881 — the delta round over the guard fixes\n";
+	assert.deepEqual(disclosedRanges(body), [{ base: "c053b8d1", head: "dae69881" }]);
+});
+
+test("fenced example lines are not disclosures", () => {
+	// A body that documents the syntax with real shas inside a code fence
+	// is an example, not a round — parsing it would silently over-cover
+	// (the review round caught the fence gap).
+	const body = [
+		"Disclose rounds like this:",
+		"",
+		"```",
+		"reviewed: c053b8d1..dae69881",
+		"```",
+		"",
+		"- reviewed: 903c1fd1",
+	].join("\n");
+	assert.deepEqual(disclosedRanges(body), [{ base: null, head: "903c1fd1" }]);
+});
+
+test("uppercase shas normalize to git's canonical lowercase", () => {
+	// The match is case-insensitive (a hand writes what it writes); the
+	// capture normalizes so resolution against rev-list's lowercase output
+	// holds — an uppercase disclosure must not red as a false typo.
+	const body = "reviewed: C053B8D1..DAE69881";
+	assert.deepEqual(disclosedRanges(body), [{ base: "c053b8d1", head: "dae69881" }]);
+});
+
+test("uncoveredCommits names branch commits no range covers, in branch order", () => {
+	const branch = [R1, R2, R3];
+	assert.deepEqual(uncoveredCommits(branch, [R1, R3]), [R2]);
+	assert.deepEqual(uncoveredCommits(branch, []), branch);
+	assert.deepEqual(uncoveredCommits(branch, [R1, R2, R3, "fffaaa111"]), []);
 });
