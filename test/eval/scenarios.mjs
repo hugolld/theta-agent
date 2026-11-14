@@ -34,8 +34,10 @@
 // The read-headroom phrasing every prompt carries verbatim (the doctrine
 // above): one home, interpolated into each prompt — the strings stay
 // deliberate, prompt for prompt, and the sentence cannot drift apart
-// across scenarios.
-const READ_HEADROOM =
+// across scenarios. The benchmark task list (test/eval/bench-tasks.mjs)
+// interpolates the same sentence, so a capture prompt and a benchmark
+// prompt share one steering vocabulary.
+export const READ_HEADROOM =
 	"Before you rely on any instruction or reference file, read it whole in a single call, with a limit larger than its line count -- never an exact-count or fragmented read.";
 
 export const SCENARIOS = Object.freeze([

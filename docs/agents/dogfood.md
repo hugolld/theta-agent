@@ -47,6 +47,8 @@ node test/rig/run.mjs build
 node test/rig/run.mjs run "<prompt>"
 ```
 
+The runner's third mode, `eval <task-id>` (M6 S2), is the benchmark layer's leg — graded tasks, not dogfood captures — and carries only the provider key; its doctrine lives in `docs/agents/eval.md`.
+
 Spot-check leg arguments ride `--leg`, repeatable, one per auditor leg slot in its order (skill, script, notebook) — `-` skips a slot, so a script-plus-notebook capture runs the skill leg as `-`:
 
 ```sh

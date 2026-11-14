@@ -5,6 +5,7 @@
 //
 //   node test/rig/run.mjs build                     build the rig image
 //   node test/rig/run.mjs run "prompt text"         one-shot dogfood + audit
+//   node test/rig/run.mjs eval <task-id>            one benchmark task, graded
 //   node test/rig/run.mjs shell                     interactive bash in a rig
 //
 // `run` reproduces the one-shot recipe from docs/agents/dogfood.md inside
@@ -22,6 +23,17 @@
 // before the session launches. `--rpc` runs the confirm-answering driver
 // (test/rig/rpc-driver.mjs) instead of `--print`, so a gated submit can
 // cross the submit gate in a headless run.
+//
+// `eval` is the benchmark layer's mode (spec #135, ADR 0007): one task
+// from the checked-in list (test/eval/bench-tasks.mjs) runs end-to-end
+// and grades from one command. It refuses `--gateway` and `--rpc` — no
+// gateway token path exists on a benchmark leg; the provider key is the
+// only credential that enters. The session runs print-mode in a fresh
+// task workspace (`$HOME/task`), so exit codes carry truncation
+// failures the way the dogfood leg's do; the objective grader runs
+// in-container against the workspace (workspace-as-oracle), and the
+// report step runs host-side — the classify() judge's credential lives
+// on the host and never enters the rig. Compaction stays native.
 
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -29,6 +41,8 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { gitStatus, manifestSha256, run as spawnRun } from "../../scripts/dogfood-gates.mjs";
 import { SESSION_FILES } from "../../scripts/session-evidence.mjs";
+import { benchTaskById } from "../eval/bench-tasks.mjs";
+import { BENCH_FILES, buildReport, resolveJudge, runJudge, sumSessionUsage } from "../eval/bench-report.mjs";
 
 const rigDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(rigDir, "../..");
@@ -293,15 +307,209 @@ function audit(legs) {
 	console.log(attestation);
 }
 
+// A benchmark leg refuses both rig extensions a dogfood leg can carry:
+// no gateway token path exists on a benchmark leg (spec #135), and the
+// RPC driver exists only to answer the submit gate — which never runs
+// here. Throws (the CLI maps the message to its refusal), so the
+// offline test can pin it without exiting the runner. Pinned by
+// bench-rig.test.mjs.
+export function assertBenchmarkFlags(flags) {
+	if (flags.gateway) throw new Error("--gateway is a dogfood-leg flag — a benchmark leg carries only the provider key");
+	if (flags.rpc) throw new Error("--rpc is a dogfood-leg flag — no confirm is ever asked on a benchmark leg");
+}
+
+// The shared leg machinery (one home, the shared-helper rule — the
+// `run` and `eval` paths are the two callers, never a copy): the
+// evidence dir's default home, the process-fact bundle every leg
+// writes before the container starts, the runtime version record, and
+// the session exit-status contract (read the file pi's wrapper wrote,
+// mark the watchdog sentinel on 124, refuse on any other non-zero —
+// stdout belongs to the model's reply, so the status lands as a file).
+function defaultEvidenceDir(prefix) {
+	return path.join(process.env.HOME, ".theta-evidence", `${prefix}-${Date.now()}`);
+}
+
+function writeEvidenceBasics({ expectedModel, prompts }) {
+	mkdirSync(sessionDir, { recursive: true });
+	writeFileSync(path.join(sessionDir, SESSION_FILES.preHead), headSha);
+	writeFileSync(path.join(sessionDir, SESSION_FILES.expectedModel), `${expectedModel}\n`);
+	writeFileSync(path.join(sessionDir, SESSION_FILES.manifestSha), manifestSha256(repoRoot));
+	prompts.forEach((prompt, index) => {
+		writeFileSync(path.join(sessionDir, suffixed(SESSION_FILES.prompt, index)), prompt);
+	});
+}
+
+function recordRuntimeVersions() {
+	execIn(`pi --version > /session/${SESSION_FILES.piVersion} && node --version > /session/${SESSION_FILES.nodeVersion}`);
+}
+
+function finishSession(exitFile, label) {
+	const exitStatus = Number.parseInt(readFileSync(path.join(sessionDir, exitFile), "utf8").trim(), 10);
+	if (!Number.isInteger(exitStatus)) fail(`cannot read the session exit-status file (${exitFile})`);
+	if (exitStatus === 124) writeFileSync(path.join(sessionDir, SESSION_FILES.watchdog), "fired\n");
+	if (exitStatus !== 0) fail(`${label} exited ${exitStatus} — evidence in ${sessionDir}`);
+}
+
+// The multi-session artifact-name rule (one home, the shared-helper
+// rule): session 1 keeps the plain name the evidence bundle owns;
+// sessions after it insert `-N` before the extension when there is one
+// (answer-2.txt), and append at the end when there is not
+// (exit-status-2) — so the family stays greppable by name.
+export function suffixed(name, index) {
+	if (index === 0) return name;
+	const suffix = `-${index + 1}`;
+	return /\.(?!.*\.)/.test(name) ? name.replace(/(\.[^.]*)$/, `${suffix}$1`) : `${name}${suffix}`;
+}
+
+// One benchmark session's command (spec #135), the pure builder the
+// offline test pins: cwd is the task workspace (`$HOME/task`), the
+// launcher rides the clone's own path WITHOUT `--dev` — the launcher
+// loads its own package root as the -e source, which is the clone, and
+// `--dev` would refuse because the workspace cwd is not the checkout —
+// and the prompt rides RIG_PROMPT, never argv. Sessions after the
+// first resume with `--continue` (resume-keeps-tools; the tracer task
+// is single-session). Print mode keeps its truncation contract: the
+// exit-status file records what pi exited, stdout belongs to the
+// model's reply (nothing glues onto it — it lands as answer.txt).
+export function evalSessionCommand({ index, timeout, provider, model }) {
+	return (
+		`cd "$HOME/task" && timeout --signal=TERM --kill-after=15 ${timeout} ` +
+		`node "$HOME/theta/bin/theta.mjs" --provider ${provider} --model ${model} ` +
+		`--session-dir /session${index > 0 ? " --continue" : ""} --print "$RIG_PROMPT" ` +
+		`< /dev/null > /session/${suffixed(BENCH_FILES.answer, index)} ` +
+		`2> /session/${suffixed(SESSION_FILES.stderr, index)}` +
+		`; echo $? > /session/${suffixed(SESSION_FILES.exitStatus, index)}`
+	);
+}
+
+// The in-container objective grading step: the grader runs from the
+// clone (committed at the pinned HEAD, no node_modules needed — it is
+// pure node:fs by design) against the task workspace, and its
+// machine-readable result lands as a file beside the evidence.
+export function evalGradeCommand(taskId) {
+	return `cd "$HOME/theta" && node test/eval/bench-grade.mjs ${taskId} "$HOME/task" /session/${BENCH_FILES.grades}`;
+}
+
+// The benchmark leg itself. One command, end to end: judge preflight
+// host-side (fail before anything disposable is spent — the judge's
+// credential lives on the host and never enters the rig), the session
+// legs in the container, in-container grading, then the host-side
+// report (classify() judge, UsageEntry totals) beside the recorded
+// exit status. A failing task grade is a successful measurement: the
+// leg exits non-zero only when the leg failed — session exit, judge
+// error, missing report — never because the model measured poorly.
+async function runEval(taskId, flags) {
+	const task = benchTaskById(taskId);
+	for (const prompt of task.sessions) {
+		if (/[^\x00-\x7F]/.test(prompt)) fail("benchmark task prompts must be pure ASCII");
+	}
+
+	// Host-side judge preflight, before Docker or a clone is spent.
+	const { ModelRuntime, ModelRegistry } = await import("@earendil-works/pi-coding-agent");
+	const registry = new ModelRegistry(await ModelRuntime.create());
+	const judgeModel = resolveJudge(registry, task.judge);
+
+	waitForDaemon();
+	let status;
+	try {
+		status = gitStatus(repoRoot);
+	} catch (error) {
+		fail(`cannot read git status: ${error.message}`);
+	}
+	if (status) fail("working tree dirty — commit first");
+	headSha = run("git", ["-C", repoRoot, "rev-parse", "HEAD"]).stdout.trim();
+
+	let providerDir;
+	try {
+		providerDir = prepareProviderConfig(flags.provider);
+		process.on("exit", () => runTeardown({ containerName: container, sourceDir, providerDir }));
+		sourceDir = stageCloneSource();
+
+		sessionDir = flags.sessionDir ?? defaultEvidenceDir(`bench-${task.id}`);
+		writeEvidenceBasics({
+			expectedModel: `${flags.provider} ${flags.model}`,
+			prompts: task.sessions,
+		});
+
+		// The gateway flag was refused at parse; the container starts
+		// gateway-free by construction here.
+		startContainer(providerDir, false);
+		recordRuntimeVersions();
+		execIn("mkdir -p \"$HOME/task\"");
+
+		for (const [index, prompt] of task.sessions.entries()) {
+			execIn(evalSessionCommand({ index, timeout: flags.timeout, provider: flags.provider, model: flags.model }), {
+				env: { RIG_PROMPT: prompt },
+			});
+			finishSession(suffixed(SESSION_FILES.exitStatus, index), `benchmark session ${index + 1}`);
+		}
+
+		execIn(evalGradeCommand(task.id));
+
+		// Host-side report: objective grades (written in-container), the
+		// classify() verdict, and the native usage ledger over every
+		// transcript the leg recorded. A missed objective check is a
+		// failed measurement — the classify row is skipped, the grade
+		// fails, and the leg still exits zero (docs/agents/eval.md);
+		// only a judge that actually broke fails the leg.
+		const grades = JSON.parse(readFileSync(path.join(sessionDir, BENCH_FILES.grades), "utf8"));
+		const usage = sumSessionUsage(sessionDir);
+		const artifact = grades.matched?.[task.classify.on];
+		const judgeResult = artifact
+			? await runJudge(registry, judgeModel, task.classify, { prompt: task.sessions[0], artifact })
+			: {
+					pass: false,
+					skipped: `objective check ${task.classify.on} matched nothing to judge`,
+				};
+		const report = buildReport({
+			task,
+			grades,
+			judgeSlot: task.judge,
+			judgeResult,
+			usage,
+			head: headSha,
+			gradedAt: new Date().toISOString(),
+		});
+		writeFileSync(path.join(sessionDir, BENCH_FILES.report), `${JSON.stringify(report, null, "\t")}\n`);
+		for (const check of report.checks) {
+			console.log(`bench: ${check.pass ? "PASS" : "FAIL"} ${check.id}${check.judgeError ? ` (${check.judgeError})` : ""}`);
+		}
+		console.log(
+			`bench: task ${report.task} graded ${report.grade}; ${usage.sessions} session(s), ` +
+				`${usage.totals.totalTokens} tokens, cost ${usage.totals.cost.toFixed(4)} USD ` +
+				`(judge ${report.judge.provider}/${report.judge.model}, tier ${report.judge.tier})`,
+		);
+		console.log(`rig: evidence in ${sessionDir}`);
+		if (judgeResult.judgeError !== undefined) {
+			fail(`the judge errored — the leg failed after the report landed: ${judgeResult.judgeError}`);
+		}
+	} catch (error) {
+		fail(`unexpected failure: ${error?.message ?? error}`);
+	}
+}
+
 function main() {
 	const [subcommand, ...argv] = process.argv.slice(2);
 	if (subcommand === undefined || subcommand === "help" || subcommand === "--help") {
-		console.log("usage: run.mjs build | run [--provider P] [--model M] [--timeout S] [--session-dir D] [--leg ARG]... [--gateway] [--rpc] <prompt> | shell [--gateway]");
+		console.log("usage: run.mjs build | run [--provider P] [--model M] [--timeout S] [--session-dir D] [--leg ARG]... [--gateway] [--rpc] <prompt> | eval [--provider P] [--model M] [--timeout S] [--session-dir D] <task-id> | shell [--gateway]");
 		return;
 	}
 	const { flags, rest } = parseFlags(argv);
 	// Before the daemon wait, so a flag-only refusal never needs Docker.
 	if (flags.rpc && !flags.gateway) fail("--rpc needs --gateway — the confirm driver exists for gated gateway legs");
+	if (subcommand === "eval") {
+		// Also before the daemon wait: a benchmark flag refusal or a
+		// judge preflight failure must not need Docker at all.
+		try {
+			assertBenchmarkFlags(flags);
+		} catch (error) {
+			fail(error.message);
+		}
+		const taskId = rest[0];
+		if (!taskId) fail("eval needs a benchmark task id — the checked-in list is the source (test/eval/bench-tasks.mjs)");
+		runEval(taskId, flags).catch((error) => fail(`unexpected failure: ${error?.message ?? error}`));
+		return;
+	}
 	waitForDaemon();
 
 	if (subcommand === "build") {
@@ -335,14 +543,11 @@ function main() {
 			const prompt = rest.join(" ");
 			if (!prompt) fail("run needs a prompt");
 			if (/[^\x00-\x7F]/.test(prompt)) fail("prompt must be pure ASCII (the auditor rejects the rest)");
-			sessionDir = flags.sessionDir ?? path.join(
-				process.env.HOME, ".theta-evidence", `rig-${headSha.slice(0, 7)}-${Date.now()}`,
-			);
-			mkdirSync(sessionDir, { recursive: true });
-			writeFileSync(path.join(sessionDir, SESSION_FILES.preHead), headSha);
-			writeFileSync(path.join(sessionDir, SESSION_FILES.prompt), prompt);
-			writeFileSync(path.join(sessionDir, SESSION_FILES.expectedModel), `${flags.provider} ${flags.model}\n`);
-			writeFileSync(path.join(sessionDir, SESSION_FILES.manifestSha), manifestSha256(repoRoot));
+			sessionDir = flags.sessionDir ?? defaultEvidenceDir(`rig-${headSha.slice(0, 7)}`);
+			writeEvidenceBasics({
+				expectedModel: `${flags.provider} ${flags.model}`,
+				prompts: [prompt],
+			});
 		}
 
 		startContainer(providerDir, flags.gateway);
@@ -354,9 +559,7 @@ function main() {
 		}
 
 		// The runtime record the audit re-verifies.
-		execIn(
-			`pi --version > /session/${SESSION_FILES.piVersion} && node --version > /session/${SESSION_FILES.nodeVersion}`,
-		);
+		recordRuntimeVersions();
 
 		// GNU timeout stands in for the host recipe's hand-rolled watchdog:
 		// SIGTERM at the bound, SIGKILL 15s later, 124 recorded on timeout.
@@ -380,13 +583,7 @@ function main() {
 			sessionEnv.RIG_TIMEOUT = String(flags.timeout);
 		}
 		execIn(`${sessionCommand}; echo $? > /session/${SESSION_FILES.exitStatus}`, { env: sessionEnv });
-		const exitStatus = Number.parseInt(
-			readFileSync(path.join(sessionDir, SESSION_FILES.exitStatus), "utf8").trim(),
-			10,
-		);
-		if (!Number.isInteger(exitStatus)) fail("cannot read the session exit-status file");
-		if (exitStatus === 124) writeFileSync(path.join(sessionDir, SESSION_FILES.watchdog), "fired\n");
-		if (exitStatus !== 0) fail(`session exited ${exitStatus} — evidence in ${sessionDir}`);
+		finishSession(SESSION_FILES.exitStatus, "session");
 
 		audit(flags.legs);
 		console.log(`rig: evidence in ${sessionDir}`);
