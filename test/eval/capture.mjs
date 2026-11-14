@@ -131,12 +131,30 @@ function runRig(scenario) {
 	console.log(`eval-capture: land it with: node test/eval/capture.mjs land ${scenario.id} ${evidenceDir}`);
 }
 
-// The credential guard: every string every provider's config entry carries
-// (URLs excepted) must be absent from the sanitized transcript — whichever
-// provider the session ran on. The values are never printed — only the
-// provider and field name that leaked. Connector scripts redact their own
-// outputs (ADR 0002); this is the net's belt under that suspenders,
-// checked once per capture.
+// The credential sweep's pure half (pinned by capture-guard.test.mjs):
+// which (provider, field) pairs leak into the text. The sweep skips the
+// structural fields a transcript carries by design — `api` is the
+// API-flavor name pi stamps onto every assistant record, URLs are
+// endpoints — and values under 8 chars are too short to be
+// secret-bearing. Everything else a provider entry carries is swept,
+// whichever provider it is: a capture that echoes a credential fails
+// here, and the values are never printed — only the provider and field
+// name that leaked. Connector scripts redact their own outputs (ADR
+// 0002); this is the net's belt under that suspenders, checked once per
+// capture.
+export function credentialLeaks(text, providers) {
+	const leaks = [];
+	for (const [provider, entry] of Object.entries(providers)) {
+		if (entry === null || typeof entry !== "object") continue;
+		for (const [field, value] of Object.entries(entry)) {
+			if (field === "api") continue;
+			if (typeof value !== "string" || /^https?:\/\//.test(value) || value.length < 8) continue;
+			if (text.includes(value)) leaks.push({ provider, field });
+		}
+	}
+	return leaks;
+}
+
 function assertNoProviderKey(text) {
 	let config;
 	try {
@@ -144,18 +162,12 @@ function assertNoProviderKey(text) {
 	} catch {
 		fail("cannot read ~/.pi/agent/models.json — the credential guard refuses to run blind");
 	}
-	const providers = Object.entries(config?.providers ?? {});
-	if (providers.length === 0) {
+	const providers = config?.providers ?? {};
+	if (Object.keys(providers).length === 0) {
 		fail("no provider entries in ~/.pi/agent/models.json — the credential guard has nothing to check");
 	}
-	for (const [provider, entry] of providers) {
-		if (entry === null || typeof entry !== "object") continue;
-		for (const [field, value] of Object.entries(entry)) {
-			if (typeof value !== "string" || /^https?:\/\//.test(value) || value.length < 8) continue;
-			if (text.includes(value)) {
-				fail(`the sanitized transcript contains provider ${provider}'s ${field} value — the capture leaked a credential`);
-			}
-		}
+	for (const { provider, field } of credentialLeaks(text, providers)) {
+		fail(`the sanitized transcript contains provider ${provider}'s ${field} value — the capture leaked a credential`);
 	}
 }
 

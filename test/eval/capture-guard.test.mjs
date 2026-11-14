@@ -15,7 +15,7 @@ import path from "node:path";
 import { test } from "node:test";
 import { run } from "../../scripts/dogfood-gates.mjs";
 import { initHardenedGitRepo } from "../helpers/git-repo.mjs";
-import { assertSurfacesUnmoved } from "./capture.mjs";
+import { assertSurfacesUnmoved, credentialLeaks } from "./capture.mjs";
 
 const scratch = mkdtempSync(path.join(tmpdir(), "eval-land-guard-"));
 test.after(() => rmSync(scratch, { recursive: true, force: true }));
@@ -96,4 +96,42 @@ test("an ignored file under a skill tree refuses like an edit would", () => {
 
 test("an unresolvable pre-head refuses instead of passing vacuously", () => {
 	assert.throws(() => assertSurfacesUnmoved(scratch, "not-a-revision"), /git probe failed/);
+});
+
+// The credential sweep (spec #134 review round): the land step refuses a
+// capture whose sanitized transcript echoes a provider entry's
+// credential. The sweep skips the fields a transcript carries by design —
+// `api` is the API-flavor name pi stamps onto every assistant record
+// ("api": "openai-completions"), URLs are endpoints — and sub-8-char
+// values are too short to be secret-bearing. Every provider entry is in
+// scope: the values never print, only the provider and field that leaked.
+test("the credential sweep detects a leaked key and names provider and field only", () => {
+	const providers = { zai: { apiKey: "sk-really-a-secret-credential" } };
+	const leaks = credentialLeaks("text with sk-really-a-secret-credential inside", providers);
+	assert.deepEqual(leaks, [{ provider: "zai", field: "apiKey" }]);
+});
+
+test("the credential sweep skips the api field — the flavor name every assistant record carries", () => {
+	const providers = { magpie: { api: "openai-completions", apiKey: "sk-other-secret-9999" } };
+	const text = '"api":"openai-completions","provider":"zai-coding-cn"';
+	assert.deepEqual(credentialLeaks(text, providers), []);
+	// the same entry's real key still sweeps
+	assert.equal(credentialLeaks(`${text} sk-other-secret-9999`, providers).length, 1);
+});
+
+test("the credential sweep skips URL fields and sub-8-char values", () => {
+	const providers = {
+		p: { baseUrl: "https://api.example.com/v1", note: "short", apiKey: "sk-long-enough-secret" },
+	};
+	assert.deepEqual(credentialLeaks("see https://api.example.com/v1 or short", providers), []);
+});
+
+test("the credential sweep covers every provider entry in the config", () => {
+	const providers = {
+		a: { apiKey: "aaaa-secret-key-one" },
+		b: { apiKey: "bbbb-secret-key-two" },
+	};
+	const leaks = credentialLeaks("x bbbb-secret-key-two y", providers);
+	assert.deepEqual(leaks, [{ provider: "b", field: "apiKey" }]);
+	assert.equal(credentialLeaks("clean text", providers).length, 0);
 });
