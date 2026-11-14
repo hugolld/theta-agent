@@ -21,14 +21,18 @@
 // the rest are the net's alone.
 
 import assert from "node:assert/strict";
+import { createJiti } from "jiti";
 
 // pi registers MCP tool names sanitized: every character outside
 // [A-Za-z0-9_] becomes `_` (pi's createMcpToolName), so the gateway
-// server's hyphenated name lands as an underscore — the same constant
-// extensions/submit-gate.ts derives, pinned there by the submit-gate
-// suite; a prefix change moves the extensions surface digest and every
-// fixture recaptures.
-const GATEWAY_PREFIX = "mcp__theta_compute__";
+// server's hyphenated name lands as an underscore. The constant has one
+// home — extensions/submit-gate.ts exports it; this test-tree module
+// consumes it through jiti, the loader pi runs extensions with (the
+// submit-gate suite's pattern). A prefix change still moves the
+// extensions surface digest and every fixture recaptures.
+const { GATEWAY_PREFIX } = await createJiti(import.meta.url).import(
+	"../../extensions/submit-gate.ts",
+);
 
 // Index a session's tool calls and results once for the shape checks: the
 // call map is keyed by tool-call id, the result map by the toolCallId the

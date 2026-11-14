@@ -55,12 +55,13 @@ The suite replays fixtures through the pi version the lockfile installs; the rig
 
 ## The drill leg
 
-Replay-net strikes carry a drill leg (ADR 0007: the drill proves the net's pins bite). On a scaffold scratch, flip one model-visible byte in the connector surface — the provenance pin must red naming the fixture. Targeted suites only, never the full suite in a scratch (an archived scratch carries no git work tree; measured 2026-11-04):
+Replay-net strikes carry a drill leg (ADR 0007: the drill proves the net's pins bite). On a scaffold scratch, flip one model-visible byte in one sampled surface — the provenance pin must red naming exactly that surface's fixture. A body flip keeps the advertisement standing; a flip landing in a SKILL.md's frontmatter moves the `advertisement` digest and reds every fixture — that is the other pin firing, not noise. Targeted suites only, never the full suite in a scratch (an archived scratch carries no git work tree; measured 2026-11-04):
 
 ```sh
 node scripts/drill-scratch.mjs /tmp/spec134-drill test/eval/replay-net.test.mjs
-# leg 0 (baseline): green — then, in the scratch only, one byte in
-# skills/theta-notebook/SKILL.md; leg 1 reds exactly the notebook fixture's
+# leg 0 (baseline): green — then, in the scratch only, one byte in the
+# body of skills/theta-notebook/SKILL.md (frontmatter untouched, so the
+# advertisement stands); leg 1 reds exactly the notebook fixture's
 # provenance pin, by name. The re-sync drift drill: one byte in the vendored
 # skills/hypothesis-generation/SKILL.md body (description untouched, so the
 # advertisement stands) reds exactly the orchestrator fixture's pin.

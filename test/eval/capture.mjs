@@ -82,9 +82,14 @@ function fail(message) {
 	process.exit(1);
 }
 
-function scenarioById(id) {
+// One home for the id lookup (the capture CLI and the tests share it):
+// throws — the CLI maps the message to its refusal, a test import fails
+// its assertion instead of exiting the runner.
+export function scenarioById(id) {
 	const scenario = SCENARIOS.find((s) => s.id === id);
-	if (scenario === undefined) fail(`unknown scenario id: ${id} (the checked-in list is the source)`);
+	if (scenario === undefined) {
+		throw new Error(`unknown scenario id: ${id} (the checked-in list is the source)`);
+	}
 	return scenario;
 }
 
@@ -232,7 +237,12 @@ function main() {
 		console.log("usage: capture.mjs rig <scenario-id> | land <scenario-id> <evidence-dir>");
 		return;
 	}
-	const scenario = scenarioById(id);
+	let scenario;
+	try {
+		scenario = scenarioById(id);
+	} catch (error) {
+		fail(error.message);
+	}
 	if (mode === "rig") {
 		runRig(scenario);
 	} else if (mode === "land") {

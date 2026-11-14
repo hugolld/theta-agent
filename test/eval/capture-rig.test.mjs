@@ -6,10 +6,17 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { rigArgs } from "./capture.mjs";
+import { rigArgs, scenarioById } from "./capture.mjs";
 import { SCENARIOS } from "./scenarios.mjs";
 
-const scenarioById = (id) => SCENARIOS.find((s) => s.id === id);
+// The --leg pairs the invocation carries, in list order.
+function legsOf(args) {
+	const legs = [];
+	for (let i = 0; i < args.length; i++) {
+		if (args[i] === "--leg") legs.push(args[++i]);
+	}
+	return legs;
+}
 
 test("the rig invocation runs the scenario's prompt with a bound, dir, and legs", () => {
 	const connector = scenarioById("connector");
@@ -17,13 +24,11 @@ test("the rig invocation runs the scenario's prompt with a bound, dir, and legs"
 	assert.match(args[0], /test\/rig\/run\.mjs$/);
 	assert.equal(args[1], "run");
 	assert.equal(args[2], connector.prompt);
-	assert.deepEqual(args.slice(3, 7), ["--timeout", "600", "--session-dir", "/tmp/ev"]);
-	const legs = [];
-	for (let i = 7; i < args.length; i++) {
-		assert.equal(args[i], "--leg");
-		legs.push(args[++i]);
-	}
-	assert.deepEqual(legs, connector.legs);
+	assert.equal(args.indexOf("--timeout"), 3);
+	assert.equal(args[args.indexOf("--timeout") + 1], "600");
+	assert.equal(args.indexOf("--session-dir"), 5);
+	assert.equal(args[args.indexOf("--session-dir") + 1], "/tmp/ev");
+	assert.deepEqual(legsOf(args), connector.legs);
 });
 
 test("exactly the gateway scenarios pass --gateway, and every leg rides in order", () => {
@@ -34,10 +39,6 @@ test("exactly the gateway scenarios pass --gateway, and every leg rides in order
 			scenario.gateway === true ? 1 : 0,
 			`${scenario.id}: --gateway must ride exactly when the scenario declares it`,
 		);
-		const legs = [];
-		for (let i = 0; i < args.length; i++) {
-			if (args[i] === "--leg") legs.push(args[++i]);
-		}
-		assert.deepEqual(legs, scenario.legs, `${scenario.id}: leg order drifted`);
+		assert.deepEqual(legsOf(args), scenario.legs, `${scenario.id}: leg order drifted`);
 	}
 });
