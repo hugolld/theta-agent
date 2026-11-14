@@ -91,7 +91,7 @@ export const SCENARIOS = Object.freeze([
 	{
 		id: "notebook",
 		prompt:
-			`Our team has decided to run the next antibody screen as a two-stage cascade instead of one large pass. Record that decision for the project so a later session can find it, using whatever provenance recording this environment provides, and tell me exactly what was written and where. ${READ_HEADROOM}`,
+			`Our team has decided to run the next antibody screen as a two-stage cascade instead of one large pass. Record that decision for the project so a later session can find it, using whatever provenance recording this environment provides, and tell me exactly what was written and where. Run each command as one plain call -- no trailing status echoes; ${READ_HEADROOM}`,
 		surfaces: ["advertisement", "skill:theta-notebook", "extensions", "project-context"],
 		// All three auditor slots, the M3 notebook dogfood shape: the skill
 		// read, the recorder executed, the notebook written (the notebook leg
