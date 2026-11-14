@@ -155,6 +155,25 @@ export function credentialLeaks(text, providers) {
 	return leaks;
 }
 
+// The sanitizer's pure half (pinned by capture-guard.test.mjs): the two
+// structural roots a rig session works under, replaced everywhere — the
+// checkout root becomes __REPO__, and the rig's own home (the session
+// cwd's parent) becomes __RIG_HOME__. A session that leaves the checkout
+// (the orchestrator capture invented a research workspace in the rig
+// home) still lands machine-free: the rig home is identical across rigs
+// (the Dockerfile pins the username), so __RIG_HOME__ carries no machine
+// identity, and the host-path guard keeps refusing any /home/ residue.
+// The checkout root replaces first — it sits under the home — and a
+// depth-1 cwd never treats / as a home.
+export function sanitizeTranscript(text, sessionCwd) {
+	let out = text.replaceAll(sessionCwd, "__REPO__");
+	const home = path.dirname(sessionCwd);
+	if (home !== "/" && home !== "") {
+		out = out.replaceAll(home, "__RIG_HOME__");
+	}
+	return out;
+}
+
 function assertNoProviderKey(text) {
 	let config;
 	try {
@@ -197,7 +216,7 @@ function land(scenario, evidenceDir) {
 	if (session.type !== "session" || typeof session.cwd !== "string" || !session.cwd.startsWith("/")) {
 		fail("the transcript's first record is not a session header with an absolute cwd");
 	}
-	const sanitized = evidence.transcriptText.replaceAll(session.cwd, "__REPO__");
+	const sanitized = sanitizeTranscript(evidence.transcriptText, session.cwd);
 	assertNoProviderKey(sanitized);
 	for (const machine of machinePathPrefixes()) {
 		if (sanitized.includes(machine)) {

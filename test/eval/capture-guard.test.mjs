@@ -15,7 +15,7 @@ import path from "node:path";
 import { test } from "node:test";
 import { run } from "../../scripts/dogfood-gates.mjs";
 import { initHardenedGitRepo } from "../helpers/git-repo.mjs";
-import { assertSurfacesUnmoved, credentialLeaks } from "./capture.mjs";
+import { assertSurfacesUnmoved, credentialLeaks, sanitizeTranscript } from "./capture.mjs";
 
 const scratch = mkdtempSync(path.join(tmpdir(), "eval-land-guard-"));
 test.after(() => rmSync(scratch, { recursive: true, force: true }));
@@ -134,4 +134,27 @@ test("the credential sweep covers every provider entry in the config", () => {
 	const leaks = credentialLeaks("x bbbb-secret-key-two y", providers);
 	assert.deepEqual(leaks, [{ provider: "b", field: "apiKey" }]);
 	assert.equal(credentialLeaks("clean text", providers).length, 0);
+});
+
+// The sanitizer (spec #134, orchestrator capture): the checkout root
+// becomes __REPO__ and the rig home — the session cwd's parent — becomes
+// __RIG_HOME__, so a session that leaves the checkout still lands
+// machine-free and the host-path guard never sees a /home/ residue.
+test("the sanitizer replaces the checkout root and the rig home, cwd first", () => {
+	const text = 'run in /home/theta/theta, home is /home/theta, work at /home/theta/research/w';
+	const out = sanitizeTranscript(text, "/home/theta/theta");
+	assert.equal(
+		out,
+		"run in __REPO__, home is __RIG_HOME__, work at __RIG_HOME__/research/w",
+	);
+});
+
+test("the sanitizer never treats a depth-1 cwd's parent (the root) as a home", () => {
+	const text = "cwd /checkout directly at the root, /etc/hosts untouched";
+	assert.equal(sanitizeTranscript(text, "/checkout"), text.replaceAll("/checkout", "__REPO__"));
+});
+
+test("the sanitizer leaves paths that are neither root nor home", () => {
+	const text = "/srv/data and /etc/config survive";
+	assert.equal(sanitizeTranscript(text, "/home/theta/theta"), text);
 });

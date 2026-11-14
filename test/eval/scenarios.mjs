@@ -64,14 +64,17 @@ export const SCENARIOS = Object.freeze([
 		id: "orchestrator",
 		prompt:
 			`An early experiment in our lab suggests a CRISPR base-editing treatment partially restored immune function in aged mice. Turn this into a disciplined research effort: state the question you would pursue first, the competing explanations worth testing, and what evidence could discriminate between them, and say which direction you are setting and why. ${READ_HEADROOM}`,
-		// The orchestrator doctrine (the surface) plus the vendored skill its
-		// hypothesize stage routes to — the re-sync drift binding. If the
-		// capture's session also records through the project notebook, that
-		// tree joins this list at land time.
+		// The orchestrator doctrine (the surface) plus the trees the capture's
+		// session proved to open — the routed vendored skill (the re-sync
+		// drift binding), the project notebook (recording), and the lit
+		// connector (searching) — the land-time binding gain the header
+		// comment's clause owns (a test-tree-only edit, never a recapture).
 		surfaces: [
 			"advertisement",
 			"skill:theta-research-loop",
 			"skill:hypothesis-generation",
+			"skill:theta-notebook",
+			"skill:theta-lit-search",
 			"extensions",
 			"project-context",
 		],
