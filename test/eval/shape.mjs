@@ -29,7 +29,7 @@
 
 import assert from "node:assert/strict";
 import { createJiti } from "jiti";
-import { collectNestedCalls } from "../../scripts/audit-dogfood.mjs";
+import { collectNestedCalls, contentText } from "../../scripts/audit-dogfood.mjs";
 
 // pi registers MCP tool names sanitized: every character outside
 // [A-Za-z0-9_] becomes `_` (pi's createMcpToolName), so the gateway
@@ -117,18 +117,11 @@ export function assertShape(entries, shape) {
 		// surface digest and recaptures every fixture; this literal then
 		// follows the new wording deliberately, in review.
 		const refusalMarker = "was refused by the submit gate";
-		const resultText = (result) =>
-			Array.isArray(result?.content)
-				? result.content
-						.filter((item) => item?.type === "text")
-						.map((item) => item.text)
-						.join("")
-				: "";
 		const flat = [...calls.values()].some(
 			(call) =>
 				call.name === gatewayTool &&
 				results.get(call.id)?.isError === true &&
-				resultText(results.get(call.id)).includes(refusalMarker),
+				contentText(results.get(call.id)?.content).includes(refusalMarker),
 		);
 		// The nested path through the one fail-closed reader of pi's
 		// bounded record (scripts/audit-dogfood.mjs): the refusal rides the

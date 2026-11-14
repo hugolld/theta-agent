@@ -119,6 +119,15 @@ test("the credential sweep skips the api field — the flavor name every assista
 	assert.equal(credentialLeaks(`${text} sk-other-secret-9999`, providers).length, 1);
 });
 
+test("the credential sweep sweeps an api field whose value is not a known flavor", () => {
+	// the skip is the flavor vocabulary, not the field name — a mislabeled
+	// entry cannot hide a credential under it
+	const providers = { sneaky: { api: "sk-not-a-flavor-name" } };
+	assert.deepEqual(credentialLeaks("echo sk-not-a-flavor-name", providers), [
+		{ provider: "sneaky", field: "api" },
+	]);
+});
+
 test("the credential sweep skips URL fields and sub-8-char values", () => {
 	const providers = {
 		p: { baseUrl: "https://api.example.com/v1", note: "short", apiKey: "sk-long-enough-secret" },
@@ -166,8 +175,13 @@ test("the sanitizer leaves paths that are neither root nor home", () => {
 // repo. Distinct values keep distinct placeholders in first-occurrence
 // order; the partition prefix survives.
 test("the node-list redaction covers both escaping levels and keeps values distinct", () => {
-	const text =
-		'outer \\"node_list\\": \\"cpu[11-13]\\" then doubly \\\\"node_list\\\\\\": \\\\"gpu1\\\\" and repeat \\"node_list\\": \\"cpu[11-13]\\"';
+	// The two escaping levels a rig transcript produces, built by
+	// JSON.stringify rather than escape soup: level 1 is the tool result's
+	// text as JSON-in-JSON, level 2 is that text embedded once more (the
+	// codemode output).
+	const lvl1 = JSON.stringify('"node_list": "cpu[11-13]"').slice(1, -1);
+	const lvl2 = JSON.stringify(JSON.stringify('"node_list": "gpu1"')).slice(1, -1);
+	const text = `outer ${lvl1} then doubly ${lvl2} and repeat ${lvl1}`;
 	const out = redactNodeLists(text);
 	assert.equal(out.includes("cpu[11-13]"), false);
 	assert.equal(out.includes("gpu1"), false);

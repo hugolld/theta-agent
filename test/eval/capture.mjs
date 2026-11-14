@@ -131,23 +131,44 @@ function runRig(scenario) {
 	console.log(`eval-capture: land it with: node test/eval/capture.mjs land ${scenario.id} ${evidenceDir}`);
 }
 
+// The API-flavor vocabulary pi stamps into an entry's `api` field — the
+// installed package's own type union (pi-ai's ApiOptionsMap keys). The
+// credential sweep skips an `api` entry only when its value names one of
+// these flavors — the structural values every assistant record carries —
+// and sweeps anything else the field might hold, so a mislabeled entry
+// cannot hide a credential under the skip. A pi floor bump that adds a
+// flavor lands with this set in the same strike; until then the land
+// refuses loudly, which is the fail-closed direction.
+const API_FLAVORS = new Set([
+	"anthropic-messages",
+	"openai-completions",
+	"openai-responses",
+	"openai-codex-responses",
+	"azure-openai-responses",
+	"google-generative-ai",
+	"google-vertex",
+	"mistral-conversations",
+	"bedrock-converse-stream",
+	"pi-messages",
+]);
+
 // The credential sweep's pure half (pinned by capture-guard.test.mjs):
 // which (provider, field) pairs leak into the text. The sweep skips the
-// structural fields a transcript carries by design — `api` is the
-// API-flavor name pi stamps onto every assistant record, URLs are
-// endpoints — and values under 8 chars are too short to be
-// secret-bearing. Everything else a provider entry carries is swept,
-// whichever provider it is: a capture that echoes a credential fails
-// here, and the values are never printed — only the provider and field
-// name that leaked. Connector scripts redact their own outputs (ADR
-// 0002); this is the net's belt under that suspenders, checked once per
-// capture.
+// structural values a transcript carries by design — an `api` entry
+// naming a known flavor (the name pi stamps onto every assistant
+// record), URLs are endpoints — and values under 8 chars are too short
+// to be secret-bearing. Everything else a provider entry carries is
+// swept, whichever provider it is: a capture that echoes a credential
+// fails here, and the values are never printed — only the provider and
+// field name that leaked. Connector scripts redact their own outputs
+// (ADR 0002); this is the net's belt under that suspenders, checked once
+// per capture.
 export function credentialLeaks(text, providers) {
 	const leaks = [];
 	for (const [provider, entry] of Object.entries(providers)) {
 		if (entry === null || typeof entry !== "object") continue;
 		for (const [field, value] of Object.entries(entry)) {
-			if (field === "api") continue;
+			if (field === "api" && API_FLAVORS.has(value)) continue;
 			if (typeof value !== "string" || /^https?:\/\//.test(value) || value.length < 8) continue;
 			if (text.includes(value)) leaks.push({ provider, field });
 		}

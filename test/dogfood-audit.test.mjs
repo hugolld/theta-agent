@@ -1594,8 +1594,9 @@ test("collectNestedCalls reads the bounded record and counts multi-level ids", (
 			{ id: "call_p/1/1", name: "read", status: "ok", arguments: {} },
 		]),
 	];
-	assert.equal(collectNestedCalls(ok).count, 2);
-	assert.deepEqual(collectNestedCalls(ok).calls, ok[1].message.nestedCalls.calls);
+	const read = collectNestedCalls(ok);
+	assert.equal(read.count, 2);
+	assert.deepEqual(read.calls, ok[1].message.nestedCalls.calls);
 	// the grandchild segment grammar is pi's own: deeper nests append /n
 	assert.equal(
 		collectNestedCalls([
