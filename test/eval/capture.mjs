@@ -82,10 +82,36 @@ function fail(message) {
 	process.exit(1);
 }
 
-function scenarioById(id) {
+// One home for the id lookup (the capture CLI and the tests share it):
+// throws — the CLI maps the message to its refusal, a test import fails
+// its assertion instead of exiting the runner.
+export function scenarioById(id) {
 	const scenario = SCENARIOS.find((s) => s.id === id);
-	if (scenario === undefined) fail(`unknown scenario id: ${id} (the checked-in list is the source)`);
+	if (scenario === undefined) {
+		throw new Error(`unknown scenario id: ${id} (the checked-in list is the source)`);
+	}
 	return scenario;
+}
+
+// The rig invocation a scenario drives, as the argv array run.mjs receives
+// (spec #134): the scenario's own prompt, a 600s bound, the isolated
+// evidence dir, its auditor legs in order — and the rig flags its scenario
+// list entry declares. `gateway: true` passes `--gateway`: the rig admits
+// the gateway token as its second credential and preflights the host-side
+// forward before launch, so a gateway capture needs that forward up (one
+// parked re-probe when it is down, never a retry loop).
+export function rigArgs(scenario, evidenceDir) {
+	return [
+		path.join(repoRoot, "test/rig/run.mjs"),
+		"run",
+		scenario.prompt,
+		"--timeout",
+		"600",
+		"--session-dir",
+		evidenceDir,
+		...(scenario.gateway ? ["--gateway"] : []),
+		...scenario.legs.flatMap((leg) => ["--leg", leg]),
+	];
 }
 
 function runRig(scenario) {
@@ -95,16 +121,7 @@ function runRig(scenario) {
 		`eval-${scenario.id}-${new Date().toISOString().replaceAll(/[-:]/g, "").slice(0, 15)}`,
 	);
 	mkdirSync(evidenceDir, { recursive: true });
-	const args = [
-		path.join(repoRoot, "test/rig/run.mjs"),
-		"run",
-		scenario.prompt,
-		"--timeout",
-		"600",
-		"--session-dir",
-		evidenceDir,
-		...scenario.legs.flatMap((leg) => ["--leg", leg]),
-	];
+	const args = rigArgs(scenario, evidenceDir);
 	console.log(`eval-capture: rig leg starting; evidence will land in ${evidenceDir}`);
 	const result = run("node", args, { stdio: "inherit" });
 	if (result.status !== 0) {
@@ -114,12 +131,108 @@ function runRig(scenario) {
 	console.log(`eval-capture: land it with: node test/eval/capture.mjs land ${scenario.id} ${evidenceDir}`);
 }
 
-// The credential guard: every string every provider's config entry carries
-// (URLs excepted) must be absent from the sanitized transcript — whichever
-// provider the session ran on. The values are never printed — only the
-// provider and field name that leaked. Connector scripts redact their own
-// outputs (ADR 0002); this is the net's belt under that suspenders,
-// checked once per capture.
+// The API-flavor vocabulary pi stamps into an entry's `api` field — the
+// installed package's own type union (pi-ai's ApiOptionsMap keys). The
+// credential sweep skips an `api` entry only when its value names one of
+// these flavors — the structural values every assistant record carries —
+// and sweeps anything else the field might hold, so a mislabeled entry
+// cannot hide a credential under the skip. A pi floor bump that adds a
+// flavor lands with this set in the same strike; until then the land
+// refuses loudly, which is the fail-closed direction.
+const API_FLAVORS = new Set([
+	"anthropic-messages",
+	"openai-completions",
+	"openai-responses",
+	"openai-codex-responses",
+	"azure-openai-responses",
+	"google-generative-ai",
+	"google-vertex",
+	"mistral-conversations",
+	"bedrock-converse-stream",
+	"pi-messages",
+]);
+
+// The credential sweep's pure half (pinned by capture-guard.test.mjs):
+// which (provider, field) pairs leak into the text. The sweep skips the
+// structural values a transcript carries by design — an `api` entry
+// naming a known flavor (the name pi stamps onto every assistant
+// record), URLs are endpoints — and values under 8 chars are too short
+// to be secret-bearing. Everything else a provider entry carries is
+// swept, whichever provider it is: a capture that echoes a credential
+// fails here, and the values are never printed — only the provider and
+// field name that leaked. Connector scripts redact their own outputs
+// (ADR 0002); this is the net's belt under that suspenders, checked once
+// per capture.
+export function credentialLeaks(text, providers) {
+	const leaks = [];
+	for (const [provider, entry] of Object.entries(providers)) {
+		if (entry === null || typeof entry !== "object") continue;
+		for (const [field, value] of Object.entries(entry)) {
+			if (field === "api" && API_FLAVORS.has(value)) continue;
+			if (typeof value !== "string" || /^https?:\/\//.test(value) || value.length < 8) continue;
+			if (text.includes(value)) leaks.push({ provider, field });
+		}
+	}
+	return leaks;
+}
+
+// The sanitizer's pure half (pinned by capture-guard.test.mjs): the two
+// structural roots a rig session works under, replaced everywhere — the
+// checkout root becomes __REPO__, and the rig's own home (the session
+// cwd's parent) becomes __RIG_HOME__. A session that leaves the checkout
+// (the orchestrator capture invented a research workspace in the rig
+// home) still lands machine-free: the rig home is identical across rigs
+// (the Dockerfile pins the username), so __RIG_HOME__ carries no machine
+// identity, and the host-path guard keeps refusing any /home/ residue.
+// The checkout root replaces first — it sits under the home — and a
+// depth-1 cwd never treats / as a home.
+export function sanitizeTranscript(text, sessionCwd) {
+	let out = text.replaceAll(sessionCwd, "__REPO__");
+	const home = path.dirname(sessionCwd);
+	if (home !== "/" && home !== "") {
+		out = out.replaceAll(home, "__RIG_HOME__");
+	}
+	return out;
+}
+
+// The node-list redaction's pure half (pinned by capture-guard.test.mjs):
+// cluster topology stays out of the public repo, mechanically, the way
+// the dogfood golden recipe does it by review
+// (test/dogfood-audit.test.mjs). Two passes share one placeholder map:
+// every JSON `node_list` value — at whichever escaping level a rig
+// transcript carries it (the tool result's own text, and that text
+// embedded again in a codemode output) — and every bare Slurm node-list
+// token the model's own prose echoes back (the session paraphrases the
+// environment output into its thinking and its answer). A value gets one
+// stable `__HOST_NODES_<PARTITION>_<N>__` placeholder wherever it
+// appears, assigned in first-occurrence order, and the placeholder
+// preserves the partition prefix, so the record still reads
+// cpu-before-gpu. Prose that merely names the field or the partition is
+// untouched: the JSON pass requires the quoted-key/colon/value structure,
+// the token pass requires digits or a bracketed range (bare `cpu`, `gpu`,
+// `cpus` stay).
+const NODE_LIST_RE =
+	/node_list[\s\\]*"+[\s\\]*:[\s\\]*"+([A-Za-z0-9,[\]*.-]+)[\s\\]*"+/g;
+const NODE_LIST_TOKEN_RE = /\b(?:cpu|gpu)(?:\d+|\d*\[[0-9,\-]+\])(?![a-z0-9])/g;
+
+export function redactNodeLists(text) {
+	const seen = new Map();
+	const placeholderFor = (value) => {
+		const key = value.toLowerCase();
+		if (!seen.has(key)) {
+			const partition = (value.match(/^[a-z]+/i)?.[0] ?? "node").toUpperCase();
+			const prefix = `__HOST_NODES_${partition}_`;
+			const used = [...seen.values()].filter((p) => p.startsWith(prefix)).length;
+			seen.set(key, `${prefix}${String.fromCharCode(65 + used)}__`);
+		}
+		return seen.get(key);
+	};
+	let out = text.replaceAll(NODE_LIST_RE, (match, value) =>
+		match.replace(value, placeholderFor(value)),
+	);
+	return out.replaceAll(NODE_LIST_TOKEN_RE, (token) => placeholderFor(token));
+}
+
 function assertNoProviderKey(text) {
 	let config;
 	try {
@@ -127,18 +240,12 @@ function assertNoProviderKey(text) {
 	} catch {
 		fail("cannot read ~/.pi/agent/models.json — the credential guard refuses to run blind");
 	}
-	const providers = Object.entries(config?.providers ?? {});
-	if (providers.length === 0) {
+	const providers = config?.providers ?? {};
+	if (Object.keys(providers).length === 0) {
 		fail("no provider entries in ~/.pi/agent/models.json — the credential guard has nothing to check");
 	}
-	for (const [provider, entry] of providers) {
-		if (entry === null || typeof entry !== "object") continue;
-		for (const [field, value] of Object.entries(entry)) {
-			if (typeof value !== "string" || /^https?:\/\//.test(value) || value.length < 8) continue;
-			if (text.includes(value)) {
-				fail(`the sanitized transcript contains provider ${provider}'s ${field} value — the capture leaked a credential`);
-			}
-		}
+	for (const { provider, field } of credentialLeaks(text, providers)) {
+		fail(`the sanitized transcript contains provider ${provider}'s ${field} value — the capture leaked a credential`);
 	}
 }
 
@@ -162,13 +269,15 @@ function land(scenario, evidenceDir) {
 
 	// Sanitization, the golden-fixture recipe: the session's checkout root
 	// becomes __REPO__ everywhere (structure survives, machine roots do
-	// not); host machine paths and credentials must be absent outright.
+	// not), cluster topology (node lists) becomes __HOST_NODES_*__
+	// placeholders; host machine paths and credentials must be absent
+	// outright.
 	const firstLine = evidence.transcriptText.split("\n", 1)[0];
 	const session = JSON.parse(firstLine);
 	if (session.type !== "session" || typeof session.cwd !== "string" || !session.cwd.startsWith("/")) {
 		fail("the transcript's first record is not a session header with an absolute cwd");
 	}
-	const sanitized = evidence.transcriptText.replaceAll(session.cwd, "__REPO__");
+	const sanitized = redactNodeLists(sanitizeTranscript(evidence.transcriptText, session.cwd));
 	assertNoProviderKey(sanitized);
 	for (const machine of machinePathPrefixes()) {
 		if (sanitized.includes(machine)) {
@@ -220,7 +329,12 @@ function main() {
 		console.log("usage: capture.mjs rig <scenario-id> | land <scenario-id> <evidence-dir>");
 		return;
 	}
-	const scenario = scenarioById(id);
+	let scenario;
+	try {
+		scenario = scenarioById(id);
+	} catch (error) {
+		fail(error.message);
+	}
 	if (mode === "rig") {
 		runRig(scenario);
 	} else if (mode === "land") {

@@ -1,0 +1,14 @@
+{
+	"scenario": "gateway-skill",
+	"sessionPreHead": "e20a4270bbfb1a27fdf886e865ca61fa8d619087",
+	"landedHead": "cb0e6fbb25959ba6d2cc2d6940f1a642275fe452",
+	"piVersion": "1.4.0",
+	"nodeVersion": "v22.23.4",
+	"surfaces": {
+		"advertisement": "68bc19e716f8a6aa44b92e7f27995fc82b614e3b4e43c1bb78b24d6711493234",
+		"skill:theta-compute": "372f764f01464bcffc1787dcf7b3d51773a14feaa5b902bee41cd133525dc8ab",
+		"skill:theta-notebook": "2264f5e8c459296e510b85c0c2d56eaf46141eeec9c8361c8f61fa3795f83556",
+		"extensions": "3b5142c834efd80d698daac69f8046ede8401bfc10afcef4ba7c91aaddada4ff",
+		"project-context": "beb43ca3a091f41ece450de326b38208a319e9d21b997f89acee4a60a27f515d"
+	}
+}

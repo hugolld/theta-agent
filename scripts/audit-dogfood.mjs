@@ -1577,6 +1577,21 @@ function collectToolGraph(recs) {
 // after the parent id (a deeper nest appends its own).
 const NESTED_ID_SUFFIX = /^(?:\/\d+)+$/;
 
+// The text a record's content field carries: the typed text items joined,
+// or the string itself when a record carries bare string content. One
+// home for the extraction (the auditor's reads and the replay net's
+// shape checks consume the same helper — the reading cannot drift apart,
+// and neither copy drops the string-content fallback).
+export function contentText(content) {
+	if (Array.isArray(content)) {
+		return content
+			.filter((c) => c?.type === "text")
+			.map((c) => c.text)
+			.join("");
+	}
+	return typeof content === "string" ? content : "";
+}
+
 // Reads codemode's bounded record of the calls a tool made (pi keeps name,
 // arguments, status — never results — as `nestedCalls` on the calling
 // tool's result message) instead of assuming a flat call sequence. Each
@@ -1586,10 +1601,13 @@ const NESTED_ID_SUFFIX = /^(?:\/\d+)+$/;
 // it, all nested ids are unique, and none collides with a top-level call
 // or result id. A fabricated record — spliced onto the wrong parent,
 // duplicated, or claiming a top-level call's id — fails closed. Returns
-// the nested-call count for the attestation.
+// the validated entries and their count — the count for the attestation,
+// the entries for the replay net's shape check (the one reader, two
+// consumers: the reading does not drift apart).
 export function collectNestedCalls(recs) {
 	const topLevelIds = new Set();
 	const nestedIds = new Set();
+	const calls = [];
 	let count = 0;
 	for (const step of walkToolCallsAndResults(recs)) {
 		if (step.call !== undefined) {
@@ -1633,6 +1651,7 @@ export function collectNestedCalls(recs) {
 				throw new Error(`duplicate nestedCalls id: ${entry.id}`);
 			}
 			nestedIds.add(entry.id);
+			calls.push(entry);
 			count += 1;
 		}
 	}
@@ -1643,7 +1662,7 @@ export function collectNestedCalls(recs) {
 			);
 		}
 	}
-	return count;
+	return { count, calls };
 }
 
 // The id-paired calls of one tool, recorded after the prompt — the shared
@@ -1732,13 +1751,7 @@ function skillReadLeg(ctx, skill) {
 		} catch {
 			return false;
 		}
-		const resultText = Array.isArray(r.content)
-			? r.content
-					.filter((c) => c?.type === "text")
-					.map((c) => c.text)
-					.join("")
-			: (typeof r.content === "string" ? r.content : "");
-		return resultText === skillText;
+		return contentText(r.content) === skillText;
 	});
 	if (!hit) {
 		throw new Error("selected file never opened");
@@ -1970,7 +1983,7 @@ export function auditSession(dir, rootArg, legs = []) {
 	}
 	// Nested calls (codemode's bounded record) are transcript structure,
 	// not a spot-check concern: every session is checked, legs or not.
-	const nestedCount = collectNestedCalls(recs);
+	const nestedCount = collectNestedCalls(recs).count;
 	const sysRecs = recs.filter(
 		(r) => r.type === "message" && r.message?.role === "system",
 	);
@@ -2030,9 +2043,7 @@ export function auditSession(dir, rootArg, legs = []) {
 	const endsWithToolCall =
 		Array.isArray(lastContent) &&
 		lastContent.some((c) => c?.type === "toolCall");
-	const lastText = Array.isArray(lastContent)
-		? lastContent.filter((c) => c?.type === "text").map((c) => c.text).join("")
-		: (typeof lastContent === "string" ? lastContent : "");
+	const lastText = contentText(lastContent);
 	if (
 		last?.type !== "message" ||
 		last?.message?.role !== "assistant" ||
@@ -2049,12 +2060,7 @@ export function auditSession(dir, rootArg, legs = []) {
 		);
 	}
 	const userRec = userRecs[0];
-	const userText = Array.isArray(userRec?.message?.content)
-		? userRec.message.content
-				.filter((c) => c?.type === "text")
-				.map((c) => c.text)
-				.join("")
-		: (typeof userRec?.message?.content === "string" ? userRec.message.content : null);
+	const userText = contentText(userRec?.message?.content);
 	if (userText !== promptWanted) {
 		throw new Error("prompt mismatch: the session did not run the recorded prompt");
 	}

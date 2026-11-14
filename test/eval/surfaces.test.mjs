@@ -18,6 +18,7 @@ import {
 	surfaceDigest,
 	surfaceProbePaths,
 } from "./surfaces.mjs";
+import { SCENARIOS } from "./scenarios.mjs";
 
 test("the surface registry is exactly the decided digest scope: one digest per model-visible surface class", () => {
 	assert.deepEqual(Object.keys(SURFACE_CLASSES), [
@@ -92,19 +93,23 @@ test("advertisementBytes derives the canonical block, sorted, with repo-relative
 	);
 });
 
-test("every surface class the connector scenario declares digests over the live tree", () => {
-	// The tracer's fixture #1 binding, exercised end-to-end against the
+test("every surface class every scenario declares digests over the live tree", () => {
+	// Each scenario's declared binding, exercised end-to-end against the
 	// real tree: each declared class resolves to a sha256 hex digest. The
-	// pinned values live in the fixture's provenance manifest, compared by
-	// the net itself. project-context is the review round's addition: pi
-	// embeds CLAUDE.md as the system record's <project_instructions>, so
-	// its bytes are as model-visible as the advertisement.
-	for (const surfaceClass of [
-		"advertisement",
-		"skill:theta-lit-search",
-		"extensions",
-		"project-context",
-	]) {
-		assert.match(surfaceDigest(surfaceClass, repoRoot), /^[0-9a-f]{64}$/);
+	// pinned values live in each fixture's provenance manifest, compared by
+	// the net itself. project-context is the #133 review round's addition:
+	// pi embeds CLAUDE.md as the system record's <project_instructions>, so
+	// its bytes are as model-visible as the advertisement. #134 adds the
+	// orchestrator (whose binding includes the vendored
+	// skill:hypothesis-generation — the re-sync drift class), the notebook,
+	// the gateway skill, and the extension-strings scenarios.
+	for (const scenario of SCENARIOS) {
+		for (const surfaceClass of scenario.surfaces) {
+			assert.match(
+				surfaceDigest(surfaceClass, repoRoot),
+				/^[0-9a-f]{64}$/,
+				`${scenario.id}: declared surface ${surfaceClass} does not resolve over the live tree`,
+			);
+		}
 	}
 });

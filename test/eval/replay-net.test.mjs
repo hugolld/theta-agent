@@ -25,6 +25,7 @@ import { buildSessionContext, parseSessionEntries } from "@earendil-works/pi-cod
 import { REPO_ROOT as repoRoot } from "../helpers/repo-root.mjs";
 import { contextHash, normalizeTree } from "./normalize.mjs";
 import { SCENARIOS } from "./scenarios.mjs";
+import { assertShape } from "./shape.mjs";
 import { surfaceDigest } from "./surfaces.mjs";
 const fixtureFile = (scenario) => path.join(repoRoot, "test/eval/fixtures", scenario.id, "session.jsonl");
 const manifestFile = (scenario) => path.join(repoRoot, "test/eval/fixtures", scenario.id, "provenance.json");
@@ -46,12 +47,23 @@ test("scenario shape paths are auditor legs the capture attested", () => {
 	// The net-time shape expectations carry the same paths as the
 	// capture-time auditor legs; this pin keeps a path edit from moving one
 	// list without the other. advertisesSkill is a name, not a path, and
-	// stays out.
+	// stays out. opensSkillsToo and gateRefusal have no auditor leg — the
+	// rig attests one skill read and one script execution, so the further
+	// opens and the gate refusal are the net's alone (docs/agents/eval.md).
 	for (const scenario of SCENARIOS) {
-		for (const shapePath of [scenario.shape.opensSkill, scenario.shape.runsScript]) {
+		const shapePaths = [scenario.shape.opensSkill, scenario.shape.runsScript].filter(
+			(p) => p !== undefined,
+		);
+		for (const shapePath of shapePaths) {
 			assert.ok(
 				scenario.legs.includes(shapePath),
 				`${scenario.id}: shape path ${shapePath} is not one of its auditor legs`,
+			);
+		}
+		if (scenario.shape.gateRefusal !== undefined) {
+			assert.ok(
+				scenario.gateway === true,
+				`${scenario.id}: a gateRefusal shape needs the gateway flag — the gate only judges gateway calls`,
 			);
 		}
 	}
@@ -60,20 +72,8 @@ test("scenario shape paths are auditor legs the capture attested", () => {
 // Index a session's tool calls and results once for the shape checks: the
 // call map is keyed by tool-call id, the result map by the toolCallId the
 // result record carries — the pairing the shape assertions lean on.
-function indexCalls(entries) {
-	const calls = new Map();
-	const results = new Map();
-	for (const entry of entries) {
-		const message = entry.message;
-		if (message?.role === "assistant") {
-			for (const item of message.content ?? []) {
-				if (item?.type === "toolCall") calls.set(item.id, item);
-			}
-		}
-		if (message?.role === "toolResult") results.set(message.toolCallId, message);
-	}
-	return { calls, results };
-}
+// (indexCalls and the shape grammar live in shape.mjs since #134, so the
+// per-scenario checks test without a fixture; see test/eval/shape.test.mjs.)
 
 for (const scenario of SCENARIOS) {
 	if (!existsSync(fixtureFile(scenario))) continue; // the presence test above owns the gap
@@ -112,51 +112,6 @@ for (const scenario of SCENARIOS) {
 	});
 
 	test(`shape — ${scenario.id}: the recording matches the scenario's expected shape`, () => {
-		const { shape } = scenario;
-		// pi advertises with pretty-printed XML — whitespace between the
-		// tags varies, the structure does not.
-		const skillRecord = new RegExp(`<skill>\\s*<name>${shape.advertisesSkill}</name>`);
-		const advertised = entries.some(
-			(entry) =>
-				entry.message?.role === "system" &&
-				typeof entry.message.sections?.skills === "string" &&
-				skillRecord.test(entry.message.sections.skills),
-		);
-		assert.ok(advertised, `the system record never advertised skill ${shape.advertisesSkill}`);
-
-		const { calls, results } = indexCalls(entries);
-		const opened = [...calls.values()].some(
-			(call) =>
-				call.name === "read" &&
-				typeof call.arguments?.path === "string" &&
-				call.arguments.path.endsWith(`/${shape.opensSkill}`) &&
-				results.get(call.id)?.isError === false,
-		);
-		assert.ok(opened, `no paired non-error read of ${shape.opensSkill} in the recording`);
-
-		// Containment only: the capture-time auditor leg owns the full
-		// execution grammar; the net pins that the session ran the
-		// connector's helper at all — spelled in full, or cd-anchored into
-		// the skill tree (the shape real sessions use).
-		const scriptFile = shape.runsScript.split("/").pop();
-		const skillRoot = shape.runsScript.split("/").slice(0, 2).join("/");
-		const ran = [...calls.values()].some(
-			(call) =>
-				call.name === "bash" &&
-				typeof call.arguments?.command === "string" &&
-				(call.arguments.command.includes(shape.runsScript) ||
-					(call.arguments.command.includes("cd ") &&
-						call.arguments.command.includes(skillRoot) &&
-						call.arguments.command.includes(scriptFile))),
-		);
-		assert.ok(ran, `no bash call runs ${shape.runsScript} (directly or cd-anchored)`);
-
-		const last = entries.at(-1);
-		assert.ok(
-			last?.message?.role === "assistant" &&
-				last.message.content?.some((item) => item?.type === "text") &&
-				last.message.stopReason === "stop",
-			"the recording does not end in a final assistant text message",
-		);
+		assertShape(entries, scenario.shape);
 	});
 }
