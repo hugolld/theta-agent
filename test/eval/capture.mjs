@@ -88,14 +88,15 @@ function scenarioById(id) {
 	return scenario;
 }
 
-function runRig(scenario) {
-	const evidenceDir = path.join(
-		homedir(),
-		".theta-evidence",
-		`eval-${scenario.id}-${new Date().toISOString().replaceAll(/[-:]/g, "").slice(0, 15)}`,
-	);
-	mkdirSync(evidenceDir, { recursive: true });
-	const args = [
+// The rig invocation a scenario drives, as the argv array run.mjs receives
+// (spec #134): the scenario's own prompt, a 600s bound, the isolated
+// evidence dir, its auditor legs in order — and the rig flags its scenario
+// list entry declares. `gateway: true` passes `--gateway`: the rig admits
+// the gateway token as its second credential and preflights the host-side
+// forward before launch, so a gateway capture needs that forward up (one
+// parked re-probe when it is down, never a retry loop).
+export function rigArgs(scenario, evidenceDir) {
+	return [
 		path.join(repoRoot, "test/rig/run.mjs"),
 		"run",
 		scenario.prompt,
@@ -103,8 +104,19 @@ function runRig(scenario) {
 		"600",
 		"--session-dir",
 		evidenceDir,
+		...(scenario.gateway ? ["--gateway"] : []),
 		...scenario.legs.flatMap((leg) => ["--leg", leg]),
 	];
+}
+
+function runRig(scenario) {
+	const evidenceDir = path.join(
+		homedir(),
+		".theta-evidence",
+		`eval-${scenario.id}-${new Date().toISOString().replaceAll(/[-:]/g, "").slice(0, 15)}`,
+	);
+	mkdirSync(evidenceDir, { recursive: true });
+	const args = rigArgs(scenario, evidenceDir);
 	console.log(`eval-capture: rig leg starting; evidence will land in ${evidenceDir}`);
 	const result = run("node", args, { stdio: "inherit" });
 	if (result.status !== 0) {
