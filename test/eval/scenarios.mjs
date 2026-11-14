@@ -111,7 +111,17 @@ export const SCENARIOS = Object.freeze([
 		id: "gateway-skill",
 		prompt:
 			`An AlphaFold3 structure prediction job we submitted to our compute cluster yesterday seems stuck in the queue. Following the guidance this environment provides for cluster work, lay out how we should check its status and, once it finishes, retrieve the finished model files, including the cautions at each step. Do not run any cluster work in this reply -- I want the plan only. ${READ_HEADROOM}`,
-		surfaces: ["advertisement", "skill:theta-compute", "extensions", "project-context"],
+		// The gateway doctrine plus the notebook tree the capture's session
+		// proved to open (the land-time binding gain). It also read
+		// gateway/README.md — repo docs, a class the registry deliberately
+		// does not carry; the scope boundary is disclosed in the PR body.
+		surfaces: [
+			"advertisement",
+			"skill:theta-compute",
+			"skill:theta-notebook",
+			"extensions",
+			"project-context",
+		],
 		// Doctrine read, plan written: no script (the gateway skill carries
 		// no helper scripts), no gateway leg — the capture stays cluster-free.
 		legs: ["skills/theta-compute/SKILL.md"],
