@@ -15,15 +15,18 @@ import { assertShape } from "./shape.mjs";
 
 const skillsSection = (name) =>
 	`<available_skills>\n  <skill>\n    <name>${name}</name>\n  </skill>\n</available_skills>`;
-const sysEntry = (skills) => ({ message: { role: "system", sections: { skills } } });
-const userEntry = () => ({ message: { role: "user", content: [{ type: "text", text: "go" }] } });
+const sysEntry = (skills) => ({ type: "message", message: { role: "system", sections: { skills } } });
+const userEntry = () => ({ type: "message", message: { role: "user", content: [{ type: "text", text: "go" }] } });
 const callEntry = (id, name, args) => ({
+	type: "message",
 	message: { role: "assistant", content: [{ type: "toolCall", id, name, arguments: args }] },
 });
 const resultEntry = (callId, isError, text = "ok") => ({
+	type: "message",
 	message: { role: "toolResult", toolCallId: callId, isError, content: [{ type: "text", text }] },
 });
 const finalEntry = () => ({
+	type: "message",
 	message: { role: "assistant", content: [{ type: "text", text: "done" }], stopReason: "stop" },
 });
 
@@ -194,6 +197,99 @@ test("gateRefusal reds on a refusal of some other gateway tool than declared", (
 	];
 	assert.throws(
 		() => assertShape(entries, { ...baseShape, gateRefusal: "submit_job" }),
+		/no refused gateway call submit_job/,
+	);
+});
+
+// The codemode path (the compute doctrine's normal case): pi keeps the
+// nested calls in the bounded record on the calling tool's result — name,
+// status, and the gate's refusal as `error` — and the nested id never
+// enters the transcript as a toolCall record. The refusal rides the
+// gate's own wording, so an ordinary error cannot pose as one.
+const nestedRefusal = (parentId, error) => ({
+	type: "message",
+	message: {
+		role: "toolResult",
+		toolCallId: parentId,
+		isError: true,
+		content: [{ type: "text", text: `Script error: ${error}` }],
+		nestedCalls: {
+			calls: [
+				{
+					id: `${parentId}/1`,
+					name: GATEWAY_TOOL,
+					status: "error",
+					arguments: { run_name: "smoke-check" },
+					error,
+				},
+			],
+			complete: true,
+		},
+	},
+});
+
+test("gateRefusal passes on a codemode-nested refusal — the bounded record carries it", () => {
+	assertShape(
+		baseEntries("demo", "skills/demo/SKILL.md", [
+			callEntry("c7", "codemode", { code: "await tools.mcp__theta_compute__submit_job({})" }),
+			nestedRefusal(
+				"c7",
+				'submit_job for run "smoke-check" (nested under tool call c7) was refused by the submit gate — ask the user',
+			),
+		]),
+		{ ...baseShape, gateRefusal: "submit_job" },
+	);
+});
+
+test("gateRefusal reds on a nested gateway error that is not a gate refusal", () => {
+	assert.throws(
+		() =>
+			assertShape(
+				baseEntries("demo", "skills/demo/SKILL.md", [
+					callEntry("c7", "codemode", { code: "await tools.mcp__theta_compute__submit_job({})" }),
+					nestedRefusal("c7", "connection refused by the gateway host"),
+				]),
+				{ ...baseShape, gateRefusal: "submit_job" },
+			),
+		/no refused gateway call submit_job/,
+	);
+});
+
+test("gateRefusal reds on a nested gateway call that succeeded", () => {
+	const entries = baseEntries("demo", "skills/demo/SKILL.md", [
+		callEntry("c7", "codemode", { code: "await tools.mcp__theta_compute__submit_job({})" }),
+		{
+			type: "message",
+			message: {
+				role: "toolResult",
+				toolCallId: "c7",
+				isError: false,
+				content: [{ type: "text", text: "submitted" }],
+				nestedCalls: {
+					calls: [
+						{ id: "c7/1", name: GATEWAY_TOOL, status: "ok", arguments: { run_name: "smoke-check" } },
+					],
+					complete: true,
+				},
+			},
+		},
+	]);
+	assert.throws(
+		() => assertShape(entries, { ...baseShape, gateRefusal: "submit_job" }),
+		/no refused gateway call submit_job/,
+	);
+});
+
+test("gateRefusal reds on a flat gateway error without the gate's wording", () => {
+	assert.throws(
+		() =>
+			assertShape(
+				baseEntries("demo", "skills/demo/SKILL.md", [
+					callEntry("c6", GATEWAY_TOOL, { run_name: "smoke-check" }),
+					resultEntry("c6", true, "connection refused by the gateway host"),
+				]),
+				{ ...baseShape, gateRefusal: "submit_job" },
+			),
 		/no refused gateway call submit_job/,
 	);
 });

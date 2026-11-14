@@ -10,10 +10,17 @@
 //   runsScript      a bash invocation of a skill script (the S0 grammar:
 //                   the path named in full, or the cd-anchored form real
 //                   sessions use)
-//   gateRefusal     a gateway tool call the submit gate blocked — an
-//                   error-paired result on the sanitized tool name. Print
+//   gateRefusal     a gateway tool call the submit gate blocked. Print
 //                   mode answers no confirms, so the refusal is
-//                   deterministic and no job can be created.
+//                   deterministic and no job can be created. Two paths
+//                   carry it: the flat call's error-paired result, or —
+//                   the compute doctrine's normal case — a codemode
+//                   script's nested call, whose refusal pi records in the
+//                   bounded record on the calling tool's result. Either
+//                   way the gate's own wording marks it: an error alone
+//                   cannot tell the gate's refusal from a gateway or
+//                   server error, and this scenario pins the extension's
+//                   user-facing strings.
 //
 // The net-side shape is half the expectation; the capture-time half is
 // the auditor legs the rig run passes live (docs/agents/eval.md). Shape
@@ -22,6 +29,7 @@
 
 import assert from "node:assert/strict";
 import { createJiti } from "jiti";
+import { collectNestedCalls } from "../../scripts/audit-dogfood.mjs";
 
 // pi registers MCP tool names sanitized: every character outside
 // [A-Za-z0-9_] becomes `_` (pi's createMcpToolName), so the gateway
@@ -101,12 +109,41 @@ export function assertShape(entries, shape) {
 	}
 
 	if (shape.gateRefusal !== undefined) {
-		const refused = [...calls.values()].some(
+		const gatewayTool = `${GATEWAY_PREFIX}${shape.gateRefusal}`;
+		// The gate's own wording (extensions/submit-gate.ts builds the
+		// refusal message around it): the marker both paths must carry, so
+		// an ordinary error — a gateway down, a server refusal — cannot
+		// pass for the gate's decision. A rewording moves the extensions
+		// surface digest and recaptures every fixture; this literal then
+		// follows the new wording deliberately, in review.
+		const refusalMarker = "was refused by the submit gate";
+		const resultText = (result) =>
+			Array.isArray(result?.content)
+				? result.content
+						.filter((item) => item?.type === "text")
+						.map((item) => item.text)
+						.join("")
+				: "";
+		const flat = [...calls.values()].some(
 			(call) =>
-				call.name === `${GATEWAY_PREFIX}${shape.gateRefusal}` &&
-				results.get(call.id)?.isError === true,
+				call.name === gatewayTool &&
+				results.get(call.id)?.isError === true &&
+				resultText(results.get(call.id)).includes(refusalMarker),
 		);
-		assert.ok(refused, `no refused gateway call ${shape.gateRefusal} in the recording`);
+		// The nested path through the one fail-closed reader of pi's
+		// bounded record (scripts/audit-dogfood.mjs): the refusal rides the
+		// entry's `error` field, `status: "error"` marks the failed call.
+		const nested = collectNestedCalls(entries).calls.some(
+			(entry) =>
+				entry.name === gatewayTool &&
+				entry.status === "error" &&
+				typeof entry.error === "string" &&
+				entry.error.includes(refusalMarker),
+		);
+		assert.ok(
+			flat || nested,
+			`no refused gateway call ${shape.gateRefusal} in the recording`,
+		);
 	}
 
 	const last = entries.at(-1);

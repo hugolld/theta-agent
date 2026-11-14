@@ -1594,13 +1594,14 @@ test("collectNestedCalls reads the bounded record and counts multi-level ids", (
 			{ id: "call_p/1/1", name: "read", status: "ok", arguments: {} },
 		]),
 	];
-	assert.equal(collectNestedCalls(ok), 2);
+	assert.equal(collectNestedCalls(ok).count, 2);
+	assert.deepEqual(collectNestedCalls(ok).calls, ok[1].message.nestedCalls.calls);
 	// the grandchild segment grammar is pi's own: deeper nests append /n
 	assert.equal(
 		collectNestedCalls([
 			assistant("call_p"),
 			carrier("call_p", [{ id: "call_p/2/3/4", name: "read", status: "ok" }]),
-		]),
+		]).count,
 		1,
 	);
 	// a flat suffix with no digits is not an assigned id

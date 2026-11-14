@@ -1586,10 +1586,13 @@ const NESTED_ID_SUFFIX = /^(?:\/\d+)+$/;
 // it, all nested ids are unique, and none collides with a top-level call
 // or result id. A fabricated record — spliced onto the wrong parent,
 // duplicated, or claiming a top-level call's id — fails closed. Returns
-// the nested-call count for the attestation.
+// the validated entries and their count — the count for the attestation,
+// the entries for the replay net's shape check (the one reader, two
+// consumers: the reading does not drift apart).
 export function collectNestedCalls(recs) {
 	const topLevelIds = new Set();
 	const nestedIds = new Set();
+	const calls = [];
 	let count = 0;
 	for (const step of walkToolCallsAndResults(recs)) {
 		if (step.call !== undefined) {
@@ -1633,6 +1636,7 @@ export function collectNestedCalls(recs) {
 				throw new Error(`duplicate nestedCalls id: ${entry.id}`);
 			}
 			nestedIds.add(entry.id);
+			calls.push(entry);
 			count += 1;
 		}
 	}
@@ -1643,7 +1647,7 @@ export function collectNestedCalls(recs) {
 			);
 		}
 	}
-	return count;
+	return { count, calls };
 }
 
 // The id-paired calls of one tool, recorded after the prompt — the shared
@@ -1970,7 +1974,7 @@ export function auditSession(dir, rootArg, legs = []) {
 	}
 	// Nested calls (codemode's bounded record) are transcript structure,
 	// not a spot-check concern: every session is checked, legs or not.
-	const nestedCount = collectNestedCalls(recs);
+	const nestedCount = collectNestedCalls(recs).count;
 	const sysRecs = recs.filter(
 		(r) => r.type === "message" && r.message?.role === "system",
 	);

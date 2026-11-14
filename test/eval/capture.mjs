@@ -174,6 +174,44 @@ export function sanitizeTranscript(text, sessionCwd) {
 	return out;
 }
 
+// The node-list redaction's pure half (pinned by capture-guard.test.mjs):
+// cluster topology stays out of the public repo, mechanically, the way
+// the dogfood golden recipe does it by review
+// (test/dogfood-audit.test.mjs). Two passes share one placeholder map:
+// every JSON `node_list` value — at whichever escaping level a rig
+// transcript carries it (the tool result's own text, and that text
+// embedded again in a codemode output) — and every bare Slurm node-list
+// token the model's own prose echoes back (the session paraphrases the
+// environment output into its thinking and its answer). A value gets one
+// stable `__HOST_NODES_<PARTITION>_<N>__` placeholder wherever it
+// appears, assigned in first-occurrence order, and the placeholder
+// preserves the partition prefix, so the record still reads
+// cpu-before-gpu. Prose that merely names the field or the partition is
+// untouched: the JSON pass requires the quoted-key/colon/value structure,
+// the token pass requires digits or a bracketed range (bare `cpu`, `gpu`,
+// `cpus` stay).
+const NODE_LIST_RE =
+	/node_list[\s\\]*"+[\s\\]*:[\s\\]*"+([A-Za-z0-9,[\]*.-]+)[\s\\]*"+/g;
+const NODE_LIST_TOKEN_RE = /\b(?:cpu|gpu)(?:\d+|\d*\[[0-9,\-]+\])(?![a-z0-9])/g;
+
+export function redactNodeLists(text) {
+	const seen = new Map();
+	const placeholderFor = (value) => {
+		const key = value.toLowerCase();
+		if (!seen.has(key)) {
+			const partition = (value.match(/^[a-z]+/i)?.[0] ?? "node").toUpperCase();
+			const prefix = `__HOST_NODES_${partition}_`;
+			const used = [...seen.values()].filter((p) => p.startsWith(prefix)).length;
+			seen.set(key, `${prefix}${String.fromCharCode(65 + used)}__`);
+		}
+		return seen.get(key);
+	};
+	let out = text.replaceAll(NODE_LIST_RE, (match, value) =>
+		match.replace(value, placeholderFor(value)),
+	);
+	return out.replaceAll(NODE_LIST_TOKEN_RE, (token) => placeholderFor(token));
+}
+
 function assertNoProviderKey(text) {
 	let config;
 	try {
@@ -210,13 +248,15 @@ function land(scenario, evidenceDir) {
 
 	// Sanitization, the golden-fixture recipe: the session's checkout root
 	// becomes __REPO__ everywhere (structure survives, machine roots do
-	// not); host machine paths and credentials must be absent outright.
+	// not), cluster topology (node lists) becomes __HOST_NODES_*__
+	// placeholders; host machine paths and credentials must be absent
+	// outright.
 	const firstLine = evidence.transcriptText.split("\n", 1)[0];
 	const session = JSON.parse(firstLine);
 	if (session.type !== "session" || typeof session.cwd !== "string" || !session.cwd.startsWith("/")) {
 		fail("the transcript's first record is not a session header with an absolute cwd");
 	}
-	const sanitized = sanitizeTranscript(evidence.transcriptText, session.cwd);
+	const sanitized = redactNodeLists(sanitizeTranscript(evidence.transcriptText, session.cwd));
 	assertNoProviderKey(sanitized);
 	for (const machine of machinePathPrefixes()) {
 		if (sanitized.includes(machine)) {

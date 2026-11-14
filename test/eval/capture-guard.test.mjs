@@ -15,7 +15,7 @@ import path from "node:path";
 import { test } from "node:test";
 import { run } from "../../scripts/dogfood-gates.mjs";
 import { initHardenedGitRepo } from "../helpers/git-repo.mjs";
-import { assertSurfacesUnmoved, credentialLeaks, sanitizeTranscript } from "./capture.mjs";
+import { assertSurfacesUnmoved, credentialLeaks, redactNodeLists, sanitizeTranscript } from "./capture.mjs";
 
 const scratch = mkdtempSync(path.join(tmpdir(), "eval-land-guard-"));
 test.after(() => rmSync(scratch, { recursive: true, force: true }));
@@ -157,4 +157,41 @@ test("the sanitizer never treats a depth-1 cwd's parent (the root) as a home", (
 test("the sanitizer leaves paths that are neither root nor home", () => {
 	const text = "/srv/data and /etc/config survive";
 	assert.equal(sanitizeTranscript(text, "/home/theta/theta"), text);
+});
+
+// The node-list redaction (spec #134, the gateway-bearing capture): the
+// cluster topology the gateway's own outputs carry — here at both
+// escaping levels a rig transcript produces — is redacted mechanically,
+// the golden-fixture vocabulary, before the fixture can enter the public
+// repo. Distinct values keep distinct placeholders in first-occurrence
+// order; the partition prefix survives.
+test("the node-list redaction covers both escaping levels and keeps values distinct", () => {
+	const text =
+		'outer \\"node_list\\": \\"cpu[11-13]\\" then doubly \\\\"node_list\\\\\\": \\\\"gpu1\\\\" and repeat \\"node_list\\": \\"cpu[11-13]\\"';
+	const out = redactNodeLists(text);
+	assert.equal(out.includes("cpu[11-13]"), false);
+	assert.equal(out.includes("gpu1"), false);
+	assert.equal((out.match(/__HOST_NODES_CPU_A__/g) ?? []).length, 2);
+	assert.equal(out.includes("__HOST_NODES_GPU_A__"), true);
+});
+
+test("the node-list redaction assigns placeholders in first-occurrence order per partition", () => {
+	const text = '"node_list": "gpu2", "node_list": "cpu[26-27]", "node_list": "gpu1"';
+	const out = redactNodeLists(text);
+	assert.equal(out, '"node_list": "__HOST_NODES_GPU_A__", "node_list": "__HOST_NODES_CPU_A__", "node_list": "__HOST_NODES_GPU_B__"');
+});
+
+test("the node-list redaction leaves prose that merely names the field", () => {
+	const text = "the node_list argument and node_list: philosophy stay";
+	assert.equal(redactNodeLists(text), text);
+});
+
+test("the node-list redaction maps a prose echo to the same placeholder as its structured value", () => {
+	const text =
+		'"node_list": "cpu[14-23,29-30]" then the session paraphrases: `cpu[14-23,29-30]` plus one mixed (`cpu28`) — 12 idle nodes on the `cpu` partition, cpus busy';
+	const out = redactNodeLists(text);
+	assert.equal((out.match(/__HOST_NODES_CPU_A__/g) ?? []).length, 2);
+	assert.equal(out.includes("__HOST_NODES_CPU_B__"), true);
+	// bare partition word, plural, and a count stay — not topology
+	assert.equal(out.includes("— 12 idle nodes on the `cpu` partition, cpus busy"), true);
 });
