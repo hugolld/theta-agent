@@ -1,6 +1,6 @@
 # The replay net and its captures
 
-The replay net is the eval suite's base layer (ADR 0007): a keyless, deterministic regression net over recorded sessions, run host-side in the standard `npm test` — no model, no key, no rig. This doc owns the net's working doctrine: the three pins, the digest-scope decision, the capture recipe, and the drill leg. The live-model benchmark suite — the eval suite's second layer — is future M6 work and inherits the capture rules recorded here.
+The replay net is the eval suite's base layer (ADR 0007): a keyless, deterministic regression net over recorded sessions, run host-side in the standard `npm test` — no model, no key, no rig. This doc owns the net's working doctrine: the three pins, the digest-scope decision, the capture recipe, and the drill leg. The benchmark suite — the eval suite's live layer — sits beside the net (M6 S2 landed its tracer); its doctrine is the last section, and its legs inherit the capture rules recorded here.
 
 ## What the net pins
 
@@ -72,3 +72,23 @@ node scripts/drill-scratch.mjs /tmp/spec134-drill test/eval/replay-net.test.mjs
 ```
 
 The captured leg output rides the strike's PR body. (The #134 drill measured all three legs 2026-11-14; leg 1's red set is the binding set, not the sampled fixture alone.)
+
+## The benchmark layer
+
+The benchmark suite (GLOSSARY) is the eval suite's live layer: graded tasks run against the model, as a mode of the clean-room rig. M6 S2 (#135) lands the tracer — one task, end to end, from one command:
+
+```sh
+node test/rig/run.mjs eval provenance-decision --timeout 600
+```
+
+Doctrine, pinned by the offline tests in `test/eval/bench-*.test.mjs`:
+
+- **One command, one credential.** The eval mode refuses `--gateway` and `--rpc` before Docker is even needed — no gateway token path exists on a benchmark leg. The provider key is the only credential that enters the rig. The classify() judge runs host-side, reading the host pi config, so its key never enters either.
+- **Workspace-as-oracle.** The session runs print-mode in a fresh task workspace (`$HOME/task` in the container; the launcher rides the clone's own path without `--dev`, which would refuse the workspace cwd). Objective checks are declarative entries in the checked-in task list (`test/eval/bench-tasks.mjs`), executed against the workspace by `test/eval/bench-grade.mjs` — pure `node:fs`, because it runs in-container from the clone where no node_modules exists. Model prose proves nothing; the grader never reads it.
+- **One subjective check rides classify().** The task's `classify` entry names its input (`on:` an objective check whose matched artifact is the judge's state, plus the session's own prompt) and a bool question. The judge is a named config slot in the task list — never an identity in code (ADR 0007). The first slot is the iteration tier, `openrouter/typesafe-jev-1.14` with `OPENROUTER_API_KEY` host-side: pi's classifier catalog is closed to the Jev/Clef/Decisions families, so the campaign chat provider cannot serve classify() (probed 2026-11-14, zero classifiers reachable) — a disclosed bend from "the campaign provider's classify()". The independent tier that judges public-destined numbers is a later strike's slot.
+- **Costs ride the native ledger.** `test/eval/bench-report.mjs` sums every transcript the leg recorded — assistant messages, standalone `usage` entries, toolResult and compaction usage — mirroring pi's own aggregation (`getSessionStats`/`getUsageCostBreakdown` on the installed pi; the helpers are not in the public export surface, so the rule set is mirrored and cited, and the pinned totals against a committed fixture keep the mirror honest). The report file (`bench-report.json`) lands beside the recorded exit status: task grade, judge tier, usage totals.
+- **Failure is loud and separated.** Print-mode exit codes carry the leg: a truncated response exits non-zero and fails the leg. A judge error fails the leg after the report lands. A failing task grade is a successful measurement — the leg exits zero and the grade rides the report; when the objective check matched nothing, the classify row is skipped (a `skipped` reason, never a `judgeError`), so grading failure and leg failure never mix.
+- **Multi-session is structure, not code.** A task's `sessions` array is one print-mode session per entry in the same workspace; entries after the first resume with `--continue` (resume-keeps-tools). The tracer task is single-session, so the resume path is structure the next suite exercises.
+- **Compaction stays native.** The eval mode never passes `reserveTokens`; a long leg compacts the way any pi session does.
+
+Evidence is dogfood-shaped, never the model's self-report: the transcript, `bench-grades.json`, `bench-report.json`, and the exit-status file in the leg's evidence dir. The first live leg's UsageEntry cost rides the strike's PR body, measured at strike time. Benchmark strikes carry no drill leg — a live-model leg has no deterministic mutation to flip (ADR 0007).
