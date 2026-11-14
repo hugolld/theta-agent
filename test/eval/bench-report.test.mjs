@@ -20,27 +20,27 @@ const fixtureText = readFileSync(path.join(import.meta.dirname, "fixtures/connec
 
 test("the usage ledger sums a real session's entries to the pinned totals", () => {
 	const summed = sumEntries(parseSessionEntries(fixtureText));
-	// Measured against the committed fixture (2026-11-15) and equal to
-	// pi's own getUsageCostBreakdown over the same entries: same key,
-	// same cost, same tokens. A pi bump that changes ledger semantics
-	// or a fixture recapture reds here on purpose.
+	// Measured against the committed fixture (2026-11-15 recapture) and
+	// equal to pi's own getUsageCostBreakdown over the same entries:
+	// same key, same cost, same tokens. A pi bump that changes ledger
+	// semantics or a fixture recapture reds here on purpose.
 	assert.deepEqual(summed.byModel, {
 		"zai-coding-cn/glm-5.3-flash": {
-			input: 43126,
-			output: 6294,
-			cacheRead: 112384,
+			input: 30464,
+			output: 6264,
+			cacheRead: 85952,
 			cacheWrite: 0,
-			cost: 0.012987419999999998,
-			totalTokens: 161804,
+			cost: 0.01028016,
+			totalTokens: 122680,
 		},
 	});
 	assert.deepEqual(summed.totals, {
-		input: 43126,
-		output: 6294,
-		cacheRead: 112384,
+		input: 30464,
+		output: 6264,
+		cacheRead: 85952,
 		cacheWrite: 0,
-		cost: 0.012987419999999998,
-		totalTokens: 161804,
+		cost: 0.01028016,
+		totalTokens: 122680,
 	});
 });
 
@@ -71,7 +71,7 @@ test("sumSessionUsage walks the transcript name grammar and counts sessions", ()
 		writeFileSync(path.join(dir, "gate.jsonl"), "{}\n"); // not a transcript
 		const summed = sumSessionUsage(dir);
 		assert.equal(summed.sessions, 1);
-		assert.equal(summed.totals.totalTokens, 161804);
+		assert.equal(summed.totals.totalTokens, 122680);
 	} finally {
 		rmSync(dir, { recursive: true, force: true });
 	}
