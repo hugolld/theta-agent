@@ -13,7 +13,7 @@ import path from "node:path";
 import { test } from "node:test";
 import { parseSessionEntries } from "@earendil-works/pi-coding-agent";
 import { BOOL_ANSWER_SAMPLE } from "./bench-answer-shape.mjs";
-import { BENCH_FILES, buildReport, resolveJudge, runJudge, sumEntries, sumSessionUsage } from "./bench-report.mjs";
+import { BENCH_FILES, buildReport, buildSuiteReport, resolveJudge, runJudge, sumEntries, sumSessionUsage } from "./bench-report.mjs";
 import { benchTaskById } from "./bench-tasks.mjs";
 
 const task = benchTaskById("provenance-decision");
@@ -168,7 +168,11 @@ test("resolveJudge names the fix for a missing model and for a missing credentia
 
 const usageStub = { sessions: 1, byModel: {}, totals: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, cost: 0, totalTokens: 2 } };
 
-test("the report carries task grade, judge tier, and usage totals; grade follows the checks", () => {
+test("the report carries task grade, judge tiers, and usage totals; grade follows checks and every tier", () => {
+	// Two-tier judging (spec #136): each judge slot produces its own row,
+	// and the task grade passes only when every objective check and every
+	// tier's verdict pass — a tier disagreement is a failed grade, loud
+	// in the report, never silently averaged away.
 	const grades = {
 		task: task.id,
 		checks: [
@@ -177,41 +181,56 @@ test("the report carries task grade, judge tier, and usage totals; grade follows
 		],
 		matched: {},
 	};
+	const slots = [task.judges[0], { tier: "independent", provider: "stub2", model: "stub-solar" }];
 	const passing = buildReport({
 		task,
 		grades,
-		judgeSlot,
-		judgeResult: { pass: true, probability: 0.9 },
+		judgeSlots: slots,
+		judgeResults: [
+			{ pass: true, probability: 0.9 },
+			{ pass: true, probability: 0.8 },
+		],
 		usage: usageStub,
 		head: "abc1234",
 		gradedAt: "2026-11-15T00:00:00.000Z",
 	});
 	assert.equal(passing.grade, "pass");
-	assert.equal(passing.judge.tier, "iteration");
-	assert.equal(passing.judge.provider, "stub");
+	assert.equal(passing.class, task.class, "the report traces the grade to the task's class");
+	assert.deepEqual(
+		passing.judges.map((j) => [j.tier, j.provider, j.pass]),
+		[
+			["iteration", "openrouter", true],
+			["independent", "stub2", true],
+		],
+		"each tier carries its own verdict row",
+	);
+	assert.equal(passing.judges[0].probability, 0.9);
 	assert.equal(passing.usage.totals.totalTokens, 2);
-	const classifyRow = passing.checks.find((c) => c.id === task.classify.id);
-	assert.equal(classifyRow.probability, 0.9);
-	assert.equal(classifyRow.judgeError, undefined);
-	assert.equal(passing.checks.length, 3, "objective checks plus the classify check");
+	assert.equal(passing.checks.length, 2, "objective checks only — judge rows live under judges");
 
 	const judgedFalse = buildReport({
 		task,
 		grades,
-		judgeSlot,
-		judgeResult: { pass: false, judgeError: "judge stopReason error" },
+		judgeSlots: slots,
+		judgeResults: [
+			{ pass: true, probability: 0.9 },
+			{ pass: false, judgeError: "judge stopReason error" },
+		],
 		usage: usageStub,
 		head: "abc1234",
 		gradedAt: "2026-11-15T00:00:00.000Z",
 	});
-	assert.equal(judgedFalse.grade, "fail");
-	assert.equal(judgedFalse.checks.find((c) => c.id === task.classify.id).judgeError, "judge stopReason error");
+	assert.equal(judgedFalse.grade, "fail", "a tier disagreement fails the task grade");
+	assert.equal(judgedFalse.judges[1].judgeError, "judge stopReason error");
 
 	const objectiveMiss = buildReport({
 		task,
 		grades: { ...grades, checks: grades.checks.map((c) => ({ ...c, pass: false })) },
-		judgeSlot,
-		judgeResult: { pass: true, probability: 0.9 },
+		judgeSlots: slots,
+		judgeResults: [
+			{ pass: true, probability: 0.9 },
+			{ pass: true, probability: 0.8 },
+		],
 		usage: usageStub,
 		head: "abc1234",
 		gradedAt: "2026-11-15T00:00:00.000Z",
@@ -219,9 +238,9 @@ test("the report carries task grade, judge tier, and usage totals; grade follows
 	assert.equal(objectiveMiss.grade, "fail");
 });
 
-test("a skipped classify row fails the grade without a judge error — a missed objective check is a failed measurement, not a leg failure", () => {
+test("a skipped judge row fails the grade without a judge error — a missed objective check is a failed measurement, not a leg failure", () => {
 	// The accepted behavior delta's pin: when the objective check matched
-	// nothing, the classify row carries `skipped`, never `judgeError` —
+	// nothing, the judge rows carry `skipped`, never `judgeError` —
 	// runEval's leg-failure gate keys on judgeError alone, so the leg
 	// exits zero and the grade rides the report (docs/agents/eval.md).
 	const report = buildReport({
@@ -234,23 +253,82 @@ test("a skipped classify row fails the grade without a judge error — a missed 
 			],
 			matched: {},
 		},
-		judgeSlot,
-		judgeResult: { pass: false, skipped: "objective check decision-entry matched nothing to judge" },
+		judgeSlots: task.judges,
+		judgeResults: task.judges.map(() => ({ pass: false, skipped: `objective check ${task.classify.on} matched nothing to judge` })),
 		usage: usageStub,
 		head: "abc1234",
 		gradedAt: "2026-11-15T00:00:00.000Z",
 	});
 	assert.equal(report.grade, "fail");
-	const classifyRow = report.checks.find((c) => c.id === task.classify.id);
-	assert.equal(classifyRow.pass, false);
-	assert.match(classifyRow.skipped, /matched nothing to judge/);
-	assert.equal(classifyRow.judgeError, undefined, "a skipped row must not trip the leg-failure gate");
+	for (const judgeRow of report.judges) {
+		assert.equal(judgeRow.pass, false);
+		assert.match(judgeRow.skipped, /matched nothing to judge/);
+		assert.equal(judgeRow.judgeError, undefined, "a skipped row must not trip the leg-failure gate");
+	}
+});
+
+test("buildSuiteReport aggregates per-task grades, judge tiers, and costs into the run artifact", () => {
+	const litTask = benchTaskById("lit-triage");
+	const reportOf = (t, grade, cost, totalTokens) => ({
+		task: t.id,
+		class: t.class,
+		grade,
+		sessions: t.sessions.length,
+		landedHead: "abc1234",
+		gradedAt: "2026-11-15T00:00:00.000Z",
+		judges: t.judges.map((slot, i) => ({
+			id: t.classify.id,
+			tier: slot.tier,
+			provider: slot.provider,
+			model: slot.model,
+			pass: grade === "pass",
+			...(i === 0 ? { usage: { totalTokens: 10, cost: { total: 0.001 } } } : {}),
+		})),
+		checks: t.checks.map((c) => ({ id: c.id, kind: c.kind, pass: grade === "pass", detail: "x" })),
+		usage: { byModel: {}, totals: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, cost, totalTokens } },
+	});
+	const reports = [
+		reportOf(litTask, "pass", 0.01, 1000),
+		reportOf(task, "fail", 0.02, 2000),
+	];
+	const suite = buildSuiteReport({
+		reports,
+		provider: "zai-coding-cn",
+		model: "glm-5.3-flash",
+		head: "abc1234",
+		gradedAt: "2026-11-15T00:00:00.000Z",
+	});
+	assert.equal(suite.landedHead, "abc1234");
+	assert.deepEqual(
+		suite.tasks.map((t) => [t.task, t.grade, t.judges.length]),
+		[
+			["lit-triage", "pass", 2],
+			["provenance-decision", "fail", 1],
+		],
+		"per-task rows carry the grade and each tier's verdict",
+	);
+	assert.deepEqual(
+		suite.tasks.map((t) => t.judges.map((j) => j.tier)),
+		[
+			["iteration", "independent"],
+			["iteration"],
+		],
+	);
+	assert.deepEqual(suite.tasks[0].checks, { passed: 2, total: 2 });
+	assert.deepEqual(suite.tasks[1].checks, { passed: 0, total: 2 });
+	assert.equal(suite.totals.tasks, 2);
+	assert.equal(suite.totals.passed, 1);
+	assert.equal(suite.totals.failed, 1);
+	assert.equal(suite.totals.sessions, 2);
+	assert.equal(suite.totals.tokens, 3000);
+	assert.equal(suite.totals.cost, 0.03);
 });
 
 test("BENCH_FILES names the eval-mode artifacts beside the session-evidence bundle", () => {
 	assert.deepEqual(BENCH_FILES, {
 		grades: "bench-grades.json",
 		report: "bench-report.json",
+		suite: "bench-suite.json",
 		answer: "answer.txt",
 	});
 });

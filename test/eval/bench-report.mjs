@@ -1,12 +1,12 @@
-// The benchmark report step (spec #135, ADR 0007): the host-side half
-// of grading. The objective half (bench-grade.mjs) ran in-container
-// against the task workspace; this step runs where the judge's
-// credential lives — host-side, reading the host pi config — because a
-// benchmark leg carries only the provider key into the rig, and the
-// classifier's key is not that key. It merges three inputs into the
-// machine-readable report file beside the recorded exit status: the
-// objective check results, the classify() verdict on the one
-// subjective check, and the session's native usage ledger.
+// The benchmark report step (spec #136, on the #135 tracer's shape):
+// the host-side half of grading. The objective half (bench-grade.mjs)
+// ran in-container against the task workspace; this step runs where the
+// judges' credentials live — host-side, reading the host pi config —
+// because a benchmark leg carries only the provider key into the rig,
+// and a classifier's key is not that key. It merges three inputs into
+// the machine-readable report file beside the recorded exit status: the
+// objective check results, one classify() verdict per judge tier on the
+// one subjective entry, and the session's native usage ledger.
 //
 // The usage ledger mirrors pi's own aggregation (dist/core/agent-session.js
 // getSessionStats + dist/core/usage-totals.js getUsageCostBreakdown on the
@@ -32,6 +32,7 @@ import { TRANSCRIPT_NAME } from "../../scripts/session-evidence.mjs";
 export const BENCH_FILES = Object.freeze({
 	grades: "bench-grades.json",
 	report: "bench-report.json",
+	suite: "bench-suite.json",
 	answer: "answer.txt",
 });
 
@@ -168,37 +169,87 @@ export async function runJudge(registry, model, classify, state) {
 	};
 }
 
-// The report itself: task grade, judge tier, usage totals — beside the
-// recorded exit status the rig already wrote (spec #135). A judgeResult
-// may carry `skipped` (the objective check matched nothing to judge —
-// the task grade fails, the leg does not: grading failure and leg
-// failure never mix) or `judgeError` (the judge itself broke — that
-// fails the leg, runEval's gate), and the two ride separate fields.
-export function buildReport({ task, grades, judgeSlot, judgeResult, usage, head, gradedAt }) {
-	const checks = [
-		...grades.checks,
-		{
+// The report itself (spec #136's two-tier shape, superseding the #135
+// single-judge one): the task grade, one judge row per tier, and usage
+// totals — beside the recorded exit status the rig already wrote. The
+// `checks` list is the objective, workspace-as-oracle rows only; the
+// subjective verdicts ride `judges`, one row per judge slot. The grade
+// passes only when every objective check and every tier pass — a tier
+// disagreement is a failed grade, loud in the report, never averaged
+// away. A judge row may carry `skipped` (the objective check matched
+// nothing to judge — the task grade fails, the leg does not: grading
+// failure and leg failure never mix) or `judgeError` (the judge itself
+// broke — that fails the leg, runEval's gate), and the two ride
+// separate fields.
+export function buildReport({ task, grades, judgeSlots, judgeResults, usage, head, gradedAt }) {
+	const judges = judgeSlots.map((slot, index) => {
+		const result = judgeResults[index];
+		return {
 			id: task.classify.id,
-			kind: "classify",
-			pass: judgeResult.pass,
-			...(judgeResult.probability !== undefined ? { probability: judgeResult.probability } : {}),
-			...(judgeResult.skipped !== undefined ? { skipped: judgeResult.skipped } : {}),
-			...(judgeResult.judgeError !== undefined ? { judgeError: judgeResult.judgeError } : {}),
-		},
-	];
+			tier: slot.tier,
+			provider: slot.provider,
+			model: slot.model,
+			pass: result.pass,
+			...(result.probability !== undefined ? { probability: result.probability } : {}),
+			...(result.skipped !== undefined ? { skipped: result.skipped } : {}),
+			...(result.judgeError !== undefined ? { judgeError: result.judgeError } : {}),
+			...(result.usage ? { usage: result.usage } : {}),
+		};
+	});
 	return {
 		task: task.id,
-		grade: checks.every((check) => check.pass) ? "pass" : "fail",
+		class: task.class,
+		grade: [...grades.checks, ...judges].every((row) => row.pass) ? "pass" : "fail",
 		sessions: usage.sessions,
 		landedHead: head,
 		gradedAt,
-		judge: {
-			tier: judgeSlot.tier,
-			provider: judgeSlot.provider,
-			model: judgeSlot.model,
-			...(judgeResult.usage ? { usage: judgeResult.usage } : {}),
-		},
-		checks,
+		judges,
+		checks: grades.checks,
 		usage: { byModel: usage.byModel, totals: usage.totals },
+	};
+}
+
+// The suite run artifact (spec #136): one per-run report carrying
+// per-task grades, each tier's verdict, and costs. Lean by design — the
+// per-task detail (by-model usage, check details, judge probabilities)
+// lives in each task's own bench-report.json; this is the file the
+// strike's PR body reads. Public-surface numbers come only from the
+// independent tier, and publishing them is the owner's editorial act,
+// out of band — the artifact records what happened, it does not publish.
+export function buildSuiteReport({ reports, provider, model, head, gradedAt }) {
+	const tasks = reports.map((report) => ({
+		task: report.task,
+		class: report.class,
+		grade: report.grade,
+		sessions: report.sessions,
+		judges: report.judges.map(({ tier, provider: judgeProvider, model: judgeModel, pass }) => ({
+			tier,
+			provider: judgeProvider,
+			model: judgeModel,
+			pass,
+		})),
+		checks: {
+			passed: report.checks.filter((check) => check.pass).length,
+			total: report.checks.length,
+		},
+		usage: { totals: report.usage.totals },
+	}));
+	const totals = tasks.reduce(
+		(acc, row) => {
+			acc.sessions += row.sessions;
+			acc.tokens += row.usage.totals.totalTokens;
+			acc.cost += row.usage.totals.cost;
+			if (row.grade === "pass") acc.passed += 1;
+			else acc.failed += 1;
+			return acc;
+		},
+		{ tasks: tasks.length, passed: 0, failed: 0, sessions: 0, tokens: 0, cost: 0 },
+	);
+	return {
+		suite: { provider, model },
+		landedHead: head,
+		gradedAt,
+		tasks,
+		totals,
 	};
 }
