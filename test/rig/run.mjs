@@ -339,7 +339,7 @@ export function selectEvalTasks(flags, rest, tasks = BENCH_TASKS) {
 	}
 	const taskId = rest[0];
 	if (!taskId) throw new Error("eval needs a benchmark task id — the checked-in list is the source (test/eval/bench-tasks.mjs)");
-	return [tasks.find((t) => t.id === taskId) ?? benchTaskById(taskId)];
+	return [benchTaskById(taskId)];
 }
 
 // The shared leg machinery (one home, the shared-helper rule — the
@@ -385,6 +385,12 @@ export function suffixed(name, index) {
 	return /\.(?!.*\.)/.test(name) ? name.replace(/(\.[^.]*)$/, `${suffix}$1`) : `${name}${suffix}`;
 }
 
+// One home for the image asset's basename (the shared-helper rule —
+// the staging command and the session argv are the two callers).
+function imageBasename(image) {
+	return image.split("/").pop();
+}
+
 // One benchmark session's command (spec #135), the pure builder the
 // offline test pins: cwd is the task workspace (`$HOME/task`), the
 // launcher rides the clone's own path WITHOUT `--dev` — the launcher
@@ -403,7 +409,7 @@ export function suffixed(name, index) {
 // first-prompt argument resolved from the cwd, so it rides the argv on
 // session one and nowhere else.
 export function evalSessionCommand({ index, timeout, provider, model, image, sessionPath = "/session" }) {
-	const imageArg = image && index === 0 ? ` "@${image.split("/").pop()}"` : "";
+	const imageArg = image && index === 0 ? ` "@${imageBasename(image)}"` : "";
 	return (
 		`cd "$HOME/task" && timeout --signal=TERM --kill-after=15 ${timeout} ` +
 		`node "$HOME/theta/bin/theta.mjs" --provider ${provider} --model ${model} ` +
@@ -418,7 +424,7 @@ export function evalSessionCommand({ index, timeout, provider, model, image, ses
 // clone already holds it — one cp into the fresh task workspace, under
 // its own basename, before the first session starts.
 export function stageImageCommand(image) {
-	return `cp "$HOME/theta/${image}" "$HOME/task/${image.split("/").pop()}"`;
+	return `cp "$HOME/theta/${image}" "$HOME/task/${imageBasename(image)}"`;
 }
 
 // The suite's per-task evidence subdir name (one home, the shared
@@ -508,19 +514,20 @@ async function runBenchTask(registry, judgeModels, task, { taskDir, taskSessionP
 	const grades = JSON.parse(readFileSync(path.join(taskDir, BENCH_FILES.grades), "utf8"));
 	const usage = sumSessionUsage(taskDir);
 	const artifact = grades.matched?.[task.classify.on];
-	const judgeResults = task.judges.map((slot) =>
-		artifact
-			? runJudge(registry, judgeModels.get(`${slot.provider}/${slot.model}`), task.classify, {
-					prompts: task.sessions,
-					artifact,
-				})
-			: { pass: false, skipped: `objective check ${task.classify.on} matched nothing to judge` },
+	const judgeResults = await Promise.all(
+		task.judges.map((slot) =>
+			artifact
+				? runJudge(registry, judgeModels.get(`${slot.provider}/${slot.model}`), task.classify, {
+						prompts: task.sessions,
+						artifact,
+					})
+				: { pass: false, skipped: `objective check ${task.classify.on} matched nothing to judge` },
+		),
 	);
 	const report = buildReport({
 		task,
 		grades,
-		judgeSlots: task.judges,
-		judgeResults: await Promise.all(judgeResults),
+		judgeCalls: task.judges.map((slot, index) => ({ slot, result: judgeResults[index] })),
 		usage,
 		head: headSha,
 		gradedAt: new Date().toISOString(),
@@ -585,8 +592,10 @@ async function runEval(task, flags) {
 // A failing task grade is a successful measurement: the loop continues
 // and the suite report carries the fail. Session exits and judge errors
 // fail the leg, per the single-task contract.
-async function runSuite(flags) {
-	const tasks = BENCH_TASKS;
+async function runSuite(tasks, flags) {
+	// The caller's selection (main's selectEvalTasks result), never a
+	// re-read of the module list — one source of what runs, and a future
+	// filter in the selection cannot silently diverge from the loop.
 	const { registry, judgeModels } = await preflightJudges(tasks);
 	const providerDir = evalStaging(flags);
 
@@ -639,7 +648,7 @@ function main() {
 		try {
 			assertBenchmarkFlags(flags);
 			const tasks = selectEvalTasks(flags, rest);
-			(flags.suite ? runSuite(flags) : runEval(tasks[0], flags)).catch((error) => fail(`unexpected failure: ${error?.message ?? error}`));
+			(flags.suite ? runSuite(tasks, flags) : runEval(tasks[0], flags)).catch((error) => fail(`unexpected failure: ${error?.message ?? error}`));
 		} catch (error) {
 			fail(error.message);
 		}

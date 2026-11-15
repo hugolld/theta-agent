@@ -182,14 +182,14 @@ test("the report carries task grade, judge tiers, and usage totals; grade follow
 		matched: {},
 	};
 	const slots = [task.judges[0], { tier: "independent", provider: "stub2", model: "stub-solar" }];
+	const results = [
+		{ pass: true, probability: 0.9 },
+		{ pass: true, probability: 0.8 },
+	];
 	const passing = buildReport({
 		task,
 		grades,
-		judgeSlots: slots,
-		judgeResults: [
-			{ pass: true, probability: 0.9 },
-			{ pass: true, probability: 0.8 },
-		],
+		judgeCalls: slots.map((slot, index) => ({ slot, result: results[index] })),
 		usage: usageStub,
 		head: "abc1234",
 		gradedAt: "2026-11-15T00:00:00.000Z",
@@ -211,10 +211,9 @@ test("the report carries task grade, judge tiers, and usage totals; grade follow
 	const judgedFalse = buildReport({
 		task,
 		grades,
-		judgeSlots: slots,
-		judgeResults: [
-			{ pass: true, probability: 0.9 },
-			{ pass: false, judgeError: "judge stopReason error" },
+		judgeCalls: [
+			{ slot: slots[0], result: { pass: true, probability: 0.9 } },
+			{ slot: slots[1], result: { pass: false, judgeError: "judge stopReason error" } },
 		],
 		usage: usageStub,
 		head: "abc1234",
@@ -226,11 +225,7 @@ test("the report carries task grade, judge tiers, and usage totals; grade follow
 	const objectiveMiss = buildReport({
 		task,
 		grades: { ...grades, checks: grades.checks.map((c) => ({ ...c, pass: false })) },
-		judgeSlots: slots,
-		judgeResults: [
-			{ pass: true, probability: 0.9 },
-			{ pass: true, probability: 0.8 },
-		],
+		judgeCalls: slots.map((slot) => ({ slot, result: { pass: true, probability: 0.9 } })),
 		usage: usageStub,
 		head: "abc1234",
 		gradedAt: "2026-11-15T00:00:00.000Z",
@@ -253,8 +248,10 @@ test("a skipped judge row fails the grade without a judge error — a missed obj
 			],
 			matched: {},
 		},
-		judgeSlots: task.judges,
-		judgeResults: task.judges.map(() => ({ pass: false, skipped: `objective check ${task.classify.on} matched nothing to judge` })),
+		judgeCalls: task.judges.map((slot) => ({
+			slot,
+			result: { pass: false, skipped: `objective check ${task.classify.on} matched nothing to judge` },
+		})),
 		usage: usageStub,
 		head: "abc1234",
 		gradedAt: "2026-11-15T00:00:00.000Z",

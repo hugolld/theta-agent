@@ -173,29 +173,27 @@ export async function runJudge(registry, model, classify, state) {
 // single-judge one): the task grade, one judge row per tier, and usage
 // totals — beside the recorded exit status the rig already wrote. The
 // `checks` list is the objective, workspace-as-oracle rows only; the
-// subjective verdicts ride `judges`, one row per judge slot. The grade
-// passes only when every objective check and every tier pass — a tier
-// disagreement is a failed grade, loud in the report, never averaged
-// away. A judge row may carry `skipped` (the objective check matched
-// nothing to judge — the task grade fails, the leg does not: grading
-// failure and leg failure never mix) or `judgeError` (the judge itself
-// broke — that fails the leg, runEval's gate), and the two ride
-// separate fields.
-export function buildReport({ task, grades, judgeSlots, judgeResults, usage, head, gradedAt }) {
-	const judges = judgeSlots.map((slot, index) => {
-		const result = judgeResults[index];
-		return {
-			id: task.classify.id,
-			tier: slot.tier,
-			provider: slot.provider,
-			model: slot.model,
-			pass: result.pass,
-			...(result.probability !== undefined ? { probability: result.probability } : {}),
-			...(result.skipped !== undefined ? { skipped: result.skipped } : {}),
-			...(result.judgeError !== undefined ? { judgeError: result.judgeError } : {}),
-			...(result.usage ? { usage: result.usage } : {}),
-		};
-	});
+// subjective verdicts ride `judges`, one row per judge slot, paired at
+// the caller as `judgeCalls` — [{ slot, result }] — so a slot and its
+// verdict cannot drift apart by index. The grade passes only when every
+// objective check and every tier pass — a tier disagreement is a failed
+// grade, loud in the report, never averaged away. A judge row may carry
+// `skipped` (the objective check matched nothing to judge — the task
+// grade fails, the leg does not: grading failure and leg failure never
+// mix) or `judgeError` (the judge itself broke — that fails the leg,
+// runEval's gate), and the two ride separate fields.
+export function buildReport({ task, grades, judgeCalls, usage, head, gradedAt }) {
+	const judges = judgeCalls.map(({ slot, result }) => ({
+		id: task.classify.id,
+		tier: slot.tier,
+		provider: slot.provider,
+		model: slot.model,
+		pass: result.pass,
+		...(result.probability !== undefined ? { probability: result.probability } : {}),
+		...(result.skipped !== undefined ? { skipped: result.skipped } : {}),
+		...(result.judgeError !== undefined ? { judgeError: result.judgeError } : {}),
+		...(result.usage ? { usage: result.usage } : {}),
+	}));
 	return {
 		task: task.id,
 		class: task.class,
