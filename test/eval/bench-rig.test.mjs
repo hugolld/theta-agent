@@ -70,6 +70,8 @@ test("the grading step runs the committed grader from the clone against the task
 test("the tracer task's judge slot is the owner-picked iteration tier", () => {
 	// The judge is config, never code (ADR 0007); the slot pins what the
 	// first live leg judged with, and the PR body discloses the bend —
-	// the campaign chat provider cannot serve classify().
-	assert.deepEqual(task.judge, { tier: "iteration", provider: "openrouter", model: "typesafe/jev-1.14" });
+	// the campaign chat provider cannot serve classify(). The id is the
+	// one the installed pi 1.4.0 catalog carries (the docs' jev-1.14
+	// names a newer catalog than the pin; probed 2026-11-15).
+	assert.deepEqual(task.judge, { tier: "iteration", provider: "openrouter", model: "typesafe/jev-1.13" });
 });

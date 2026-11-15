@@ -36,8 +36,12 @@ export const BENCH_TASKS = Object.freeze([
 		// closed to the Jev/Clef/Decisions families; probed 2026-11-14,
 		// zero classifiers reachable through the campaign entry), so the
 		// iteration slot names the owner-picked classifier host. Its key
-		// lives host-side only; the judge never runs in the rig.
-		judge: { tier: "iteration", provider: "openrouter", model: "typesafe/jev-1.14" },
+		// lives host-side only; the judge never runs in the rig. The id
+		// is the one the installed pi 1.4.0 catalog actually carries
+		// (probed 2026-11-15: openrouter lists jev-1.13 and
+		// ~typesafe/jev-latest — the docs' jev-1.14 names a newer
+		// catalog than the pin).
+		judge: { tier: "iteration", provider: "openrouter", model: "typesafe/jev-1.13" },
 		sessions: [
 			`Our team has decided to sequence the confirmatory cohort with long-read sequencing instead of short reads, starting with the March batch. Record this decision for the project so a later session can find it, using whatever provenance recording this environment provides, and tell me exactly what was written and where. Run each command as one plain call -- no trailing status echoes; ${READ_HEADROOM}`,
 		],
