@@ -93,7 +93,7 @@ The compute gateway's per-principal rolling bound on job creation — the deploy
 _Avoid_: quota, spend cap
 
 **Clean-room rig**:
-The disposable Linux container a dogfood or adversarial session runs in: the checkout is a fresh clone of the pinned HEAD in the container's ephemeral home, the evidence dir mounts in from the host, and it receives exactly two credentials — the provider key always, plus the gateway token on a gateway leg, reached through the host-side port-forward (the cluster SSH key never enters). ADR 0005 ships it; M5 S3 admits the second credential.
+The disposable Linux container a dogfood, adversarial, eval-capture, or benchmark session runs in: the checkout is a fresh clone of the pinned HEAD in the container's ephemeral home, the evidence dir mounts in from the host, and it receives at most two credentials — the provider key always, plus the gateway token on a gateway leg (a benchmark leg never takes it), reached through the host-side port-forward (the cluster SSH key never enters). ADR 0005 ships it; M5 S3 admits the second credential.
 _Avoid_: dev server, test server
 
 **Codemode**:
@@ -117,7 +117,7 @@ The eval suite's base layer: a keyless, deterministic regression net over record
 _Avoid_: regression suite, replay suite
 
 **Benchmark suite**:
-The eval suite's live layer: graded task suites run against the model, as a new mode of the clean-room rig, carrying only the provider key. Single-model first (provider is config); two-tier judging — the campaign provider's classify() for iteration, an independent provider for numbers destined for public surfaces; costs ride pi's native UsageEntry ledger. ADR 0007 decides it.
+The eval suite's live layer: graded task suites run against the model, as a mode of the clean-room rig, carrying only the provider key. Single-model first (provider is config); two-tier judging — iteration and independent tiers through named config slots that never share a model family (a disclosed bend from ADR 0007's campaign-provider letter: pi's classifier catalog is closed to its families, so both tiers ride OpenRouter); costs ride pi's native UsageEntry ledger. ADR 0007 decides it.
 _Avoid_: benchmark harness, live eval
 
 **Workspace-as-oracle**:
@@ -125,5 +125,9 @@ The benchmark suite's grading doctrine: the workspace is the oracle — model pr
 _Avoid_: transcript grading, output grading
 
 **Eval capture**:
-A session recording taken deliberately for the eval suite — an eval-shaped scenario run in the clean-room rig — never evidence derived from a dogfood run. A model-visible change (skill text, connector script, orchestrator doctrine, extension code) lands only with a fresh capture. Distinct from session evidence, the dogfood run's artifact bundle. ADR 0007 decides it.
+A session recording taken deliberately for the eval suite — an eval-shaped scenario run in the clean-room rig — never evidence derived from a dogfood run. A model-visible change (skill text, connector script, orchestrator doctrine, extension code, the project context) lands only with a fresh capture. Distinct from session evidence, the dogfood run's artifact bundle. ADR 0007 decides it.
 _Avoid_: evidence reuse, recycled transcript
+
+**Surface class**:
+One of the model-visible byte classes an eval capture binds, one digest per class in the fixture's provenance manifest: the extension advertisement, a skill tree, the extension sources, the project context. The registry is `test/eval/surfaces.mjs`, pinned beside the land guard. Spec #133 ships it.
+_Avoid_: surface kind, scope class

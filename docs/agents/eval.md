@@ -6,7 +6,7 @@ The replay net is the eval suite's base layer (ADR 0007): a keyless, determinist
 
 Every fixture under `test/eval/fixtures/<scenario-id>/` is a sanitized pi session recording in pi's own session-file format, committed beside a provenance manifest and a normalized snapshot. The net replays it through pi's public reconstruction exports (`parseSessionEntries`, `buildSessionContext`, from the installed `@earendil-works/pi-coding-agent`) — never a Theta re-implementation of replay. Three pins per fixture, all keyless:
 
-1. **Provenance** — the manifest declares one digest per model-visible surface class (below). The net recomputes each digest from the live tree; a mismatch reds naming the fixture. That red is the doctrine firing: a model-visible change (skill text, connector script, orchestrator doctrine, extension code) lands only with a fresh eval capture, never by editing the fixture.
+1. **Provenance** — the manifest declares one digest per model-visible surface class (below). The net recomputes each digest from the live tree; a mismatch reds naming the fixture. That red is the doctrine firing: a model-visible change (skill text, connector script, orchestrator doctrine, extension code, the project context) lands only with a fresh eval capture, never by editing the fixture.
 2. **Snapshot** — the fixture's entry tree, run through the typed normalization layer (`test/eval/normalize.mjs`), equals its committed snapshot under `test/eval/snapshots/`. A fresh capture replaces the snapshot as a reviewable PR diff; the snapshot is never hand-edited.
 3. **Determinism** — pi's reconstruction of the fixture yields one context hash, stable across repeated runs in the same pass. Cross-machine stability is what the typed tokens buy; the snapshot pin holds it.
 
