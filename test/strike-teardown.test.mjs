@@ -19,6 +19,7 @@ const scriptPath = fileURLToPath(
 	new URL("../scripts/strike-teardown.mjs", import.meta.url),
 );
 import { parseWorktrees } from "../scripts/strike-teardown.mjs";
+import { fixtureGitRunner } from "./helpers/git-repo.mjs";
 
 // A fixture: a bare origin, a main checkout cloned from it (on branch main),
 // and one feature worktree. `merged` decides whether the feature branch's
@@ -26,14 +27,7 @@ import { parseWorktrees } from "../scripts/strike-teardown.mjs";
 function makeFixture(t, { merged }) {
 	const root = mkdtempSync(path.join(tmpdir(), "strike-teardown-"));
 	t.after(() => rmSync(root, { recursive: true, force: true }));
-	const git = (args, cwd = root) => {
-		const run = spawnSync("git", ["-c", "init.defaultBranch=main", ...args], {
-			cwd,
-			encoding: "utf8",
-		});
-		assert.equal(run.status, 0, `git ${args.join(" ")}: ${run.stderr}`);
-		return run.stdout;
-	};
+	const git = fixtureGitRunner(root);
 	const origin = path.join(root, "origin.git");
 	git(["init", "--bare", "--initial-branch=main", origin]);
 	const main = path.join(root, "main");

@@ -85,6 +85,17 @@ test("the pin pattern rejects run-time resolves", () => {
 	assert.ok(!PINNED.test("@scope/tool"));
 });
 
+test("the suite bounds every test with a runner timeout", () => {
+	// The flag bounds each REGISTERED test: a body that never settles (a
+	// never-listening server, a stuck container wait) reds at the bound
+	// instead of hanging the suite — verified live. It does NOT bound the
+	// load-time hang class (the S3 retro's 36-minute hook hang: a
+	// discovered file's main guard read stdin before any test registered,
+	// so no bound applied) — that class's defense is the NODE_TEST_CONTEXT
+	// guard, doctrine in docs/agents/eval.md.
+	assert.match(manifest.scripts.test ?? "", /--test-timeout=\d+/);
+});
+
 // The version a bump ships must reach every prose surface that names it;
 // README's other, intentional old-version mentions ("0.4.0 predates the M5
 // safety gates") are excluded by anchoring each assertion to its surface's

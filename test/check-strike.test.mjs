@@ -125,6 +125,23 @@ test("prose may follow the shas; one range per line", () => {
 	assert.deepEqual(disclosedRanges(body), [{ base: "c053b8d1", head: "dae69881" }]);
 });
 
+test("decorated range lines match nothing — the anchor is line-start", () => {
+	// The S3 retro: a naturally formatted body (bold round labels,
+	// backticked ranges) parsed to ZERO ranges and the gate reported
+	// every commit uncovered — indistinguishable from missing
+	// disclosures. The anchor is the line start after an optional list
+	// marker; markdown decoration counts as nothing, and the gate's
+	// zero-parse branch names that contract instead of the uncovered
+	// list (a bare indented line is a disclosure — the earlier pin).
+	const body = [
+		"- **Round 4 (judge transport):** findings triaged into two commits.",
+		"  - reviewed in prose: c053b8d1..dae69881",
+		"- **Round 5:** `reviewed: c053b8d1..dae69881`",
+		"**reviewed: c053b8d1..dae69881**",
+	].join("\n");
+	assert.deepEqual(disclosedRanges(body), []);
+});
+
 test("fenced example lines are not disclosures", () => {
 	// A body that documents the syntax with real shas inside a code fence
 	// is an example, not a round — parsing it would silently over-cover

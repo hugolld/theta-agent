@@ -280,6 +280,22 @@ function main(argv) {
 		}
 		const uncovered = uncoveredCommits(branchCommits, [...covered]);
 		if (uncovered.length > 0) {
+			if (ranges.length === 0) {
+				// The S3 retro: a decorated body (bold labels, backticked
+				// ranges) parses to zero ranges and this branch used to
+				// print the uncovered-commits list — indistinguishable
+				// from genuinely missing disclosures. Name the format
+				// contract instead.
+				console.error(
+					`\nreview coverage: the PR body parses to zero \`reviewed:\` ranges, so all ` +
+						`${uncovered.length} branch commit(s) sit uncovered — the gate reads only ` +
+						"lines that START with `reviewed: <base>..<head>` (indent and one list " +
+						"marker are fine); ranges wrapped in markdown decoration — bold, " +
+						"backticks — count as nothing. Move each range onto its own bare line " +
+						"and rerun.",
+				);
+				return 1;
+			}
 			const named = run(`git log --no-walk --format='%h %s' ${uncovered.join(" ")}`).trim();
 			console.error(
 				`\nreview coverage: ${uncovered.length} commit(s) not under any disclosed ` +
