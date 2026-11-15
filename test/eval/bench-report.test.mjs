@@ -12,6 +12,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { parseSessionEntries } from "@earendil-works/pi-coding-agent";
+import { BOOL_ANSWER_SAMPLE } from "./bench-answer-shape.mjs";
 import { BENCH_FILES, buildReport, resolveJudge, runJudge, sumEntries, sumSessionUsage } from "./bench-report.mjs";
 import { benchTaskById } from "./bench-tasks.mjs";
 
@@ -93,25 +94,25 @@ function stubRegistry(classifyImpl) {
 const judgeSlot = { tier: "iteration", provider: "stub", model: "stub-jev" };
 
 test("a judge that stops cleanly turns its bool probability into the check row", async () => {
-	// pi's real answer shape (pi-ai dist/types.d.ts ClassifierBoolAnswer):
-	// { type: "bool", probability } — never a bare boolean. The stub
-	// returns the real shape; an unwrap that reads the wrong type fails
-	// here, not on the live leg.
+	// The stub answers through BOOL_ANSWER_SAMPLE, the shape anchored to
+	// pi-ai's declared ClassifierBoolAnswer (test/eval/bench-answer-shape.mjs,
+	// checked by tsc) — a stub shape pi never produces reds typecheck, not
+	// the live leg.
 	const registry = stubRegistry(async () => ({
 		stopReason: "stop",
-		answers: { [task.classify.id]: { type: "bool", probability: 0.87 } },
+		answers: { [task.classify.id]: { ...BOOL_ANSWER_SAMPLE } },
 		usage: { totalTokens: 900, cost: { total: 0.001 } },
 	}));
 	const result = await runJudge(registry, judgeSlot, task.classify, { prompt: "p", artifact: {} });
 	assert.equal(result.pass, true);
-	assert.equal(result.probability, 0.87);
+	assert.equal(result.probability, BOOL_ANSWER_SAMPLE.probability);
 	assert.deepEqual(result.usage, { totalTokens: 900, cost: { total: 0.001 } });
 });
 
 test("a probability below the threshold is a failed measurement, not a judge error", async () => {
 	const registry = stubRegistry(async () => ({
 		stopReason: "stop",
-		answers: { [task.classify.id]: { type: "bool", probability: 0.2 } },
+		answers: { [task.classify.id]: { ...BOOL_ANSWER_SAMPLE, probability: 0.2 } },
 	}));
 	const result = await runJudge(registry, judgeSlot, task.classify, { prompt: "p", artifact: {} });
 	assert.equal(result.pass, false);

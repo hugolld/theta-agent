@@ -6,7 +6,9 @@
 		"strict": true,
 		"isolatedModules": true,
 		"skipLibCheck": true,
-		"noEmit": true
+		"noEmit": true,
+		"allowJs": true,
+		"checkJs": true
 	},
-	"include": ["extensions/**/*.ts"]
+	"include": ["extensions/**/*.ts", "test/eval/bench-answer-shape.mjs"]
 }
