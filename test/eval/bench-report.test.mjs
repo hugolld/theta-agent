@@ -227,15 +227,20 @@ const ECHO_VERDICT_CHILD = [
 	"const chunks = [];",
 	"for await (const c of process.stdin) chunks.push(c);",
 	'const input = JSON.parse(chunks.join(""));',
-	'process.stdout.write(JSON.stringify({ ok: true, settled: { stopReason: "stop", argv: process.argv.slice(2), classifyId: input.classify.id } }));',
+	'process.stdout.write(JSON.stringify({ ok: true, settled: { stopReason: "stop", argv: process.argv.slice(2), classifyId: input.classify.id, runnerMarker: process.env.NODE_TEST_CONTEXT ?? null } }));',
 ].join("\n");
 
-test("spawnJudgeChild delivers argv and stdin and parses the verdict JSON", async () => {
+test("spawnJudgeChild delivers argv and stdin, strips the runner marker, and parses the verdict JSON", async () => {
 	await withTempChild(ECHO_VERDICT_CHILD, async (childPath) => {
 		const child = await spawnJudgeChild(judgeSlot, task.classify, { prompts: ["p"] }, { childPath, timeoutMs: 5000 });
 		assert.equal(child.kind, "settled");
 		assert.deepEqual(child.settled.argv, [judgeSlot.provider, judgeSlot.model]);
 		assert.equal(child.settled.classifyId, task.classify.id);
+		// This test process runs under node:test, so the marker is set in
+		// its env — the child seeing null proves spawnJudgeChild strips it
+		// (a leak would silence the real child's main block, landing every
+		// tier malformed).
+		assert.equal(child.settled.runnerMarker, null);
 	});
 });
 
@@ -279,9 +284,11 @@ test("the judge child loaded under the test runner does nothing, promptly", asyn
 	// The regression this pins: the runner discovers every .mjs under
 	// test/ and loads it in a child with stdin held open; the old main
 	// guard read stdin there and hung the suite's commit hook for 36
-	// minutes. With the runner's marker set, the child must exit at once
-	// — the 5s spawn timeout turns a regression into a fast red, and the
-	// verdict is "malformed" (the child answers nothing), never a hang.
+	// minutes. With the runner's marker set, the child must exit at once.
+	// A regressed child would read the finite stdin to EOF and actually
+	// run its main block — answering a verdict JSON (which fails the
+	// parse assertion below) or stalling on the network call (which rides
+	// the 5s spawn timeout). Either mechanism reds this pin fast.
 	const run = spawnSync(
 		process.execPath,
 		[fileURLToPath(new URL("./bench-judge.mjs", import.meta.url)), judgeSlot.provider, judgeSlot.model],

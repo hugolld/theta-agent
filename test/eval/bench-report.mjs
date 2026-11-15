@@ -213,7 +213,17 @@ export async function spawnJudgeChild(slot, classify, state, { childPath = judge
 	const run = spawnSync(
 		process.execPath,
 		[childPath, slot.provider, slot.model],
-		{ input: JSON.stringify({ state, classify }), encoding: "utf8", timeout: timeoutMs },
+		{
+			input: JSON.stringify({ state, classify }),
+			encoding: "utf8",
+			timeout: timeoutMs,
+			// The runner's env must not leak into the child: NODE_TEST_CONTEXT
+			// set in a caller's process (a future end-to-end test under the
+			// node test runner) would silence the child's main block and land
+			// every tier malformed — silent verdict loss. Undefined drops the
+			// variable; everything else inherits (the spawn-env-inherit rule).
+			env: { ...process.env, NODE_TEST_CONTEXT: undefined },
+		},
 	);
 	if (run.error?.code === "ETIMEDOUT") {
 		return { kind: "timeout", detail: `judge child timed out after ${timeoutMs}ms` };
