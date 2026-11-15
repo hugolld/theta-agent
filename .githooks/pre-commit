@@ -10,6 +10,11 @@ unset GIT_DIR GIT_INDEX_FILE GIT_WORK_TREE GIT_OBJECT_DIRECTORY
 # A pipeline's failing head must fail the hook (lint:sh, #139) — the tail
 # summary must never mask a red suite.
 set -o pipefail
+# The stale-stage warning (the S3 retro, #150): the commit takes the
+# index while this hook tests the working tree — name any file whose
+# staged snapshot predates its working-tree content. Warning only: a
+# git add -p partial-hunk commit leaves this state on purpose.
+node scripts/stale-stage.mjs
 # A stale gateway lock fails the suite as nine servers that never listen —
 # name the cause first (S1's version bump staled it exactly that way).
 (cd gateway && uv lock --check) || exit 1

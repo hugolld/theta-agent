@@ -39,7 +39,7 @@
 		"lint:dups": "npx --yes jscpd@5.4.1 --min-tokens 50 --ignore \"**/fixtures/**,**/snapshots/**,**/.venv/**,**/uv.lock\" --threshold 6 --reporters console scripts test bin extensions gateway",
 		"lint:py": "uvx ruff@0.15.7 check skills/theta-lit-search/scripts skills/theta-notebook/scripts gateway/theta_compute test/helpers",
 		"lint:sh": "node scripts/lint-sh.mjs",
-		"test": "node --test",
+		"test": "node --test --test-timeout=120000",
 		"rig": "node test/rig/run.mjs",
 		"typecheck": "tsc --noEmit"
 	},

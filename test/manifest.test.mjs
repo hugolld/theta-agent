@@ -85,6 +85,15 @@ test("the pin pattern rejects run-time resolves", () => {
 	assert.ok(!PINNED.test("@scope/tool"));
 });
 
+test("the suite bounds every test with a runner timeout", () => {
+	// node:test discovers every .mjs under test/ and loads it in a child
+	// with stdin held open; one blocking test hung the pre-commit hook
+	// for 36 minutes (the S3 retro's bench-judge main guard). The flag
+	// reds such a test in seconds — verified live: a hanging test exits 1
+	// at the bound, and hangs forever without the flag.
+	assert.match(manifest.scripts.test ?? "", /--test-timeout=\d+/);
+});
+
 // The version a bump ships must reach every prose surface that names it;
 // README's other, intentional old-version mentions ("0.4.0 predates the M5
 // safety gates") are excluded by anchoring each assertion to its surface's
