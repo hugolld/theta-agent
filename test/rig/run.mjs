@@ -24,16 +24,20 @@
 // (test/rig/rpc-driver.mjs) instead of `--print`, so a gated submit can
 // cross the submit gate in a headless run.
 //
-// `eval` is the benchmark layer's mode (spec #135, ADR 0007): one task
-// from the checked-in list (test/eval/bench-tasks.mjs) runs end-to-end
-// and grades from one command. It refuses `--gateway` and `--rpc` — no
-// gateway token path exists on a benchmark leg; the provider key is the
-// only credential that enters. The session runs print-mode in a fresh
-// task workspace (`$HOME/task`), so exit codes carry truncation
-// failures the way the dogfood leg's do; the objective grader runs
-// in-container against the workspace (workspace-as-oracle), and the
-// report step runs host-side — the classify() judge's credential lives
-// on the host and never enters the rig. Compaction stays native.
+// `eval` is the benchmark layer's mode (spec #136, on the #135 tracer's
+// shape): one task from the checked-in list (test/eval/bench-tasks.mjs)
+// runs end-to-end and grades from one command — or `--suite` runs the
+// whole checked-in list in one container, one clone, one report. Either
+// way it refuses `--gateway` and `--rpc` — no gateway token path exists
+// on a benchmark leg; the provider key is the only credential that
+// enters. Each session runs print-mode in a fresh task workspace
+// (`$HOME/task`), so exit codes carry truncation failures the way the
+// dogfood leg's do; the objective grader runs in-container against the
+// workspace (workspace-as-oracle), and the judge step runs host-side —
+// the classifiers' credentials live on the host and never enter the
+// rig. A suite leg writes its evidence under a per-task subdir and the
+// run-level report (bench-suite.json) lands at the evidence root once
+// every task is graded. Compaction stays native.
 
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -41,8 +45,8 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { gitStatus, manifestSha256, run as spawnRun } from "../../scripts/dogfood-gates.mjs";
 import { SESSION_FILES } from "../../scripts/session-evidence.mjs";
-import { benchTaskById } from "../eval/bench-tasks.mjs";
-import { BENCH_FILES, buildReport, resolveJudge, runJudge, sumSessionUsage } from "../eval/bench-report.mjs";
+import { BENCH_TASKS, benchTaskById } from "../eval/bench-tasks.mjs";
+import { BENCH_FILES, buildReport, buildSuiteReport, resolveJudge, runJudge, sumSessionUsage } from "../eval/bench-report.mjs";
 
 const rigDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(rigDir, "../..");
@@ -86,7 +90,7 @@ function waitForDaemon() {
 }
 
 export function parseFlags(argv) {
-	const flags = { timeout: 300, provider: defaultProvider, model: defaultModel, legs: [], gateway: false, rpc: false };
+	const flags = { timeout: 300, provider: defaultProvider, model: defaultModel, legs: [], gateway: false, rpc: false, suite: false };
 	const rest = [];
 	for (let i = 0; i < argv.length; i++) {
 		const arg = argv[i];
@@ -94,7 +98,7 @@ export function parseFlags(argv) {
 			const value = argv[++i];
 			if (value === undefined) fail(`${arg} needs a value`);
 			flags[arg.slice(2)] = value;
-		} else if (arg === "--gateway" || arg === "--rpc") {
+		} else if (arg === "--gateway" || arg === "--rpc" || arg === "--suite") {
 			flags[arg.slice(2)] = true;
 		} else if (arg === "--timeout") {
 			const value = argv[++i];
@@ -318,6 +322,26 @@ export function assertBenchmarkFlags(flags) {
 	if (flags.rpc) throw new Error("--rpc is a dogfood-leg flag — no confirm is ever asked on a benchmark leg");
 }
 
+// The eval mode's task selection (spec #136): one id runs that task,
+// `--suite` runs the whole checked-in list in checked-in order — never
+// both. The prompt doctrine is gated here, before anything disposable
+// is spent. Throws (the CLI maps the message to its refusal); pinned
+// by bench-rig.test.mjs.
+export function selectEvalTasks(flags, rest, tasks = BENCH_TASKS) {
+	for (const task of tasks) {
+		for (const prompt of task.sessions) {
+			if (/[^\x00-\x7F]/.test(prompt)) throw new Error("benchmark task prompts must be pure ASCII");
+		}
+	}
+	if (flags.suite) {
+		if (rest.length > 0) throw new Error("--suite runs the whole checked-in list — no task id beside it");
+		return tasks;
+	}
+	const taskId = rest[0];
+	if (!taskId) throw new Error("eval needs a benchmark task id — the checked-in list is the source (test/eval/bench-tasks.mjs)");
+	return [benchTaskById(taskId)];
+}
+
 // The shared leg machinery (one home, the shared-helper rule — the
 // `run` and `eval` paths are the two callers, never a copy): the
 // evidence dir's default home, the process-fact bundle every leg
@@ -329,13 +353,13 @@ function defaultEvidenceDir(prefix) {
 	return path.join(process.env.HOME, ".theta-evidence", `${prefix}-${Date.now()}`);
 }
 
-function writeEvidenceBasics({ expectedModel, prompts }) {
-	mkdirSync(sessionDir, { recursive: true });
-	writeFileSync(path.join(sessionDir, SESSION_FILES.preHead), headSha);
-	writeFileSync(path.join(sessionDir, SESSION_FILES.expectedModel), `${expectedModel}\n`);
-	writeFileSync(path.join(sessionDir, SESSION_FILES.manifestSha), manifestSha256(repoRoot));
+function writeEvidenceBasics(dir, { expectedModel, prompts }) {
+	mkdirSync(dir, { recursive: true });
+	writeFileSync(path.join(dir, SESSION_FILES.preHead), headSha);
+	writeFileSync(path.join(dir, SESSION_FILES.expectedModel), `${expectedModel}\n`);
+	writeFileSync(path.join(dir, SESSION_FILES.manifestSha), manifestSha256(repoRoot));
 	prompts.forEach((prompt, index) => {
-		writeFileSync(path.join(sessionDir, suffixed(SESSION_FILES.prompt, index)), prompt);
+		writeFileSync(path.join(dir, suffixed(SESSION_FILES.prompt, index)), prompt);
 	});
 }
 
@@ -343,11 +367,11 @@ function recordRuntimeVersions() {
 	execIn(`pi --version > /session/${SESSION_FILES.piVersion} && node --version > /session/${SESSION_FILES.nodeVersion}`);
 }
 
-function finishSession(exitFile, label) {
-	const exitStatus = Number.parseInt(readFileSync(path.join(sessionDir, exitFile), "utf8").trim(), 10);
+function finishSession(dir, exitFile, label) {
+	const exitStatus = Number.parseInt(readFileSync(path.join(dir, exitFile), "utf8").trim(), 10);
 	if (!Number.isInteger(exitStatus)) fail(`cannot read the session exit-status file (${exitFile})`);
-	if (exitStatus === 124) writeFileSync(path.join(sessionDir, SESSION_FILES.watchdog), "fired\n");
-	if (exitStatus !== 0) fail(`${label} exited ${exitStatus} — evidence in ${sessionDir}`);
+	if (exitStatus === 124) writeFileSync(path.join(dir, SESSION_FILES.watchdog), "fired\n");
+	if (exitStatus !== 0) fail(`${label} exited ${exitStatus} — evidence in ${dir}`);
 }
 
 // The multi-session artifact-name rule (one home, the shared-helper
@@ -361,6 +385,12 @@ export function suffixed(name, index) {
 	return /\.(?!.*\.)/.test(name) ? name.replace(/(\.[^.]*)$/, `${suffix}$1`) : `${name}${suffix}`;
 }
 
+// One home for the image asset's basename (the shared-helper rule —
+// the staging command and the session argv are the two callers).
+function imageBasename(image) {
+	return image.split("/").pop();
+}
+
 // One benchmark session's command (spec #135), the pure builder the
 // offline test pins: cwd is the task workspace (`$HOME/task`), the
 // launcher rides the clone's own path WITHOUT `--dev` — the launcher
@@ -371,44 +401,73 @@ export function suffixed(name, index) {
 // is single-session). Print mode keeps its truncation contract: the
 // exit-status file records what pi exited, stdout belongs to the
 // model's reply (nothing glues onto it — it lands as answer.txt).
-export function evalSessionCommand({ index, timeout, provider, model }) {
+//
+// `sessionPath` is the container path this leg's artifacts write to —
+// `/session` for a single-task leg, a per-task subdir for a suite leg
+// (spec #136: one evidence dir per task under the suite's mount).
+// `image` (spec #136) names a committed asset: pi's @path is a
+// first-prompt argument resolved from the cwd, so it rides the argv on
+// session one and nowhere else.
+export function evalSessionCommand({ index, timeout, provider, model, image, sessionPath = "/session" }) {
+	const imageArg = image && index === 0 ? ` "@${imageBasename(image)}"` : "";
 	return (
 		`cd "$HOME/task" && timeout --signal=TERM --kill-after=15 ${timeout} ` +
 		`node "$HOME/theta/bin/theta.mjs" --provider ${provider} --model ${model} ` +
-		`--session-dir /session${index > 0 ? " --continue" : ""} --print "$RIG_PROMPT" ` +
-		`< /dev/null > /session/${suffixed(BENCH_FILES.answer, index)} ` +
-		`2> /session/${suffixed(SESSION_FILES.stderr, index)}` +
-		`; echo $? > /session/${suffixed(SESSION_FILES.exitStatus, index)}`
+		`--session-dir ${sessionPath}${index > 0 ? " --continue" : ""} --print "$RIG_PROMPT"${imageArg} ` +
+		`< /dev/null > ${sessionPath}/${suffixed(BENCH_FILES.answer, index)} ` +
+		`2> ${sessionPath}/${suffixed(SESSION_FILES.stderr, index)}` +
+		`; echo $? > ${sessionPath}/${suffixed(SESSION_FILES.exitStatus, index)}`
 	);
+}
+
+// The image staging command (spec #136): the asset is committed, so the
+// clone already holds it — one cp into the fresh task workspace, under
+// its own basename, before the first session starts.
+export function stageImageCommand(image) {
+	return `cp "$HOME/theta/${image}" "$HOME/task/${imageBasename(image)}"`;
+}
+
+// The suite's per-task evidence subdir name (one home, the shared
+// helper rule — the runner and the tests read the same shape).
+export function suiteTaskDirName(taskId) {
+	return `task-${taskId}`;
 }
 
 // The in-container objective grading step: the grader runs from the
 // clone (committed at the pinned HEAD, no node_modules needed — it is
 // pure node:fs by design) against the task workspace, and its
 // machine-readable result lands as a file beside the evidence.
-export function evalGradeCommand(taskId) {
-	return `cd "$HOME/theta" && node test/eval/bench-grade.mjs ${taskId} "$HOME/task" /session/${BENCH_FILES.grades}`;
+export function evalGradeCommand(taskId, sessionPath = "/session") {
+	return `cd "$HOME/theta" && node test/eval/bench-grade.mjs ${taskId} "$HOME/task" ${sessionPath}/${BENCH_FILES.grades}`;
 }
 
-// The benchmark leg itself. One command, end to end: judge preflight
-// host-side (fail before anything disposable is spent — the judge's
-// credential lives on the host and never enters the rig), the session
-// legs in the container, in-container grading, then the host-side
-// report (classify() judge, UsageEntry totals) beside the recorded
-// exit status. A failing task grade is a successful measurement: the
-// leg exits non-zero only when the leg failed — session exit, judge
-// error, missing report — never because the model measured poorly.
-async function runEval(taskId, flags) {
-	const task = benchTaskById(taskId);
-	for (const prompt of task.sessions) {
-		if (/[^\x00-\x7F]/.test(prompt)) fail("benchmark task prompts must be pure ASCII");
-	}
-
-	// Host-side judge preflight, before Docker or a clone is spent.
+// Host-side judge preflight (spec #136): every judge slot of every
+// selected task resolves against the installed catalog and its provider
+// key, before Docker or a clone is spent. One resolve per unique slot —
+// the two tiers share a host but never an identity. The judge calls
+// themselves run in fresh child processes (test/eval/bench-judge.mjs),
+// so nothing downstream needs the resolved models.
+async function preflightJudges(tasks) {
 	const { ModelRuntime, ModelRegistry } = await import("@earendil-works/pi-coding-agent");
 	const registry = new ModelRegistry(await ModelRuntime.create());
-	const judgeModel = resolveJudge(registry, task.judge);
+	const seen = new Set();
+	for (const task of tasks) {
+		for (const slot of task.judges) {
+			const key = `${slot.provider}/${slot.model}`;
+			if (!seen.has(key)) {
+				seen.add(key);
+				resolveJudge(registry, slot);
+			}
+		}
+	}
+}
 
+// The Docker-and-git prelude both eval paths share (one home, the
+// shared-helper rule): daemon wait, the clean-tree gate, the pinned
+// HEAD, the provider config, and the exit-hook teardown that owns
+// every disposable artifact from here on. Returns the provider config
+// dir for startContainer.
+function evalStaging(flags) {
 	waitForDaemon();
 	let status;
 	try {
@@ -418,96 +477,185 @@ async function runEval(taskId, flags) {
 	}
 	if (status) fail("working tree dirty — commit first");
 	headSha = run("git", ["-C", repoRoot, "rev-parse", "HEAD"]).stdout.trim();
+	const providerDir = prepareProviderConfig(flags.provider);
+	process.on("exit", () => runTeardown({ containerName: container, sourceDir, providerDir }));
+	sourceDir = stageCloneSource();
+	return providerDir;
+}
 
-	let providerDir;
-	try {
-		providerDir = prepareProviderConfig(flags.provider);
-		process.on("exit", () => runTeardown({ containerName: container, sourceDir, providerDir }));
-		sourceDir = stageCloneSource();
+// One benchmark task's leg, on a live container (both eval paths are
+// callers — the single-task mode and the suite loop share every step):
+// fresh workspace, image staging, the session legs, in-container
+// grading, then the host-side judges and the per-task report. A failing
+// task grade is a successful measurement — the report rides it, the
+// caller continues; a session exit fails the leg from finishSession,
+// and a judge error lands in the report for the caller's gate
+// (gateJudgeErrors — after the run-level report has landed).
+async function runBenchTask(task, { taskDir, taskSessionPath, flags }) {
+	execIn(`rm -rf "$HOME/task" && mkdir -p "$HOME/task"`);
+	execIn(`mkdir -p '${taskSessionPath}'`);
+	if (task.image) execIn(stageImageCommand(task.image));
 
-		sessionDir = flags.sessionDir ?? defaultEvidenceDir(`bench-${task.id}`);
-		writeEvidenceBasics({
-			expectedModel: `${flags.provider} ${flags.model}`,
-			prompts: task.sessions,
-		});
+	writeEvidenceBasics(taskDir, { expectedModel: `${flags.provider} ${flags.model}`, prompts: task.sessions });
 
-		// The gateway flag was refused at parse; the container starts
-		// gateway-free by construction here.
-		startContainer(providerDir, false);
-		recordRuntimeVersions();
-		execIn("mkdir -p \"$HOME/task\"");
-
-		for (const [index, prompt] of task.sessions.entries()) {
-			execIn(evalSessionCommand({ index, timeout: flags.timeout, provider: flags.provider, model: flags.model }), {
-				env: { RIG_PROMPT: prompt },
-			});
-			finishSession(suffixed(SESSION_FILES.exitStatus, index), `benchmark session ${index + 1}`);
-		}
-
-		execIn(evalGradeCommand(task.id));
-
-		// Host-side report: objective grades (written in-container), the
-		// classify() verdict, and the native usage ledger over every
-		// transcript the leg recorded. A missed objective check is a
-		// failed measurement — the classify row is skipped, the grade
-		// fails, and the leg still exits zero (docs/agents/eval.md);
-		// only a judge that actually broke fails the leg.
-		const grades = JSON.parse(readFileSync(path.join(sessionDir, BENCH_FILES.grades), "utf8"));
-		const usage = sumSessionUsage(sessionDir);
-		const artifact = grades.matched?.[task.classify.on];
-		const judgeResult = artifact
-			? await runJudge(registry, judgeModel, task.classify, { prompt: task.sessions[0], artifact })
-			: {
-					pass: false,
-					skipped: `objective check ${task.classify.on} matched nothing to judge`,
-				};
-		const report = buildReport({
-			task,
-			grades,
-			judgeSlot: task.judge,
-			judgeResult,
-			usage,
-			head: headSha,
-			gradedAt: new Date().toISOString(),
-		});
-		writeFileSync(path.join(sessionDir, BENCH_FILES.report), `${JSON.stringify(report, null, "\t")}\n`);
-		for (const check of report.checks) {
-			console.log(`bench: ${check.pass ? "PASS" : "FAIL"} ${check.id}${check.judgeError ? ` (${check.judgeError})` : ""}`);
-		}
-		console.log(
-			`bench: task ${report.task} graded ${report.grade}; ${usage.sessions} session(s), ` +
-				`${usage.totals.totalTokens} tokens, cost ${usage.totals.cost.toFixed(4)} USD ` +
-				`(judge ${report.judge.provider}/${report.judge.model}, tier ${report.judge.tier})`,
+	for (const [index, prompt] of task.sessions.entries()) {
+		execIn(
+			evalSessionCommand({
+				index,
+				timeout: flags.timeout,
+				provider: flags.provider,
+				model: flags.model,
+				image: task.image,
+				sessionPath: taskSessionPath,
+			}),
+			{ env: { RIG_PROMPT: prompt } },
 		);
-		console.log(`rig: evidence in ${sessionDir}`);
-		if (judgeResult.judgeError !== undefined) {
-			fail(`the judge errored — the leg failed after the report landed: ${judgeResult.judgeError}`);
-		}
-	} catch (error) {
-		fail(`unexpected failure: ${error?.message ?? error}`);
+		finishSession(taskDir, suffixed(SESSION_FILES.exitStatus, index), `benchmark session ${index + 1} (${task.id})`);
 	}
+
+	execIn(evalGradeCommand(task.id, taskSessionPath));
+
+	const grades = JSON.parse(readFileSync(path.join(taskDir, BENCH_FILES.grades), "utf8"));
+	const usage = sumSessionUsage(taskDir);
+	const artifact = grades.matched?.[task.classify.on];
+	const judgeResults = await Promise.all(
+		task.judges.map((slot) =>
+			artifact
+				? runJudge(slot, task.classify, {
+						prompts: task.sessions,
+						artifact,
+					})
+				: { pass: false, skipped: `objective check ${task.classify.on} matched nothing to judge` },
+		),
+	);
+	const report = buildReport({
+		task,
+		grades,
+		judgeCalls: task.judges.map((slot, index) => ({ slot, result: judgeResults[index] })),
+		usage,
+		head: headSha,
+		gradedAt: new Date().toISOString(),
+	});
+	writeFileSync(path.join(taskDir, BENCH_FILES.report), `${JSON.stringify(report, null, "\t")}\n`);
+	for (const check of report.checks) {
+		console.log(`bench: ${task.id} ${check.pass ? "PASS" : "FAIL"} ${check.id} — ${check.detail}`);
+	}
+	for (const judgeRow of report.judges) {
+		console.log(
+			`bench: ${task.id} ${judgeRow.pass ? "PASS" : "FAIL"} ${judgeRow.id} [${judgeRow.tier} ${judgeRow.provider}/${judgeRow.model}]` +
+				(judgeRow.probability !== undefined ? ` p=${judgeRow.probability.toFixed(3)}` : "") +
+				(judgeRow.judgeError ? ` (${judgeRow.judgeError})` : ""),
+		);
+	}
+	console.log(
+		`bench: task ${report.task} graded ${report.grade}; ${usage.sessions} session(s), ` +
+			`${usage.totals.totalTokens} tokens, cost ${usage.totals.cost.toFixed(4)} USD`,
+	);
+	return report;
+}
+
+// The leg-failure gate for judge errors (the S2 doctrine, one home now):
+// a judge that actually broke fails the leg, but only after the
+// run-level report has landed — never mid-run, with nothing to read.
+function gateJudgeErrors(reports) {
+	for (const report of reports) {
+		for (const judgeRow of report.judges) {
+			if (judgeRow.judgeError !== undefined) {
+				fail(`the judge errored — the leg failed after the report landed: ${judgeRow.judgeError}`);
+			}
+		}
+	}
+}
+
+// One command, end to end, for one task (the #135 tracer's shape,
+// preserved): judge preflight host-side, the session legs in the
+// container, in-container grading, then the host-side report beside the
+// recorded exit status.
+async function runEval(task, flags) {
+	await preflightJudges([task]);
+	const providerDir = evalStaging(flags);
+
+	sessionDir = flags.sessionDir ?? defaultEvidenceDir(`bench-${task.id}`);
+
+	// The gateway flag was refused at parse; the container starts
+	// gateway-free by construction here.
+	startContainer(providerDir, false);
+	recordRuntimeVersions();
+	const report = await runBenchTask(task, {
+		taskDir: sessionDir,
+		taskSessionPath: "/session",
+		flags,
+	});
+	console.log(`rig: evidence in ${sessionDir}`);
+	gateJudgeErrors([report]);
+}
+
+// The suite (spec #136): one command runs the whole checked-in task
+// list — one container, one clone, a per-task evidence subdir and
+// report each, and the run-level bench-suite.json at the evidence root.
+// A failing task grade is a successful measurement: the loop continues
+// and the suite report carries the fail. Session exits and judge errors
+// fail the leg, per the single-task contract.
+async function runSuite(tasks, flags) {
+	// The caller's selection (main's selectEvalTasks result), never a
+	// re-read of the module list — one source of what runs, and a future
+	// filter in the selection cannot silently diverge from the loop.
+	await preflightJudges(tasks);
+	const providerDir = evalStaging(flags);
+
+	sessionDir = flags.sessionDir ?? defaultEvidenceDir("bench-suite");
+	writeEvidenceBasics(sessionDir, { expectedModel: `${flags.provider} ${flags.model}`, prompts: [] });
+
+	startContainer(providerDir, false);
+	recordRuntimeVersions();
+
+	const reports = [];
+	for (const task of tasks) {
+		console.log(`rig: benchmark task ${task.id} (${task.class})`);
+		reports.push(
+			await runBenchTask(task, {
+				taskDir: path.join(sessionDir, suiteTaskDirName(task.id)),
+				taskSessionPath: `/session/${suiteTaskDirName(task.id)}`,
+				flags,
+			}),
+		);
+	}
+	const suite = buildSuiteReport({
+		reports,
+		provider: flags.provider,
+		model: flags.model,
+		head: headSha,
+		gradedAt: new Date().toISOString(),
+	});
+	writeFileSync(path.join(sessionDir, BENCH_FILES.suite), `${JSON.stringify(suite, null, "\t")}\n`);
+	console.log(
+		`suite: ${suite.totals.passed}/${suite.totals.tasks} tasks pass; ${suite.totals.sessions} session(s), ` +
+			`${suite.totals.tokens} tokens, cost ${suite.totals.cost.toFixed(4)} USD (report: ${BENCH_FILES.suite})`,
+	);
+	console.log(`rig: evidence in ${sessionDir}`);
+	gateJudgeErrors(reports);
 }
 
 function main() {
 	const [subcommand, ...argv] = process.argv.slice(2);
 	if (subcommand === undefined || subcommand === "help" || subcommand === "--help") {
-		console.log("usage: run.mjs build | run [--provider P] [--model M] [--timeout S] [--session-dir D] [--leg ARG]... [--gateway] [--rpc] <prompt> | eval [--provider P] [--model M] [--timeout S] [--session-dir D] <task-id> | shell [--gateway]");
+		console.log("usage: run.mjs build | run [--provider P] [--model M] [--timeout S] [--session-dir D] [--leg ARG]... [--gateway] [--rpc] <prompt> | eval [--provider P] [--model M] [--timeout S] [--session-dir D] (--suite | <task-id>) | shell [--gateway]");
 		return;
 	}
 	const { flags, rest } = parseFlags(argv);
 	// Before the daemon wait, so a flag-only refusal never needs Docker.
 	if (flags.rpc && !flags.gateway) fail("--rpc needs --gateway — the confirm driver exists for gated gateway legs");
 	if (subcommand === "eval") {
-		// Also before the daemon wait: a benchmark flag refusal or a
-		// judge preflight failure must not need Docker at all.
+		// Also before the daemon wait: a benchmark flag refusal, a task
+		// selection refusal, or a judge preflight failure must not need
+		// Docker at all.
 		try {
 			assertBenchmarkFlags(flags);
+			const tasks = selectEvalTasks(flags, rest);
+			(flags.suite ? runSuite(tasks, flags) : runEval(tasks[0], flags)).catch((error) => fail(`unexpected failure: ${error?.message ?? error}`));
 		} catch (error) {
 			fail(error.message);
 		}
-		const taskId = rest[0];
-		if (!taskId) fail("eval needs a benchmark task id — the checked-in list is the source (test/eval/bench-tasks.mjs)");
-		runEval(taskId, flags).catch((error) => fail(`unexpected failure: ${error?.message ?? error}`));
 		return;
 	}
 	waitForDaemon();
@@ -544,7 +692,7 @@ function main() {
 			if (!prompt) fail("run needs a prompt");
 			if (/[^\x00-\x7F]/.test(prompt)) fail("prompt must be pure ASCII (the auditor rejects the rest)");
 			sessionDir = flags.sessionDir ?? defaultEvidenceDir(`rig-${headSha.slice(0, 7)}`);
-			writeEvidenceBasics({
+			writeEvidenceBasics(sessionDir, {
 				expectedModel: `${flags.provider} ${flags.model}`,
 				prompts: [prompt],
 			});
@@ -583,7 +731,7 @@ function main() {
 			sessionEnv.RIG_TIMEOUT = String(flags.timeout);
 		}
 		execIn(`${sessionCommand}; echo $? > /session/${SESSION_FILES.exitStatus}`, { env: sessionEnv });
-		finishSession(SESSION_FILES.exitStatus, "session");
+		finishSession(sessionDir, SESSION_FILES.exitStatus, "session");
 
 		audit(flags.legs);
 		console.log(`rig: evidence in ${sessionDir}`);

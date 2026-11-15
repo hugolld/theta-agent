@@ -1,12 +1,12 @@
-// The benchmark report step (spec #135, ADR 0007): the host-side half
-// of grading. The objective half (bench-grade.mjs) ran in-container
-// against the task workspace; this step runs where the judge's
-// credential lives — host-side, reading the host pi config — because a
-// benchmark leg carries only the provider key into the rig, and the
-// classifier's key is not that key. It merges three inputs into the
-// machine-readable report file beside the recorded exit status: the
-// objective check results, the classify() verdict on the one
-// subjective check, and the session's native usage ledger.
+// The benchmark report step (spec #136, on the #135 tracer's shape):
+// the host-side half of grading. The objective half (bench-grade.mjs)
+// ran in-container against the task workspace; this step runs where the
+// judges' credentials live — host-side, reading the host pi config —
+// because a benchmark leg carries only the provider key into the rig,
+// and a classifier's key is not that key. It merges three inputs into
+// the machine-readable report file beside the recorded exit status: the
+// objective check results, one classify() verdict per judge tier on the
+// one subjective entry, and the session's native usage ledger.
 //
 // The usage ledger mirrors pi's own aggregation (dist/core/agent-session.js
 // getSessionStats + dist/core/usage-totals.js getUsageCostBreakdown on the
@@ -18,12 +18,14 @@
 // against a committed fixture keeps the mirror honest, and a pi bump
 // that changes ledger semantics reds it.
 //
-// The judge never crashes the leg: classify() answers with a stopReason
-// (pi's contract — it does not reject), a judge error lands as a failed
-// check plus a leg failure, and the report records what happened.
+// The judge never crashes the leg: a settled answer, a transport
+// failure, or any other error lands as a failed check plus a leg
+// failure, and the report records what happened.
 
+import { spawnSync } from "node:child_process";
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { parseSessionEntries } from "@earendil-works/pi-coding-agent";
 import { TRANSCRIPT_NAME } from "../../scripts/session-evidence.mjs";
 
@@ -32,8 +34,13 @@ import { TRANSCRIPT_NAME } from "../../scripts/session-evidence.mjs";
 export const BENCH_FILES = Object.freeze({
 	grades: "bench-grades.json",
 	report: "bench-report.json",
+	suite: "bench-suite.json",
 	answer: "answer.txt",
 });
+
+// The judge child (one fresh process per call — the runJudge doctrine
+// below) lives beside this module.
+const judgeChildPath = fileURLToPath(new URL("./bench-judge.mjs", import.meta.url));
 
 // A blank usage record, pi's createUsageTotals shape.
 function blankTotals() {
@@ -131,22 +138,44 @@ export function resolveJudge(registry, judge) {
 }
 
 // Run the one subjective check through models.classify() — the same
-// call codemode scripts make, driven by the harness. The state carries
-// the task statement and the matched workspace artifact (never model
-// prose: workspace-as-oracle). Returns a check row; a judge error is a
-// failed check with the error recorded, and the caller fails the leg.
-// A bool classify() verdict lands as { type: "bool", probability } (pi-ai
+// call codemode scripts make — with each call in one fresh child
+// process (test/eval/bench-judge.mjs). The state carries the task
+// statement and the matched workspace artifact (never model prose:
+// workspace-as-oracle). Returns a check row; a judge error is a failed
+// check with the error recorded, and the caller fails the leg. A bool
+// classify() verdict lands as { type: "bool", probability } (pi-ai
 // dist/types.d.ts ClassifierBoolAnswer); probability >= 0.5 reads true.
 // The threshold lives here, once, beside the shape it thresholds.
+//
+// Why a child per call: the suite runner lives 20+ minutes while
+// sessions run, and every judge failure observed live (five suite runs,
+// 2026-11-15) rode that long-lived process — pooled connection state
+// answering bare TypeError "fetch failed", even after an in-process
+// fresh-socket retry — while every fresh-process probe passed
+// (back-to-back calls, idle gaps, container churn, a real rig session
+// in between). The child makes the verdict independent of whatever the
+// runner's pool holds, and dumps the full error tree to stderr on any
+// failure, so the evidence self-diagnoses.
+//
+// One bounded retry rides the measured transport class: a child that
+// reports a fetch failure, or hangs past its timeout (a stalled socket
+// is the same class). A child that dies on a signal without our timeout
+// is not that class — it died of something this harness did not choose
+// (an OOM kill, an external SIGTERM) — so it lands as `killed`, its
+// judgeError names the signal, and retrying would hide the cause.
+// API-level outcomes — a stopReason error, a malformed answer — are
+// answers, not transport: they never retry, because a 404 or a 4xx is
+// deterministic and the suite's live-cluster doctrine ("never a retry
+// loop") stays honored — this is one bounded retry on a stateless
+// classifier call, not a loop over a connection.
 const BOOL_PASS_PROBABILITY = 0.5;
+const TRANSPORT_RETRY_DELAY_MS = 2000;
+const JUDGE_CHILD_TIMEOUT_MS = 120000;
 
-export async function runJudge(registry, model, classify, state) {
-	let settled;
-	try {
-		settled = await registry.classify(model, { state, questions: { [classify.id]: classify.question } });
-	} catch (error) {
-		return { pass: false, judgeError: String(error?.message ?? error) };
-	}
+// The verdict semantics (the child transports; the parent decides): a
+// stopReason error and a malformed answer are judge errors; a bool
+// probability becomes the pass/fail measurement.
+export function judgeVerdict(classify, settled) {
 	if (settled.stopReason !== "stop") {
 		return {
 			pass: false,
@@ -168,37 +197,157 @@ export async function runJudge(registry, model, classify, state) {
 	};
 }
 
-// The report itself: task grade, judge tier, usage totals — beside the
-// recorded exit status the rig already wrote (spec #135). A judgeResult
-// may carry `skipped` (the objective check matched nothing to judge —
-// the task grade fails, the leg does not: grading failure and leg
-// failure never mix) or `judgeError` (the judge itself broke — that
-// fails the leg, runEval's gate), and the two ride separate fields.
-export function buildReport({ task, grades, judgeSlot, judgeResult, usage, head, gradedAt }) {
-	const checks = [
-		...grades.checks,
+// Clip a child's output tail for the judgeError — enough to diagnose,
+// never the whole stream in the report JSON.
+function clip(text) {
+	const trimmed = String(text ?? "").trim();
+	return trimmed.length > 400 ? `${trimmed.slice(-400)}...` : trimmed;
+}
+
+// Spawn one judge child and map its outcome onto a kind the retry
+// policy reads: a settled verdict, a child-reported failure (with the
+// transport flag), a timeout, a spawn error, or a child that answered
+// nothing parseable — the failures carry detail, so the report
+// self-diagnoses.
+export async function spawnJudgeChild(slot, classify, state, { childPath = judgeChildPath, timeoutMs = JUDGE_CHILD_TIMEOUT_MS } = {}) {
+	const run = spawnSync(
+		process.execPath,
+		[childPath, slot.provider, slot.model],
 		{
-			id: task.classify.id,
-			kind: "classify",
-			pass: judgeResult.pass,
-			...(judgeResult.probability !== undefined ? { probability: judgeResult.probability } : {}),
-			...(judgeResult.skipped !== undefined ? { skipped: judgeResult.skipped } : {}),
-			...(judgeResult.judgeError !== undefined ? { judgeError: judgeResult.judgeError } : {}),
+			input: JSON.stringify({ state, classify }),
+			encoding: "utf8",
+			timeout: timeoutMs,
+			// The runner's env must not leak into the child: NODE_TEST_CONTEXT
+			// set in a caller's process (a future end-to-end test under the
+			// node test runner) would silence the child's main block and land
+			// every tier malformed — silent verdict loss. Undefined drops the
+			// variable; everything else inherits (the spawn-env-inherit rule).
+			env: { ...process.env, NODE_TEST_CONTEXT: undefined },
 		},
-	];
+	);
+	if (run.error?.code === "ETIMEDOUT") {
+		return { kind: "timeout", detail: `judge child timed out after ${timeoutMs}ms` };
+	}
+	if (run.signal !== null) {
+		return { kind: "killed", detail: `judge child died on ${run.signal}` };
+	}
+	if (run.error) {
+		return { kind: "spawn-error", detail: String(run.error.message ?? run.error) };
+	}
+	let verdict;
+	try {
+		verdict = JSON.parse(run.stdout);
+	} catch {
+		return {
+			kind: "malformed",
+			detail: `judge child exited ${run.status} without a verdict — stdout: ${clip(run.stdout)} stderr: ${clip(run.stderr)}`,
+		};
+	}
+	if (verdict && typeof verdict === "object" && verdict.ok === true) {
+		return { kind: "settled", settled: verdict.settled };
+	}
+	if (verdict && typeof verdict === "object" && verdict.ok === false) {
+		return {
+			kind: "judge-failure",
+			transport: Boolean(verdict.transport),
+			detail: String(verdict.error ?? "judge child reported no error"),
+		};
+	}
+	return {
+		kind: "malformed",
+		detail: `judge child exited ${run.status} with a verdict of no known shape — stdout: ${clip(run.stdout)} stderr: ${clip(run.stderr)}`,
+	};
+}
+
+export async function runJudge(slot, classify, state, { spawnChild = spawnJudgeChild, retryDelayMs = TRANSPORT_RETRY_DELAY_MS } = {}) {
+	let child = await spawnChild(slot, classify, state);
+	if (child.kind === "timeout" || (child.kind === "judge-failure" && child.transport)) {
+		await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
+		child = await spawnChild(slot, classify, state);
+	}
+	if (child.kind === "settled") return judgeVerdict(classify, child.settled);
+	return { pass: false, judgeError: child.detail };
+}
+
+// The report itself (spec #136's two-tier shape, superseding the #135
+// single-judge one): the task grade, one judge row per tier, and usage
+// totals — beside the recorded exit status the rig already wrote. The
+// `checks` list is the objective, workspace-as-oracle rows only; the
+// subjective verdicts ride `judges`, one row per judge slot, paired at
+// the caller as `judgeCalls` — [{ slot, result }] — so a slot and its
+// verdict cannot drift apart by index. The grade passes only when every
+// objective check and every tier pass — a tier disagreement is a failed
+// grade, loud in the report, never averaged away. A judge row may carry
+// `skipped` (the objective check matched nothing to judge — the task
+// grade fails, the leg does not: grading failure and leg failure never
+// mix) or `judgeError` (the judge itself broke — that fails the leg,
+// runEval's gate), and the two ride separate fields.
+export function buildReport({ task, grades, judgeCalls, usage, head, gradedAt }) {
+	const judges = judgeCalls.map(({ slot, result }) => ({
+		id: task.classify.id,
+		tier: slot.tier,
+		provider: slot.provider,
+		model: slot.model,
+		pass: result.pass,
+		...(result.probability !== undefined ? { probability: result.probability } : {}),
+		...(result.skipped !== undefined ? { skipped: result.skipped } : {}),
+		...(result.judgeError !== undefined ? { judgeError: result.judgeError } : {}),
+		...(result.usage ? { usage: result.usage } : {}),
+	}));
 	return {
 		task: task.id,
-		grade: checks.every((check) => check.pass) ? "pass" : "fail",
+		class: task.class,
+		grade: [...grades.checks, ...judges].every((row) => row.pass) ? "pass" : "fail",
 		sessions: usage.sessions,
 		landedHead: head,
 		gradedAt,
-		judge: {
-			tier: judgeSlot.tier,
-			provider: judgeSlot.provider,
-			model: judgeSlot.model,
-			...(judgeResult.usage ? { usage: judgeResult.usage } : {}),
-		},
-		checks,
+		judges,
+		checks: grades.checks,
 		usage: { byModel: usage.byModel, totals: usage.totals },
+	};
+}
+
+// The suite run artifact (spec #136): one per-run report carrying
+// per-task grades, each tier's verdict, and costs. Lean by design — the
+// per-task detail (by-model usage, check details, judge probabilities)
+// lives in each task's own bench-report.json; this is the file the
+// strike's PR body reads. Public-surface numbers come only from the
+// independent tier, and publishing them is the owner's editorial act,
+// out of band — the artifact records what happened, it does not publish.
+export function buildSuiteReport({ reports, provider, model, head, gradedAt }) {
+	const tasks = reports.map((report) => ({
+		task: report.task,
+		class: report.class,
+		grade: report.grade,
+		sessions: report.sessions,
+		judges: report.judges.map(({ tier, provider: judgeProvider, model: judgeModel, pass }) => ({
+			tier,
+			provider: judgeProvider,
+			model: judgeModel,
+			pass,
+		})),
+		checks: {
+			passed: report.checks.filter((check) => check.pass).length,
+			total: report.checks.length,
+		},
+		usage: { totals: report.usage.totals },
+	}));
+	const totals = tasks.reduce(
+		(acc, row) => {
+			acc.sessions += row.sessions;
+			acc.tokens += row.usage.totals.totalTokens;
+			acc.cost += row.usage.totals.cost;
+			if (row.grade === "pass") acc.passed += 1;
+			else acc.failed += 1;
+			return acc;
+		},
+		{ tasks: tasks.length, passed: 0, failed: 0, sessions: 0, tokens: 0, cost: 0 },
+	);
+	return {
+		suite: { provider, model },
+		landedHead: head,
+		gradedAt,
+		tasks,
+		totals,
 	};
 }
