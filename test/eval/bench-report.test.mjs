@@ -195,54 +195,77 @@ test("a child timeout is the transport class — one retry, then the judge error
 	assert.equal(calls.length, 2);
 });
 
-test("spawnJudgeChild delivers argv and stdin and parses the verdict JSON", async () => {
+test("a killed, malformed, or spawn-error child never retries", async () => {
+	// The three kinds outside the measured transport class: each lands as
+	// the judgeError row on the first child, with its own detail — a
+	// retry would only hide the observed cause.
+	for (const kind of ["killed", "malformed", "spawn-error"]) {
+		const detail = `${kind}: the observed detail`;
+		const { spawnChild, calls } = mockChild([{ kind, detail }]);
+		const result = await runJudge(judgeSlot, task.classify, {}, { spawnChild, retryDelayMs: 1 });
+		assert.equal(result.pass, false, kind);
+		assert.equal(result.judgeError, detail, kind);
+		assert.equal(calls.length, 1, `${kind} must not retry`);
+	}
+});
+
+// The real-child pins share one scaffolding: a throwaway script file in
+// a temp dir, the child run through spawnJudgeChild, the dir removed
+// whichever way the pin ends.
+async function withTempChild(script, fn) {
 	const dir = mkdtempSync(path.join(tmpdir(), "bench-child-"));
 	try {
-		const childPath = path.join(dir, "echo.mjs");
-		writeFileSync(
-			childPath,
-			[
-				"const chunks = [];",
-				"for await (const c of process.stdin) chunks.push(c);",
-				'const input = JSON.parse(chunks.join(""));',
-				'process.stdout.write(JSON.stringify({ ok: true, settled: { stopReason: "stop", argv: process.argv.slice(2), classifyId: input.classify.id } }));',
-			].join("\n"),
-		);
+		const childPath = path.join(dir, "child.mjs");
+		writeFileSync(childPath, script);
+		return await fn(childPath);
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+}
+
+const ECHO_VERDICT_CHILD = [
+	"const chunks = [];",
+	"for await (const c of process.stdin) chunks.push(c);",
+	'const input = JSON.parse(chunks.join(""));',
+	'process.stdout.write(JSON.stringify({ ok: true, settled: { stopReason: "stop", argv: process.argv.slice(2), classifyId: input.classify.id } }));',
+].join("\n");
+
+test("spawnJudgeChild delivers argv and stdin and parses the verdict JSON", async () => {
+	await withTempChild(ECHO_VERDICT_CHILD, async (childPath) => {
 		const child = await spawnJudgeChild(judgeSlot, task.classify, { prompts: ["p"] }, { childPath, timeoutMs: 5000 });
 		assert.equal(child.kind, "settled");
 		assert.deepEqual(child.settled.argv, [judgeSlot.provider, judgeSlot.model]);
 		assert.equal(child.settled.classifyId, task.classify.id);
-	} finally {
-		rmSync(dir, { recursive: true, force: true });
-	}
+	});
 });
 
 test("a child that answers no verdict JSON lands as malformed with the output tails", async () => {
-	const dir = mkdtempSync(path.join(tmpdir(), "bench-child-"));
-	try {
-		const childPath = path.join(dir, "garbage.mjs");
-		writeFileSync(childPath, 'process.stdout.write("garbage");process.stderr.write("boom stack");process.exit(1);');
+	await withTempChild('process.stdout.write("garbage");process.stderr.write("boom stack");process.exit(1);', async (childPath) => {
 		const child = await spawnJudgeChild(judgeSlot, task.classify, {}, { childPath, timeoutMs: 5000 });
 		assert.equal(child.kind, "malformed");
 		assert.match(child.detail, /exited 1/);
 		assert.match(child.detail, /garbage/);
 		assert.match(child.detail, /boom stack/);
-	} finally {
-		rmSync(dir, { recursive: true, force: true });
-	}
+	});
 });
 
 test("a child that hangs past the timeout lands as timeout", async () => {
-	const dir = mkdtempSync(path.join(tmpdir(), "bench-child-"));
-	try {
-		const childPath = path.join(dir, "sleepy.mjs");
-		writeFileSync(childPath, "setTimeout(() => {}, 60000);");
+	await withTempChild("setTimeout(() => {}, 60000);", async (childPath) => {
 		const child = await spawnJudgeChild(judgeSlot, task.classify, {}, { childPath, timeoutMs: 300 });
 		assert.equal(child.kind, "timeout");
 		assert.match(child.detail, /timed out after 300ms/);
-	} finally {
-		rmSync(dir, { recursive: true, force: true });
-	}
+	});
+});
+
+test("a child that dies on a signal without the timeout lands as killed, not timeout", async () => {
+	// The SIGKILL stands in for an OOM kill or an external signal: not
+	// this harness's timeout, so not the retryable transport class —
+	// the detail names what was observed, nothing else.
+	await withTempChild('process.kill(process.pid, "SIGKILL");', async (childPath) => {
+		const child = await spawnJudgeChild(judgeSlot, task.classify, {}, { childPath, timeoutMs: 5000 });
+		assert.equal(child.kind, "killed");
+		assert.match(child.detail, /SIGKILL/);
+	});
 });
 
 test("the judge child module exposes the protocol surface the parent drives", async () => {

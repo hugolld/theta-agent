@@ -159,11 +159,15 @@ export function resolveJudge(registry, judge) {
 //
 // One bounded retry rides the measured transport class: a child that
 // reports a fetch failure, or hangs past its timeout (a stalled socket
-// is the same class). API-level outcomes — a stopReason error, a
-// malformed answer — are answers, not transport: they never retry,
-// because a 404 or a 4xx is deterministic and the suite's live-cluster
-// doctrine ("never a retry loop") stays honored — this is one bounded
-// retry on a stateless classifier call, not a loop over a connection.
+// is the same class). A child that dies on a signal without our timeout
+// is not that class — it died of something this harness did not choose
+// (an OOM kill, an external SIGTERM) — so it lands as `killed`, its
+// judgeError names the signal, and retrying would hide the cause.
+// API-level outcomes — a stopReason error, a malformed answer — are
+// answers, not transport: they never retry, because a 404 or a 4xx is
+// deterministic and the suite's live-cluster doctrine ("never a retry
+// loop") stays honored — this is one bounded retry on a stateless
+// classifier call, not a loop over a connection.
 const BOOL_PASS_PROBABILITY = 0.5;
 const TRANSPORT_RETRY_DELAY_MS = 2000;
 const JUDGE_CHILD_TIMEOUT_MS = 120000;
@@ -215,7 +219,7 @@ export async function spawnJudgeChild(slot, classify, state, { childPath = judge
 		return { kind: "timeout", detail: `judge child timed out after ${timeoutMs}ms` };
 	}
 	if (run.signal !== null) {
-		return { kind: "timeout", detail: `judge child was killed with ${run.signal} after ${timeoutMs}ms` };
+		return { kind: "killed", detail: `judge child died on ${run.signal}` };
 	}
 	if (run.error) {
 		return { kind: "spawn-error", detail: String(run.error.message ?? run.error) };

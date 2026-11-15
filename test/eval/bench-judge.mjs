@@ -28,6 +28,12 @@ export function transportMessage(error) {
 	return cause ? `fetch failed (${cause})` : String(error?.message ?? error);
 }
 
+// One dump shape for both failure paths (judgeMain's catch and the main
+// guard's): the full error tree on stderr, so the evidence self-diagnoses.
+function dump(error) {
+	console.error(inspect(error, { depth: 6, breakLength: 120 }));
+}
+
 // The classify call itself. A settled result — including a stopReason
 // error, which is an answer, not a throw — rides ok:true; a thrown
 // error rides ok:false with the transport flag the parent's retry
@@ -48,7 +54,7 @@ export async function judgeMain(argv, input) {
 		});
 		return { ok: true, settled };
 	} catch (error) {
-		console.error(inspect(error, { depth: 6, breakLength: 120 }));
+		dump(error);
 		return { ok: false, transport: isTransportError(error), error: transportMessage(error) };
 	}
 }
@@ -67,7 +73,7 @@ if (process.env.NODE_TEST_CONTEXT === undefined && import.meta.url === pathToFil
 		const input = JSON.parse(chunks.join(""));
 		process.stdout.write(JSON.stringify(await judgeMain(process.argv.slice(2), input)));
 	} catch (error) {
-		console.error(inspect(error, { depth: 6, breakLength: 120 }));
+		dump(error);
 		process.stdout.write(JSON.stringify({ ok: false, transport: false, error: String(error?.message ?? error) }));
 	}
 }
