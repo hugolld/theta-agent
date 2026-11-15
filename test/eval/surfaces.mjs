@@ -32,8 +32,9 @@
 // not an accident.
 
 import { createHash } from "node:crypto";
-import { readdirSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import path from "node:path";
+import { childDirs } from "../helpers/child-dirs.mjs";
 import { parseFrontmatter } from "../helpers/frontmatter.mjs";
 import { sortedTreeFiles } from "../helpers/tree-walk.mjs";
 
@@ -96,10 +97,7 @@ export function fileTreeDigest(rootAbs) {
 // what a session advertises (a description rewrite, a vendored re-sync, a
 // dropped skill) moves this digest.
 export function advertisementBytes(skillsRoot) {
-	const dirs = readdirSync(skillsRoot, { withFileTypes: true })
-		.filter((entry) => entry.isDirectory())
-		.map((entry) => entry.name)
-		.sort();
+	const dirs = childDirs(skillsRoot);
 	const lines = dirs.map((dir) => {
 		const { name, description } = parseFrontmatter(
 			readFileSync(path.join(skillsRoot, dir, "SKILL.md"), "utf8"),

@@ -59,14 +59,11 @@ const shipped = childDirs(skillsRoot);
 // Pool trees sit one level deeper (pack/skill); the enumeration is the same
 // directory read, two passes.
 const poolPacks = childDirs(poolRoot);
-const poolTrees = [];
-for (const pack of poolPacks) {
-	const entries = await readdir(new URL(`${pack}/`, poolRoot), { withFileTypes: true });
-	for (const entry of entries) {
-		if (entry.isDirectory()) poolTrees.push(`${pack}/${entry.name}`);
-	}
-}
-poolTrees.sort();
+const poolTrees = poolPacks
+	.flatMap((pack) =>
+		childDirs(new URL(`${pack}/`, poolRoot)).map((slug) => `${pack}/${slug}`),
+	)
+	.sort();
 
 // The hyphenated key is destructured once; everything downstream uses
 // plain identifiers.
