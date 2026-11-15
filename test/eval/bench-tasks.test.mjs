@@ -67,6 +67,26 @@ test("objective checks are declarative and complete; exactly one classify check 
 	}
 });
 
+test("every judge slot resolves in the installed pi catalog — keyless", async () => {
+	// A slot id the installed pi does not carry sails green through every
+	// offline test and dies only at the live preflight: the S2 slot named
+	// the docs' jev-1.14 while the installed 1.4.0 catalog carries 1.13
+	// (caught by the preflight before a leg was spent). This pin resolves
+	// each slot through the installed package's own catalog — keyless and
+	// configless (ModelRuntime.create() needs no host pi config; verified
+	// against an empty HOME, the CI shape) — so a wrong id reds at commit
+	// time, naming the slot.
+	const { ModelRuntime, ModelRegistry } = await import("@earendil-works/pi-coding-agent");
+	const registry = new ModelRegistry(await ModelRuntime.create());
+	for (const task of BENCH_TASKS) {
+		const model = registry.getModelOfType("classifier", task.judge.provider, task.judge.model);
+		assert.ok(
+			model,
+			`${task.id}: judge ${task.judge.provider}/${task.judge.model} is not in the installed catalog — pin the id the catalog carries, not the docs'`,
+		);
+	}
+});
+
 test("benchTaskById refuses an unknown id by name", () => {
 	assert.throws(() => benchTaskById("no-such-task"), /unknown benchmark task id: no-such-task/);
 });
