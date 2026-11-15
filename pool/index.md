@@ -18,7 +18,7 @@ not the upstream README:
 
 Cluster structure prediction keeps routing through theta-compute
 ([ADR 0004](docs/adr/0004-compute-is-a-native-mcp-server.md)); Tamarind and
-Adaptyv stay the documented no-cluster fallbacks, key-bearing.
+Adaptyv stay the documented no-cluster fallbacks, cloud-class.
 
 | name | pack | class | when needed |
 |------|------|-------|-------------|
