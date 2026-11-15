@@ -194,6 +194,23 @@ harness itself. It would duplicate pi's own documentation, drift against
 installed pi releases, and add nothing to the research loop. The skip is
 recorded on [issue #5](https://github.com/hugolld/theta-agent/issues/5).
 
+## Skill pool
+
+Beside the always-shipped Tier-1 library, the repo carries a **skill pool** of
+vendored domain skills at `pool/` — verbatim K-Dense trees under the same
+[ADR 0001](docs/adr/0001-vendor-k-dense-skills-verbatim.md) rules, organized
+as one **domain pack** per research domain and loaded per research project
+rather than shipped in the package
+([ADR 0008](docs/adr/0008-the-skill-pool-is-a-vendored-project-scoped-library.md)).
+[`pool/index.md`](pool/index.md) lists every skill with its class column —
+`local` (no credential, no spend), `key` (a credential, no metered spend),
+`cloud` (credential plus metered spend) — verified against each skill's stated
+requirements. The K-Dense attribution and citation below cover the pool trees
+too.
+
+First wave (upstream release `v2.72.0`, commit `526ebce`, vendored 2026-11-15):
+protein-engineering (5), bioinformatics (32), cheminformatics (11) — 48 skills.
+
 K-Dense's skills are MIT-licensed, © K-Dense Inc. If you use them in research,
 please cite their paper:
 

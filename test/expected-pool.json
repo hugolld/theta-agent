@@ -1,0 +1,196 @@
+{
+	"pool": [
+		{
+			"name": "bioinformatics/alphagenome",
+			"tree-sha256": "3ce9cb7f390f3a78204b3adace4e40416f8fd699b2ba485384b621d729bc8e39"
+		},
+		{
+			"name": "bioinformatics/anndata",
+			"tree-sha256": "d115bf642e049faffd7d96a80101d04aa14ebf4001b0acf91fb349f0d53abb58"
+		},
+		{
+			"name": "bioinformatics/arboreto",
+			"tree-sha256": "de5522a7d7e50a43ed5da2f66d8a125ed3a9656b9daa46fe52c5db3351517635"
+		},
+		{
+			"name": "bioinformatics/biopython",
+			"tree-sha256": "1e48a0cd62b2d47624d7462f4128b3cf3044039676fe9edf8da17a369b319169"
+		},
+		{
+			"name": "bioinformatics/bioservices",
+			"tree-sha256": "d5634a688c620379e8d61f6712bb61eea2aeb57b28623d4a76bb2af399cb08a5"
+		},
+		{
+			"name": "bioinformatics/bulk-rnaseq",
+			"tree-sha256": "8677f45dd5d589697dd734a282ff5cecb56f96d2547444da08f6bd2a67f23a81"
+		},
+		{
+			"name": "bioinformatics/cellxgene-census",
+			"tree-sha256": "5020f19363a50da95345e22d8bbae57f5b3b21e28aa21f7a43c3816252918c5f"
+		},
+		{
+			"name": "bioinformatics/deeptools",
+			"tree-sha256": "b3ca03dae5addc09ac45715c2c9c827d4b0772d43975a4aa2593d63dcca0ec14"
+		},
+		{
+			"name": "bioinformatics/etetoolkit",
+			"tree-sha256": "81e1f82b5e9acfec47ac41c890b1e55adf7ca37d712b997f6fa14212d23b59d5"
+		},
+		{
+			"name": "bioinformatics/flowio",
+			"tree-sha256": "17a398e8360ff8c051a92ce3bcd99638b03b69f7f12b89994abdfa34ba5dad25"
+		},
+		{
+			"name": "bioinformatics/flowkit",
+			"tree-sha256": "89ae40a6757637e7332083270bab6bdf51a4b6ed5b40d0c94f99a70081bdb738"
+		},
+		{
+			"name": "bioinformatics/geniml",
+			"tree-sha256": "9f50e12d6ecd7f2bfbb3446cd548ca19f0c6e7587ff73ffe60337183ed34ee99"
+		},
+		{
+			"name": "bioinformatics/genomic-coordinates",
+			"tree-sha256": "17369fd10d8d49d065446b8ad1d905a77bfd14ba49a73f18af65a315a0a58186"
+		},
+		{
+			"name": "bioinformatics/genomic-intelligence",
+			"tree-sha256": "2ef2c632a3db558416d9382d66acb5840789f2c111f89e0ecb48b3e40e272476"
+		},
+		{
+			"name": "bioinformatics/gget",
+			"tree-sha256": "72b34af4726bc6c15d9298246de4c46f1ba2de5160520201e970db6630849813"
+		},
+		{
+			"name": "bioinformatics/gtars",
+			"tree-sha256": "63829848f6fb0469bd55e3e3ac1ea88da802b2d4b24681a36200e721936b366a"
+		},
+		{
+			"name": "bioinformatics/mageck",
+			"tree-sha256": "608fcc43a59ee682946fb55a55cfbd6dd8db8c15c9bbb85a5c06b00a25a0da4c"
+		},
+		{
+			"name": "bioinformatics/onekgpd",
+			"tree-sha256": "fd3b45eefce74ed21a22ee8f3ce939428552b336b51a2602f3a2c158e74e2fa5"
+		},
+		{
+			"name": "bioinformatics/pathway-enrichment",
+			"tree-sha256": "55536b2c37bda1035037fdc628ced1da6eb22a88f1f2c7e2901a08d3dcfe054f"
+		},
+		{
+			"name": "bioinformatics/phylogenetics",
+			"tree-sha256": "a00920735b418e4c65f686f75408dfa3269118ea6ae2306a583d97b6b4ab0099"
+		},
+		{
+			"name": "bioinformatics/polars-bio",
+			"tree-sha256": "13c18376d21ddd888d493e240ebbd50082db338b58309f18bb4dc2a3636a0bea"
+		},
+		{
+			"name": "bioinformatics/primer-design",
+			"tree-sha256": "d57788cba3b81431c8a7d35a9c736127c91222afdfa4148b085e35a5a3e7c768"
+		},
+		{
+			"name": "bioinformatics/pydeseq2",
+			"tree-sha256": "e41c2fdfcdd6410c90bd01e80b5befc012c2abb31cf6d91d6ed57c60b3ed1eb3"
+		},
+		{
+			"name": "bioinformatics/pysam",
+			"tree-sha256": "e751d5333e5fb053f7f74360fe90cba0cb850a8092c7285d71dbbf8c862ca62f"
+		},
+		{
+			"name": "bioinformatics/qiime2-amplicon",
+			"tree-sha256": "5b360d383a56e36ea97a5125b601e05a75f5c8c7735b8d4482892e6b673cbeca"
+		},
+		{
+			"name": "bioinformatics/scanpy",
+			"tree-sha256": "1d6971355a05819dee16ed8182b72a41171f69b7137d29d669a0090e4aca8b2b"
+		},
+		{
+			"name": "bioinformatics/scikit-bio",
+			"tree-sha256": "6941a02fd9fed7e9614bd109d487bb2c4067895bfcb08a5f66aa5abcca9080ed"
+		},
+		{
+			"name": "bioinformatics/scvelo",
+			"tree-sha256": "5fd81b03739bb0a5a7a74b7a199959315244ac8cc82841f5db343a0ec011d10f"
+		},
+		{
+			"name": "bioinformatics/scvi-tools",
+			"tree-sha256": "69a630893698f5aa7cae9035cb141b456e7e9ff95e60b87aadab676b202595b9"
+		},
+		{
+			"name": "bioinformatics/tiledbvcf",
+			"tree-sha256": "06310fbf110eb4baabee6637bb92e4fefe04bdfa35f376c6781bd51f18588216"
+		},
+		{
+			"name": "bioinformatics/waypoint-bio",
+			"tree-sha256": "d612f1bc7bd7e0b1793e2092f7b57da0cf88ee106f060fbb58d54c3662258c81"
+		},
+		{
+			"name": "bioinformatics/zarr-python",
+			"tree-sha256": "2f89293b730a313d71d9f2528963d339de8c6f2661914a7609cd1be1c605da8e"
+		},
+		{
+			"name": "cheminformatics/datamol",
+			"tree-sha256": "8d3938a0a691e758e64cdf20e4f6a8ffc9835588c4f78113c34823cefe66b0aa"
+		},
+		{
+			"name": "cheminformatics/deepchem",
+			"tree-sha256": "7b3613b5419c524aa2be78245479f1dc127142e19c744b5b4d45b08923e21a8d"
+		},
+		{
+			"name": "cheminformatics/diffdock",
+			"tree-sha256": "e2b981d7a12a94abd977997224dce796de6d46edc688e9a48c439c5378f91487"
+		},
+		{
+			"name": "cheminformatics/medchem",
+			"tree-sha256": "bdee7ac8ddbc9aa94b54c2c7a9574ab21525c6252c7fcd63bcf83e71e2dd9769"
+		},
+		{
+			"name": "cheminformatics/molecular-dynamics",
+			"tree-sha256": "8eae17b5ce9c7ac04095eb7e88ce2dd681b4fc0351b6cf4525e1c0426fe3a3b9"
+		},
+		{
+			"name": "cheminformatics/molfeat",
+			"tree-sha256": "d5fca1966d0f249c56c713ca48173595ef9702b4ad5d4e935655520d491d24db"
+		},
+		{
+			"name": "cheminformatics/nmrglue",
+			"tree-sha256": "03a3532dce946985601155693bc1484dc516650dc3268e4c50d66913b2a62b59"
+		},
+		{
+			"name": "cheminformatics/pytdc",
+			"tree-sha256": "f2c5c1a37f13e721828f06eb29ff5b63a79457c0adf99fcc17833198807309a1"
+		},
+		{
+			"name": "cheminformatics/rdkit",
+			"tree-sha256": "20b583d7f526f40557b95db4a75717af4a0154010dfcfbf6cc6f7c8e4b67c9ad"
+		},
+		{
+			"name": "cheminformatics/rowan",
+			"tree-sha256": "f69ec04fa3be325193d5ec81dceaaff6743cc31d7ecc0a0828a7b89b9d174a2b"
+		},
+		{
+			"name": "cheminformatics/torchdrug",
+			"tree-sha256": "bcc6d885c3731a7023503b5bef3b3bff6852c254647dee7b7d4ef48a61ebab82"
+		},
+		{
+			"name": "protein-engineering/adaptyv",
+			"tree-sha256": "85d85d1e05f0fd59e9bbc26da9c82ee3137c5041acec7c16e97bcac06721f608"
+		},
+		{
+			"name": "protein-engineering/esm",
+			"tree-sha256": "c0aa243be139062a8045248da8a4ecf20df295608580d81165c7675ff71a5565"
+		},
+		{
+			"name": "protein-engineering/glycoengineering",
+			"tree-sha256": "2065550ef32acefb9af5a428a75245e479292f6c92d18f4c5e1bb12e2572fb21"
+		},
+		{
+			"name": "protein-engineering/relion",
+			"tree-sha256": "4149bf18eefeb9ef7e891d70de71e1edc407aabdf29835100189cd99baef0c31"
+		},
+		{
+			"name": "protein-engineering/tamarind",
+			"tree-sha256": "f092ece13cff8a9cf8d3162a659a8b54dacc7d89289cc6bc0026e525bfffdce9"
+		}
+	]
+}

@@ -131,3 +131,11 @@ _Avoid_: evidence reuse, recycled transcript
 **Surface class**:
 One of the model-visible byte classes an eval capture binds, one digest per class in the fixture's provenance manifest: the extension advertisement, a skill tree, the extension sources, the project context. The registry is `test/eval/surfaces.mjs`, pinned by `test/eval/surfaces.test.mjs`. Spec #133 ships it.
 _Avoid_: surface kind, scope class
+
+**Skill pool**:
+The versioned in-repo library of vendored domain skills at `pool/` — verbatim K-Dense trees under the ADR 0001 rules, outside the npm tarball — loaded per research project through `.theta/skills.json` instead of shipping in every session. Distinct from the Tier-1 library, which ships in the tarball and loads always. ADR 0008 decides it.
+_Avoid_: skill catalog, skill marketplace
+
+**Domain pack**:
+One pack per research domain inside the skill pool — protein-engineering, bioinformatics, cheminformatics — the unit a research project loads and a pack re-sync vendors. First wave owner-decided 2026-11-15: 48 skills, zero robots, zero PHI. ADR 0008 decides it.
+_Avoid_: skill bundle, skill collection
