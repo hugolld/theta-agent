@@ -141,6 +141,7 @@ test("decorated range lines match nothing — the anchor is line-start", () => {
 	].join("\n");
 	assert.deepEqual(disclosedRanges(body), []);
 });
+
 test("fenced example lines are not disclosures", () => {
 	// A body that documents the syntax with real shas inside a code fence
 	// is an example, not a round — parsing it would silently over-cover

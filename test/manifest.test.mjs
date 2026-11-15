@@ -86,11 +86,13 @@ test("the pin pattern rejects run-time resolves", () => {
 });
 
 test("the suite bounds every test with a runner timeout", () => {
-	// node:test discovers every .mjs under test/ and loads it in a child
-	// with stdin held open; one blocking test hung the pre-commit hook
-	// for 36 minutes (the S3 retro's bench-judge main guard). The flag
-	// reds such a test in seconds — verified live: a hanging test exits 1
-	// at the bound, and hangs forever without the flag.
+	// The flag bounds each REGISTERED test: a body that never settles (a
+	// never-listening server, a stuck container wait) reds at the bound
+	// instead of hanging the suite — verified live. It does NOT bound the
+	// load-time hang class (the S3 retro's 36-minute hook hang: a
+	// discovered file's main guard read stdin before any test registered,
+	// so no bound applied) — that class's defense is the NODE_TEST_CONTEXT
+	// guard, doctrine in docs/agents/eval.md.
 	assert.match(manifest.scripts.test ?? "", /--test-timeout=\d+/);
 });
 

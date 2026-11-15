@@ -6,6 +6,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 import { staleStagedFiles } from "../scripts/stale-stage.mjs";
+import { fixtureGitRunner, initHardenedGitRepo } from "./helpers/git-repo.mjs";
 
 // The staged-vs-worktree divergence the pre-commit hook warns about
 // (the S3 retro, #150): the commit takes the index, the suite tests the
@@ -47,19 +48,9 @@ test("empty and undefined parse to nothing", () => {
 const scriptPath = fileURLToPath(new URL("../scripts/stale-stage.mjs", import.meta.url));
 
 function makeRepo(t) {
-	const root = mkdtempSync(path.join(tmpdir(), "stale-stage-"));
+	const root = initHardenedGitRepo(mkdtempSync(path.join(tmpdir(), "stale-stage-")));
 	t.after(() => rmSync(root, { recursive: true, force: true }));
-	const git = (args) => {
-		const run = spawnSync("git", ["-c", "init.defaultBranch=main", ...args], {
-			cwd: root,
-			encoding: "utf8",
-		});
-		assert.equal(run.status, 0, `git ${args.join(" ")}: ${run.stderr}`);
-		return run.stdout;
-	};
-	git(["init"]);
-	git(["config", "user.email", "fixture@example.com"]);
-	git(["config", "user.name", "fixture"]);
+	const git = fixtureGitRunner(root);
 	writeFileSync(path.join(root, "a.txt"), "one\n");
 	git(["add", "a.txt"]);
 	git(["commit", "--message", "base"]);
