@@ -129,5 +129,5 @@ A session recording taken deliberately for the eval suite — an eval-shaped sce
 _Avoid_: evidence reuse, recycled transcript
 
 **Surface class**:
-One of the model-visible byte classes an eval capture binds, one digest per class in the fixture's provenance manifest: the extension advertisement, a skill tree, the extension sources, the project context. The registry is `test/eval/surfaces.mjs`, pinned beside the land guard. Spec #133 ships it.
+One of the model-visible byte classes an eval capture binds, one digest per class in the fixture's provenance manifest: the extension advertisement, a skill tree, the extension sources, the project context. The registry is `test/eval/surfaces.mjs`, pinned by `test/eval/surfaces.test.mjs`. Spec #133 ships it.
 _Avoid_: surface kind, scope class
