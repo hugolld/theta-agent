@@ -19,6 +19,13 @@ const skillsRoot = new URL("../skills/", import.meta.url);
 const expected = JSON.parse(
 	await readFile(new URL("expected-skills.json", import.meta.url), "utf8"),
 );
+// The pool pin (ADR 0008): expected-pool.json carries one entry per pool
+// tree — `pack/slug` plus tree-sha256 — checked in and updated only by a
+// pack re-sync, the expected-skills.json discipline one directory up.
+const poolRoot = new URL("../pool/", import.meta.url);
+const expectedPool = (
+	JSON.parse(await readFile(new URL("expected-pool.json", import.meta.url), "utf8")).pool
+).sort((a, b) => (a.name < b.name ? -1 : 1));
 
 // Frontmatter is parsed by the same YAML engine pi itself runs (`yaml`, the
 // package pi declares as a dependency — 2.9.x on both sides today), so what
@@ -51,6 +58,21 @@ const shipped = (await readdir(skillsRoot, { withFileTypes: true }))
 	.map((entry) => entry.name)
 	.sort();
 
+// Pool trees sit one level deeper (pack/skill); the enumeration is the same
+// directory read, two passes.
+const poolPacks = (await readdir(poolRoot, { withFileTypes: true }))
+	.filter((entry) => entry.isDirectory())
+	.map((entry) => entry.name)
+	.sort();
+const poolTrees = [];
+for (const pack of poolPacks) {
+	const entries = await readdir(new URL(`${pack}/`, poolRoot), { withFileTypes: true });
+	for (const entry of entries) {
+		if (entry.isDirectory()) poolTrees.push(`${pack}/${entry.name}`);
+	}
+}
+poolTrees.sort();
+
 // The hyphenated key is destructured once; everything downstream uses
 // plain identifiers.
 const { vendored, "self-authored": selfAuthored } = expected;
@@ -58,9 +80,9 @@ const expectedVendored = [...vendored].map((s) => s.name).sort();
 const expectedSelfAuthored = [...selfAuthored].sort();
 const expectedShipped = [...expectedVendored, ...expectedSelfAuthored].sort();
 
-async function loadSkill(name) {
+async function loadSkill(name, rootUrl = skillsRoot) {
 	const markdown = await readFile(
-		new URL(`${name}/SKILL.md`, skillsRoot),
+		new URL(`${name}/SKILL.md`, rootUrl),
 		"utf8",
 	);
 	return { markdown, frontmatter: parseFrontmatter(markdown) };
@@ -70,27 +92,33 @@ test("shipped skills equal the checked-in expected list", () => {
 	assert.deepEqual(shipped, expectedShipped);
 });
 
+// The name/description rules, one home since the pool became the shape's
+// second caller: shipped skills and pool skills face the same bar.
+function assertNameAndDescription(label, frontmatter) {
+	assert.match(
+		frontmatter.name,
+		/^[a-z0-9][a-z0-9-]{0,63}$/,
+		`${label}: invalid skill name`,
+	);
+	assert.equal(
+		typeof frontmatter.description,
+		"string",
+		`${label}: description missing`,
+	);
+	assert.ok(
+		frontmatter.description.length > 0 && frontmatter.description.length <= 1024,
+		`${label}: description must be 1..1024 chars, got ${frontmatter.description.length}`,
+	);
+}
+
 test("every skill carries a parseable SKILL.md with a valid name and description", async () => {
 	for (const name of shipped) {
 		const { frontmatter } = await loadSkill(name);
-		assert.match(
-			frontmatter.name,
-			/^[a-z0-9][a-z0-9-]{0,63}$/,
-			`${name}: invalid skill name`,
-		);
+		assertNameAndDescription(name, frontmatter);
 		assert.equal(
 			frontmatter.name,
 			name,
 			`${name}: frontmatter name differs from directory`,
-		);
-		assert.equal(
-			typeof frontmatter.description,
-			"string",
-			`${name}: description missing`,
-		);
-		assert.ok(
-			frontmatter.description.length > 0 && frontmatter.description.length <= 1024,
-			`${name}: description must be 1..1024 chars, got ${frontmatter.description.length}`,
 		);
 	}
 });
@@ -122,23 +150,28 @@ function treeDigest(dirUrl) {
 	return digestOf("");
 }
 
+// Provenance rules, one home since the pool became the shape's second
+// caller: the same six-line header, the same upstream, the same MIT.
+function assertProvenance(label, provenance) {
+	assert.ok(provenance, `${label}: metadata.provenance missing`);
+	for (const field of ["upstream-repo", "release", "commit", "date", "license"]) {
+		assert.equal(
+			typeof provenance[field],
+			"string",
+			`${label}: provenance.${field} missing`,
+		);
+	}
+	assert.match(provenance["upstream-repo"], /K-Dense-AI\/scientific-agent-skills/);
+	assert.match(provenance.release, /^v\d+\.\d+\.\d+$/);
+	assert.match(provenance.commit, /^[0-9a-f]{40}$/);
+	assert.match(provenance.date, /^\d{4}-\d{2}-\d{2}$/);
+	assert.match(provenance.license, /MIT/);
+}
+
 test("vendored skills carry full provenance and are hash-pinned", async () => {
 	for (const skill of vendored) {
 		const { frontmatter } = await loadSkill(skill.name);
-		const provenance = frontmatter.metadata?.provenance;
-		assert.ok(provenance, `${skill.name}: metadata.provenance missing`);
-		for (const field of ["upstream-repo", "release", "commit", "date", "license"]) {
-			assert.equal(
-				typeof provenance[field],
-				"string",
-				`${skill.name}: provenance.${field} missing`,
-			);
-		}
-		assert.match(provenance["upstream-repo"], /K-Dense-AI\/scientific-agent-skills/);
-		assert.match(provenance.release, /^v\d+\.\d+\.\d+$/);
-		assert.match(provenance.commit, /^[0-9a-f]{40}$/);
-		assert.match(provenance.date, /^\d{4}-\d{2}-\d{2}$/);
-		assert.match(provenance.license, /MIT/);
+		assertProvenance(skill.name, frontmatter.metadata?.provenance);
 		// Content pin over the whole tree (SKILL.md, references, scripts,
 		// assets): any edit fails CI; a re-sync updates the pin with the
 		// provenance header.
@@ -154,6 +187,52 @@ test("vendored skills carry full provenance and are hash-pinned", async () => {
 			`${skill.name}: content drifted from the pinned tree digest`,
 		);
 	}
+});
+
+test("pool trees equal the checked-in expected list", () => {
+	assert.deepEqual(poolTrees, expectedPool.map((s) => s.name));
+});
+
+test("pool skills carry full provenance and are hash-pinned", async () => {
+	for (const skill of expectedPool) {
+		const { frontmatter } = await loadSkill(skill.name, poolRoot);
+		assertProvenance(skill.name, frontmatter.metadata?.provenance);
+		// The same content pin, pool-side: any byte edit in a pool tree
+		// fails CI; a pack re-sync updates the pin (docs/agents/resync.md).
+		const digest = treeDigest(new URL(`${skill.name}/`, poolRoot));
+		assert.match(
+			skill["tree-sha256"],
+			/^[0-9a-f]{64}$/,
+			`${skill.name}: tree-sha256 pin missing from expected-pool.json`,
+		);
+		assert.equal(
+			digest,
+			skill["tree-sha256"],
+			`${skill.name}: content drifted from the pinned pool tree digest`,
+		);
+	}
+});
+
+test("pool skills follow the shipped name and description rules", async () => {
+	const poolNames = [];
+	for (const name of poolTrees) {
+		const { frontmatter } = await loadSkill(name, poolRoot);
+		assertNameAndDescription(name, frontmatter);
+		assert.equal(
+			frontmatter.name,
+			name.split("/")[1],
+			`${name}: frontmatter name differs from directory`,
+		);
+		poolNames.push(frontmatter.name);
+	}
+	// A pool skill named like a shipped skill would shadow it once a pack
+	// loads beside the Tier-1 library — the union must stay unique.
+	const all = [...shipped, ...poolNames].sort();
+	assert.equal(
+		new Set(all).size,
+		all.length,
+		"a skill name appears in both skills/ and pool/",
+	);
 });
 
 test("the orchestrator is self-authored and walks the six-stage loop", async () => {
@@ -503,6 +582,11 @@ const scanSurfaces = [
 	// ADR 0007 carries the M6 eval headwords (eval suite, replay net,
 	// benchmark suite, workspace-as-oracle, eval capture).
 	"docs/adr/0007-the-eval-suite-is-a-custom-two-layer-harness.md",
+	// ADR 0008 carries the pool headwords (skill pool, domain pack).
+	"docs/adr/0008-the-skill-pool-is-a-vendored-project-scoped-library.md",
+	// pool/index.md is the pool's self-authored face — the class column's
+	// working vocabulary and the headwords above.
+	"pool/index.md",
 	// The gateway README carries the compute headwords' working vocabulary
 	// (compute gateway, audit line) through the M4 strikes.
 	"gateway/README.md",
@@ -758,7 +842,7 @@ const proseFiles = await (async () => {
 	for (const skill of expectedSelfAuthored) {
 		await addTree(new URL(`../skills/${skill}/`, import.meta.url), (n) => n.endsWith(".md"));
 	}
-	files.push("gateway/README.md", "README.md", "CLAUDE.md");
+	files.push("gateway/README.md", "README.md", "CLAUDE.md", "pool/index.md");
 	return files;
 })();
 
@@ -813,6 +897,7 @@ const ADR_COINAGES = new Map([
 	["0005", ["clean-room rig"]],
 	["0006", ["Submit gate", "submit capability"]],
 	["0007", ["eval suite"]],
+	["0008", ["skill pool", "domain pack"]],
 ]);
 
 async function adrFiles() {

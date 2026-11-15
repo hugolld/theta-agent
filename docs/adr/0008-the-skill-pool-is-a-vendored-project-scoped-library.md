@@ -1,0 +1,22 @@
+# 0008 — The skill pool is a vendored, project-scoped library
+
+- **Status**: accepted (2026-11-15)
+- **Context**: M6 shipped the research-loop core on the Tier-1 library, but the K-Dense domain skills — protein engineering, bioinformatics, cheminformatics — stayed on the side: 48 more trees, always loaded, would spend every session's context on skills a given research project never calls, and several carry credentials or metered spend that a keyless session must never touch. The workbench face (M7) is a pool consumer and should build against the finished mechanism (#155). What pi provides is the `resources_discover` extension event and per-project storage under `.theta/`; what the campaign already owns is the ADR 0001 vendoring discipline, the clean-room rig, and the eval suite's drift pins.
+- **Decision**: domain skills move into a versioned in-repo **skill pool** (GLOSSARY) at `pool/` — verbatim K-Dense trees under ADR 0001 rules, outside the npm tarball.
+  The unit of selection and re-sync is the **domain pack** (GLOSSARY), one per research domain; a Theta extension loads packs per research project. It hooks pi's `resources_discover` event, reads `<project>/.theta/skills.json`, and contributes `pool/<pack>` paths. Selection is deterministic scan-only by default — keyless, no model call; keyed owner sessions add a one-call `models.classify()` (Jev) gate at session start whose decision and rationale land in `skills.json`. `pool/index.md` carries the per-skill class column, verified against each `SKILL.md`'s stated requirements: **local** = no credential, no spend; **key** = a credential, no metered spend; **cloud** = credential plus metered spend. Cluster structure prediction keeps routing through theta-compute (ADR 0004); Tamarind and Adaptyv stay documented no-cluster fallbacks, key-bearing. First wave (owner-decided 2026-11-15): the mission-named three — Protein Engineering & Design (5), Bioinformatics & Genomics (32), Cheminformatics & Drug Discovery (11) — 48 skills, zero robots, zero PHI, eval-exercisable in the rig.
+
+## Considered options
+
+- **Ship and load all domain skills always** — the tarball grows by 48 trees, every session pays the context for skills it never calls, and keyed or metered surfaces enter keyless sessions. Rejected.
+- **A separate npm package for the pool** — versioning and re-syncs split from the repo, and the gallery/manifest surface grows for no loader benefit; the pool must version and re-sync with the checkout it pins. Rejected.
+- **Runtime discovery from upstream** — cloning or downloading at session start makes context nondeterministic, needs network where a research session may have none, and leaves nothing for the eval pins to bind. Rejected in favor of vendored trees at a recorded pin.
+- **Model-driven selection as the default** — a session's loaded pack would depend on a model call before any skill loads. Rejected: deterministic scan-only is the default; `classify()` appears only as the keyed owner-session gate.
+
+## Consequences
+
+- The pool lands in strikes (children of #155): S0 vendors the first wave, writes `pool/index.md`, and lands this ADR; S1 the loader extension (`resources_discover` hook, `skills.json` read/write, deterministic scan, `/theta:skills` command — the tarball delta is the extension file only); S2 the Jev gate (the key stays host-side; rig and benchmark legs stay deterministic); S3 eval and dogfood (the pool scenario joins the replay net — fresh rig capture, digest scope plus pool trees, shape assertion — plus one real research session with a loaded pack); S4 the doctrine sweep (README Tier-3 story, CLAUDE.md sections, resync and dogfood homes, glossary enforcement).
+- `test/expected-pool.json` pins every pool tree's digest with the same `treeDigest` algorithm as the shipped surface pin, in a separate file; a byte edit in a pool tree reds by name.
+- Vendored pool trees stay out of Python-lint scope by construction, and the pool never enters the npm tarball — the shipped file count is unchanged by S0.
+- The class column gates selection: local skills are the deterministic default set; key and cloud skills load only through the keyed owner gate, and a cloud class additionally means owner approval for the metered spend itself.
+- The eval-capture obligation for pool surfaces activates with S3's fixture — until then there is no pool capture to owe.
+- A re-sync of a domain pack follows the same nine steps as the Tier-1 library, with pool targets and `test/expected-pool.json` as the integrity pin (docs/agents/resync.md).
