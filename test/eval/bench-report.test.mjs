@@ -13,7 +13,7 @@ import path from "node:path";
 import { test } from "node:test";
 import { parseSessionEntries } from "@earendil-works/pi-coding-agent";
 import { BOOL_ANSWER_SAMPLE } from "./bench-answer-shape.mjs";
-import { BENCH_FILES, buildReport, buildSuiteReport, resolveJudge, runJudge, sumEntries, sumSessionUsage } from "./bench-report.mjs";
+import { BENCH_FILES, buildReport, buildSuiteReport, resolveJudge, runJudge, spawnJudgeChild, sumEntries, sumSessionUsage } from "./bench-report.mjs";
 import { benchTaskById } from "./bench-tasks.mjs";
 
 const task = benchTaskById("provenance-decision");
@@ -87,120 +87,167 @@ test("sumSessionUsage refuses a dir with no transcript", () => {
 	}
 });
 
-// A stub registry drives the judge wrapper without a key.
-function stubRegistry(classifyImpl) {
-	return { classify: classifyImpl };
-}
+// The judge seam: runJudge drives one fresh child process per call
+// (test/eval/bench-judge.mjs). Measured live (2026-11-15, five suite
+// runs): every judge failure rode the long-lived runner process's pooled
+// connection state, and every fresh-process probe passed — so these
+// tests mock the child runner at the seam the parent owns, and the
+// child's own spawn protocol gets real-process pins with throwaway
+// children that never touch pi or the network.
 const judgeSlot = { tier: "iteration", provider: "stub", model: "stub-jev" };
+const SETTLED_ANSWER = () => ({
+	stopReason: "stop",
+	answers: { [task.classify.id]: { ...BOOL_ANSWER_SAMPLE } },
+	usage: { totalTokens: 900, cost: { total: 0.001 } },
+});
 
-test("a judge that stops cleanly turns its bool probability into the check row", async () => {
-	// The stub answers through BOOL_ANSWER_SAMPLE, the shape anchored to
-	// pi-ai's declared ClassifierBoolAnswer (test/eval/bench-answer-shape.mjs,
-	// checked by tsc) — a stub shape pi never produces reds typecheck, not
-	// the live leg.
-	const registry = stubRegistry(async () => ({
-		stopReason: "stop",
-		answers: { [task.classify.id]: { ...BOOL_ANSWER_SAMPLE } },
-		usage: { totalTokens: 900, cost: { total: 0.001 } },
-	}));
-	const result = await runJudge(registry, judgeSlot, task.classify, { prompt: "p", artifact: {} });
+function mockChild(results) {
+	const calls = [];
+	const spawnChild = async (slot, classify, state) => {
+		calls.push({ slot, classify, state });
+		return results[Math.min(calls.length - 1, results.length - 1)];
+	};
+	return { spawnChild, calls };
+}
+
+test("a settled bool answer becomes the check row, and the child gets slot, classify, and state", async () => {
+	const { spawnChild, calls } = mockChild([{ kind: "settled", settled: SETTLED_ANSWER() }]);
+	const state = { prompts: ["p"], artifact: {} };
+	const result = await runJudge(judgeSlot, task.classify, state, { spawnChild, retryDelayMs: 1 });
 	assert.equal(result.pass, true);
 	assert.equal(result.probability, BOOL_ANSWER_SAMPLE.probability);
 	assert.deepEqual(result.usage, { totalTokens: 900, cost: { total: 0.001 } });
+	assert.deepEqual(calls[0].slot, judgeSlot);
+	assert.deepEqual(calls[0].classify, task.classify);
+	assert.deepEqual(calls[0].state, state);
 });
 
 test("a probability below the threshold is a failed measurement, not a judge error", async () => {
-	const registry = stubRegistry(async () => ({
-		stopReason: "stop",
-		answers: { [task.classify.id]: { ...BOOL_ANSWER_SAMPLE, probability: 0.2 } },
-	}));
-	const result = await runJudge(registry, judgeSlot, task.classify, { prompt: "p", artifact: {} });
+	const settled = SETTLED_ANSWER();
+	settled.answers[task.classify.id].probability = 0.2;
+	const { spawnChild } = mockChild([{ kind: "settled", settled }]);
+	const result = await runJudge(judgeSlot, task.classify, {}, { spawnChild, retryDelayMs: 1 });
 	assert.equal(result.pass, false);
 	assert.equal(result.judgeError, undefined, "a low-probability verdict must not fail the leg");
 });
 
 test("a judge answer in another shape fails the check loudly", async () => {
-	const choiceShaped = stubRegistry(async () => ({
-		stopReason: "stop",
-		answers: { [task.classify.id]: { type: "choice", choice: "true", probabilities: {}, confidence: 1 } },
-	}));
-	const bareBoolean = stubRegistry(async () => ({ stopReason: "stop", answers: { [task.classify.id]: true } }));
-	for (const registry of [choiceShaped, bareBoolean]) {
-		const result = await runJudge(registry, judgeSlot, task.classify, { prompt: "p", artifact: {} });
+	for (const answer of [{ type: "choice", choice: "true", probabilities: {}, confidence: 1 }, true]) {
+		const settled = { stopReason: "stop", answers: { [task.classify.id]: answer } };
+		const { spawnChild } = mockChild([{ kind: "settled", settled }]);
+		const result = await runJudge(judgeSlot, task.classify, {}, { spawnChild, retryDelayMs: 1 });
 		assert.equal(result.pass, false);
 		assert.match(result.judgeError, /not a bool probability/);
 	}
 });
 
-test("a judge error is a failed check with the error recorded, never a crash", async () => {
-	const errored = stubRegistry(async () => ({ stopReason: "error", errorMessage: "boom" }));
-	const rejected = stubRegistry(async () => {
-		throw new Error("network gone");
-	});
-	for (const registry of [errored, rejected]) {
-		const result = await runJudge(registry, judgeSlot, task.classify, { prompt: "p", artifact: {} });
-		assert.equal(result.pass, false);
-		assert.ok(result.judgeError);
+test("a stopReason error is an answer, not a transport failure — no retry", async () => {
+	const { spawnChild, calls } = mockChild([
+		{ kind: "settled", settled: { stopReason: "error", errorMessage: "System One API error (404)" } },
+	]);
+	const result = await runJudge(judgeSlot, task.classify, {}, { spawnChild, retryDelayMs: 1 });
+	assert.equal(result.pass, false);
+	assert.equal(result.judgeError, "System One API error (404)");
+	assert.equal(calls.length, 1, "an API-level answer is deterministic — no retry");
+});
+
+test("a child-reported transport failure retries once and rides through", async () => {
+	const { spawnChild, calls } = mockChild([
+		{ kind: "judge-failure", transport: true, detail: "fetch failed (ECONNRESET)" },
+		{ kind: "settled", settled: SETTLED_ANSWER() },
+	]);
+	const result = await runJudge(judgeSlot, task.classify, {}, { spawnChild, retryDelayMs: 1 });
+	assert.equal(result.pass, true, "the retry lands the verdict");
+	assert.equal(calls.length, 2, "exactly one retry");
+});
+
+test("a second transport failure records the judge error without a third child", async () => {
+	const { spawnChild, calls } = mockChild([
+		{ kind: "judge-failure", transport: true, detail: "fetch failed (ECONNRESET)" },
+		{ kind: "judge-failure", transport: true, detail: "fetch failed (ECONNRESET)" },
+	]);
+	const result = await runJudge(judgeSlot, task.classify, {}, { spawnChild, retryDelayMs: 1 });
+	assert.equal(result.pass, false);
+	assert.equal(result.judgeError, "fetch failed (ECONNRESET)");
+	assert.equal(calls.length, 2, "one retry, then out");
+});
+
+test("a non-transport child failure never retries", async () => {
+	const { spawnChild, calls } = mockChild([
+		{ kind: "judge-failure", transport: false, detail: "judge stub/stub-jev is not in the catalog" },
+	]);
+	const result = await runJudge(judgeSlot, task.classify, {}, { spawnChild, retryDelayMs: 1 });
+	assert.equal(result.pass, false);
+	assert.match(result.judgeError, /not in the catalog/);
+	assert.equal(calls.length, 1);
+});
+
+test("a child timeout is the transport class — one retry, then the judge error", async () => {
+	const { spawnChild, calls } = mockChild([
+		{ kind: "timeout", detail: "judge child timed out after 120000ms" },
+		{ kind: "timeout", detail: "judge child timed out after 120000ms" },
+	]);
+	const result = await runJudge(judgeSlot, task.classify, {}, { spawnChild, retryDelayMs: 1 });
+	assert.equal(result.pass, false);
+	assert.match(result.judgeError, /timed out/);
+	assert.equal(calls.length, 2);
+});
+
+test("spawnJudgeChild delivers argv and stdin and parses the verdict JSON", async () => {
+	const dir = mkdtempSync(path.join(tmpdir(), "bench-child-"));
+	try {
+		const childPath = path.join(dir, "echo.mjs");
+		writeFileSync(
+			childPath,
+			[
+				"const chunks = [];",
+				"for await (const c of process.stdin) chunks.push(c);",
+				'const input = JSON.parse(chunks.join(""));',
+				'process.stdout.write(JSON.stringify({ ok: true, settled: { stopReason: "stop", argv: process.argv.slice(2), classifyId: input.classify.id } }));',
+			].join("\n"),
+		);
+		const child = await spawnJudgeChild(judgeSlot, task.classify, { prompts: ["p"] }, { childPath, timeoutMs: 5000 });
+		assert.equal(child.kind, "settled");
+		assert.deepEqual(child.settled.argv, [judgeSlot.provider, judgeSlot.model]);
+		assert.equal(child.settled.classifyId, task.classify.id);
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
 	}
 });
 
-test("a transport-level fetch failure retries once and rides through", async () => {
-	// Measured live (2026-11-15, the first suite run): the pooled
-	// keep-alive socket dies between the suite's long tasks and fetch
-	// answers TypeError "fetch failed" — one retry opens a fresh socket.
-	// API-level outcomes never retry (the next test pins that side).
-	let calls = 0;
-	const registry = stubRegistry(async () => {
-		calls += 1;
-		if (calls === 1) throw new TypeError("fetch failed");
-		return {
-			stopReason: "stop",
-			answers: { [task.classify.id]: { ...BOOL_ANSWER_SAMPLE } },
-			usage: { totalTokens: 10, cost: { total: 0 } },
-		};
-	});
-	const result = await runJudge(registry, judgeSlot, task.classify, { prompt: "p", artifact: {} });
-	assert.equal(result.pass, true, "the retry lands the verdict");
-	assert.equal(calls, 2, "exactly one retry");
+test("a child that answers no verdict JSON lands as malformed with the output tails", async () => {
+	const dir = mkdtempSync(path.join(tmpdir(), "bench-child-"));
+	try {
+		const childPath = path.join(dir, "garbage.mjs");
+		writeFileSync(childPath, 'process.stdout.write("garbage");process.stderr.write("boom stack");process.exit(1);');
+		const child = await spawnJudgeChild(judgeSlot, task.classify, {}, { childPath, timeoutMs: 5000 });
+		assert.equal(child.kind, "malformed");
+		assert.match(child.detail, /exited 1/);
+		assert.match(child.detail, /garbage/);
+		assert.match(child.detail, /boom stack/);
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
 });
 
-test("a second transport failure records the judge error without a third call", async () => {
-	let calls = 0;
-	const registry = stubRegistry(async () => {
-		calls += 1;
-		throw new TypeError("fetch failed");
-	});
-	const result = await runJudge(registry, judgeSlot, task.classify, { prompt: "p", artifact: {} });
-	assert.equal(result.pass, false);
-	assert.equal(result.judgeError, "fetch failed");
-	assert.equal(calls, 2, "one retry, then out");
+test("a child that hangs past the timeout lands as timeout", async () => {
+	const dir = mkdtempSync(path.join(tmpdir(), "bench-child-"));
+	try {
+		const childPath = path.join(dir, "sleepy.mjs");
+		writeFileSync(childPath, "setTimeout(() => {}, 60000);");
+		const child = await spawnJudgeChild(judgeSlot, task.classify, {}, { childPath, timeoutMs: 300 });
+		assert.equal(child.kind, "timeout");
+		assert.match(child.detail, /timed out after 300ms/);
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
 });
 
-test("API-level and non-transport throws never retry", async () => {
-	let apiCalls = 0;
-	const apiError = stubRegistry(async () => {
-		apiCalls += 1;
-		return { stopReason: "error", errorMessage: "System One API error (404)" };
-	});
-	const apiResult = await runJudge(apiError, judgeSlot, task.classify, { prompt: "p", artifact: {} });
-	assert.equal(apiResult.judgeError, "System One API error (404)");
-	assert.equal(apiCalls, 1, "an API-level answer is deterministic — no retry");
-
-	let throwCalls = 0;
-	const otherThrow = stubRegistry(async () => {
-		throwCalls += 1;
-		throw new Error("network gone");
-	});
-	const throwResult = await runJudge(otherThrow, judgeSlot, task.classify, { prompt: "p", artifact: {} });
-	assert.match(throwResult.judgeError, /network gone/);
-	assert.equal(throwCalls, 1, "only the fetch-failed class retries");
-});
-
-test("a judge answer that is not a bool shape fails the check", async () => {
-	const registry = stubRegistry(async () => ({ stopReason: "stop", answers: { [task.classify.id]: "yes" } }));
-	const result = await runJudge(registry, judgeSlot, task.classify, { prompt: "p", artifact: {} });
-	assert.equal(result.pass, false);
-	assert.match(result.judgeError, /not a bool probability/);
+test("the judge child module exposes the protocol surface the parent drives", async () => {
+	const child = await import("./bench-judge.mjs");
+	assert.equal(typeof child.judgeMain, "function");
+	assert.equal(typeof child.isTransportError, "function");
+	assert.equal(typeof child.transportMessage, "function");
 });
 
 test("resolveJudge names the fix for a missing model and for a missing credential", () => {

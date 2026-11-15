@@ -443,19 +443,23 @@ export function evalGradeCommand(taskId, sessionPath = "/session") {
 
 // Host-side judge preflight (spec #136): every judge slot of every
 // selected task resolves against the installed catalog and its provider
-// key, before Docker or a clone is spent. One model per unique slot —
-// the two tiers share a host but never an identity.
+// key, before Docker or a clone is spent. One resolve per unique slot —
+// the two tiers share a host but never an identity. The judge calls
+// themselves run in fresh child processes (test/eval/bench-judge.mjs),
+// so nothing downstream needs the resolved models.
 async function preflightJudges(tasks) {
 	const { ModelRuntime, ModelRegistry } = await import("@earendil-works/pi-coding-agent");
 	const registry = new ModelRegistry(await ModelRuntime.create());
-	const judgeModels = new Map();
+	const seen = new Set();
 	for (const task of tasks) {
 		for (const slot of task.judges) {
 			const key = `${slot.provider}/${slot.model}`;
-			if (!judgeModels.has(key)) judgeModels.set(key, resolveJudge(registry, slot));
+			if (!seen.has(key)) {
+				seen.add(key);
+				resolveJudge(registry, slot);
+			}
 		}
 	}
-	return { registry, judgeModels };
 }
 
 // The Docker-and-git prelude both eval paths share (one home, the
@@ -487,7 +491,7 @@ function evalStaging(flags) {
 // caller continues; a session exit fails the leg from finishSession,
 // and a judge error lands in the report for the caller's gate
 // (gateJudgeErrors — after the run-level report has landed).
-async function runBenchTask(registry, judgeModels, task, { taskDir, taskSessionPath, flags }) {
+async function runBenchTask(task, { taskDir, taskSessionPath, flags }) {
 	execIn(`rm -rf "$HOME/task" && mkdir -p "$HOME/task"`);
 	execIn(`mkdir -p '${taskSessionPath}'`);
 	if (task.image) execIn(stageImageCommand(task.image));
@@ -517,7 +521,7 @@ async function runBenchTask(registry, judgeModels, task, { taskDir, taskSessionP
 	const judgeResults = await Promise.all(
 		task.judges.map((slot) =>
 			artifact
-				? runJudge(registry, judgeModels.get(`${slot.provider}/${slot.model}`), task.classify, {
+				? runJudge(slot, task.classify, {
 						prompts: task.sessions,
 						artifact,
 					})
@@ -568,7 +572,7 @@ function gateJudgeErrors(reports) {
 // container, in-container grading, then the host-side report beside the
 // recorded exit status.
 async function runEval(task, flags) {
-	const { registry, judgeModels } = await preflightJudges([task]);
+	await preflightJudges([task]);
 	const providerDir = evalStaging(flags);
 
 	sessionDir = flags.sessionDir ?? defaultEvidenceDir(`bench-${task.id}`);
@@ -577,7 +581,7 @@ async function runEval(task, flags) {
 	// gateway-free by construction here.
 	startContainer(providerDir, false);
 	recordRuntimeVersions();
-	const report = await runBenchTask(registry, judgeModels, task, {
+	const report = await runBenchTask(task, {
 		taskDir: sessionDir,
 		taskSessionPath: "/session",
 		flags,
@@ -596,7 +600,7 @@ async function runSuite(tasks, flags) {
 	// The caller's selection (main's selectEvalTasks result), never a
 	// re-read of the module list — one source of what runs, and a future
 	// filter in the selection cannot silently diverge from the loop.
-	const { registry, judgeModels } = await preflightJudges(tasks);
+	await preflightJudges(tasks);
 	const providerDir = evalStaging(flags);
 
 	sessionDir = flags.sessionDir ?? defaultEvidenceDir("bench-suite");
@@ -609,7 +613,7 @@ async function runSuite(tasks, flags) {
 	for (const task of tasks) {
 		console.log(`rig: benchmark task ${task.id} (${task.class})`);
 		reports.push(
-			await runBenchTask(registry, judgeModels, task, {
+			await runBenchTask(task, {
 				taskDir: path.join(sessionDir, suiteTaskDirName(task.id)),
 				taskSessionPath: `/session/${suiteTaskDirName(task.id)}`,
 				flags,

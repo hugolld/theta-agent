@@ -18,12 +18,14 @@
 // against a committed fixture keeps the mirror honest, and a pi bump
 // that changes ledger semantics reds it.
 //
-// The judge never crashes the leg: classify() answers with a stopReason
-// (pi's contract — it does not reject), a judge error lands as a failed
-// check plus a leg failure, and the report records what happened.
+// The judge never crashes the leg: a settled answer, a transport
+// failure, or any other error lands as a failed check plus a leg
+// failure, and the report records what happened.
 
+import { spawnSync } from "node:child_process";
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { parseSessionEntries } from "@earendil-works/pi-coding-agent";
 import { TRANSCRIPT_NAME } from "../../scripts/session-evidence.mjs";
 
@@ -35,6 +37,10 @@ export const BENCH_FILES = Object.freeze({
 	suite: "bench-suite.json",
 	answer: "answer.txt",
 });
+
+// The judge child (one fresh process per call — the runJudge doctrine
+// below) lives beside this module.
+const judgeChildPath = fileURLToPath(new URL("./bench-judge.mjs", import.meta.url));
 
 // A blank usage record, pi's createUsageTotals shape.
 function blankTotals() {
@@ -132,55 +138,40 @@ export function resolveJudge(registry, judge) {
 }
 
 // Run the one subjective check through models.classify() — the same
-// call codemode scripts make, driven by the harness. The state carries
-// the task statement and the matched workspace artifact (never model
-// prose: workspace-as-oracle). Returns a check row; a judge error is a
-// failed check with the error recorded, and the caller fails the leg.
-// A bool classify() verdict lands as { type: "bool", probability } (pi-ai
+// call codemode scripts make — with each call in one fresh child
+// process (test/eval/bench-judge.mjs). The state carries the task
+// statement and the matched workspace artifact (never model prose:
+// workspace-as-oracle). Returns a check row; a judge error is a failed
+// check with the error recorded, and the caller fails the leg. A bool
+// classify() verdict lands as { type: "bool", probability } (pi-ai
 // dist/types.d.ts ClassifierBoolAnswer); probability >= 0.5 reads true.
 // The threshold lives here, once, beside the shape it thresholds.
 //
-// One bounded retry rides transport-level failures only (measured live
-// 2026-11-15: the suite's first run lost three mid-run judge calls to
-// `fetch failed` after the first two landed — the pooled keep-alive
-// class, not an outage). One retry after a short backoff opens a fresh
-// socket. API-level outcomes — a stopReason error, a malformed answer —
-// are answers, not transport: they return as judge errors and never
-// retry, because a 404 or a 4xx is deterministic and the suite's live
-// cluster doctrine ("never a retry loop") stays honored — this is one
-// bounded retry on a stateless classifier call, not a loop over a
-// connection.
+// Why a child per call: the suite runner lives 20+ minutes while
+// sessions run, and every judge failure observed live (five suite runs,
+// 2026-11-15) rode that long-lived process — pooled connection state
+// answering bare TypeError "fetch failed", even after an in-process
+// fresh-socket retry — while every fresh-process probe passed
+// (back-to-back calls, idle gaps, container churn, a real rig session
+// in between). The child makes the verdict independent of whatever the
+// runner's pool holds, and dumps the full error tree to stderr on any
+// failure, so the evidence self-diagnoses.
+//
+// One bounded retry rides the measured transport class: a child that
+// reports a fetch failure, or hangs past its timeout (a stalled socket
+// is the same class). API-level outcomes — a stopReason error, a
+// malformed answer — are answers, not transport: they never retry,
+// because a 404 or a 4xx is deterministic and the suite's live-cluster
+// doctrine ("never a retry loop") stays honored — this is one bounded
+// retry on a stateless classifier call, not a loop over a connection.
 const BOOL_PASS_PROBABILITY = 0.5;
 const TRANSPORT_RETRY_DELAY_MS = 2000;
+const JUDGE_CHILD_TIMEOUT_MS = 120000;
 
-function isTransportError(error) {
-	return error instanceof TypeError && error.message === "fetch failed";
-}
-
-// The judgeError message carries the cause, not just the wrapper: fetch
-// failures answer "fetch failed" with the real reason (ECONNRESET,
-// ETIMEDOUT, a certificate refusal) riding error.cause — the report
-// must self-diagnose, not say the network blipped.
-function transportMessage(error) {
-	const cause = error?.cause?.code ?? error?.cause?.message;
-	return cause ? `fetch failed (${cause})` : String(error?.message ?? error);
-}
-
-export async function runJudge(registry, model, classify, state) {
-	let settled;
-	try {
-		settled = await registry.classify(model, { state, questions: { [classify.id]: classify.question } });
-	} catch (error) {
-		if (!isTransportError(error)) {
-			return { pass: false, judgeError: String(error?.message ?? error) };
-		}
-		await new Promise((resolve) => setTimeout(resolve, TRANSPORT_RETRY_DELAY_MS));
-		try {
-			settled = await registry.classify(model, { state, questions: { [classify.id]: classify.question } });
-		} catch (retryError) {
-			return { pass: false, judgeError: transportMessage(retryError) };
-		}
-	}
+// The verdict semantics (the child transports; the parent decides): a
+// stopReason error and a malformed answer are judge errors; a bool
+// probability becomes the pass/fail measurement.
+export function judgeVerdict(classify, settled) {
 	if (settled.stopReason !== "stop") {
 		return {
 			pass: false,
@@ -200,6 +191,68 @@ export async function runJudge(registry, model, classify, state) {
 		probability: answer.probability,
 		usage: settled.usage,
 	};
+}
+
+// Clip a child's output tail for the judgeError — enough to diagnose,
+// never the whole stream in the report JSON.
+function clip(text) {
+	const trimmed = String(text ?? "").trim();
+	return trimmed.length > 400 ? `${trimmed.slice(-400)}...` : trimmed;
+}
+
+// Spawn one judge child and map its outcome onto a kind the retry
+// policy reads: a settled verdict, a child-reported failure (with the
+// transport flag), a timeout, a spawn error, or a child that answered
+// nothing parseable — the failures carry detail, so the report
+// self-diagnoses.
+export async function spawnJudgeChild(slot, classify, state, { childPath = judgeChildPath, timeoutMs = JUDGE_CHILD_TIMEOUT_MS } = {}) {
+	const run = spawnSync(
+		process.execPath,
+		[childPath, slot.provider, slot.model],
+		{ input: JSON.stringify({ state, classify }), encoding: "utf8", timeout: timeoutMs },
+	);
+	if (run.error?.code === "ETIMEDOUT") {
+		return { kind: "timeout", detail: `judge child timed out after ${timeoutMs}ms` };
+	}
+	if (run.signal !== null) {
+		return { kind: "timeout", detail: `judge child was killed with ${run.signal} after ${timeoutMs}ms` };
+	}
+	if (run.error) {
+		return { kind: "spawn-error", detail: String(run.error.message ?? run.error) };
+	}
+	let verdict;
+	try {
+		verdict = JSON.parse(run.stdout);
+	} catch {
+		return {
+			kind: "malformed",
+			detail: `judge child exited ${run.status} without a verdict — stdout: ${clip(run.stdout)} stderr: ${clip(run.stderr)}`,
+		};
+	}
+	if (verdict && typeof verdict === "object" && verdict.ok === true) {
+		return { kind: "settled", settled: verdict.settled };
+	}
+	if (verdict && typeof verdict === "object" && verdict.ok === false) {
+		return {
+			kind: "judge-failure",
+			transport: Boolean(verdict.transport),
+			detail: String(verdict.error ?? "judge child reported no error"),
+		};
+	}
+	return {
+		kind: "malformed",
+		detail: `judge child exited ${run.status} with a verdict of no known shape — stdout: ${clip(run.stdout)} stderr: ${clip(run.stderr)}`,
+	};
+}
+
+export async function runJudge(slot, classify, state, { spawnChild = spawnJudgeChild, retryDelayMs = TRANSPORT_RETRY_DELAY_MS } = {}) {
+	let child = await spawnChild(slot, classify, state);
+	if (child.kind === "timeout" || (child.kind === "judge-failure" && child.transport)) {
+		await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
+		child = await spawnChild(slot, classify, state);
+	}
+	if (child.kind === "settled") return judgeVerdict(classify, child.settled);
+	return { pass: false, judgeError: child.detail };
 }
 
 // The report itself (spec #136's two-tier shape, superseding the #135
