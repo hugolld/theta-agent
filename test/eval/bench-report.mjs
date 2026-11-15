@@ -157,6 +157,15 @@ function isTransportError(error) {
 	return error instanceof TypeError && error.message === "fetch failed";
 }
 
+// The judgeError message carries the cause, not just the wrapper: fetch
+// failures answer "fetch failed" with the real reason (ECONNRESET,
+// ETIMEDOUT, a certificate refusal) riding error.cause — the report
+// must self-diagnose, not say the network blipped.
+function transportMessage(error) {
+	const cause = error?.cause?.code ?? error?.cause?.message;
+	return cause ? `fetch failed (${cause})` : String(error?.message ?? error);
+}
+
 export async function runJudge(registry, model, classify, state) {
 	let settled;
 	try {
@@ -169,7 +178,7 @@ export async function runJudge(registry, model, classify, state) {
 		try {
 			settled = await registry.classify(model, { state, questions: { [classify.id]: classify.question } });
 		} catch (retryError) {
-			return { pass: false, judgeError: String(retryError?.message ?? retryError) };
+			return { pass: false, judgeError: transportMessage(retryError) };
 		}
 	}
 	if (settled.stopReason !== "stop") {
