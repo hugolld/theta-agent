@@ -144,6 +144,58 @@ test("a judge error is a failed check with the error recorded, never a crash", a
 	}
 });
 
+test("a transport-level fetch failure retries once and rides through", async () => {
+	// Measured live (2026-11-15, the first suite run): the pooled
+	// keep-alive socket dies between the suite's long tasks and fetch
+	// answers TypeError "fetch failed" — one retry opens a fresh socket.
+	// API-level outcomes never retry (the next test pins that side).
+	let calls = 0;
+	const registry = stubRegistry(async () => {
+		calls += 1;
+		if (calls === 1) throw new TypeError("fetch failed");
+		return {
+			stopReason: "stop",
+			answers: { [task.classify.id]: { ...BOOL_ANSWER_SAMPLE } },
+			usage: { totalTokens: 10, cost: { total: 0 } },
+		};
+	});
+	const result = await runJudge(registry, judgeSlot, task.classify, { prompt: "p", artifact: {} });
+	assert.equal(result.pass, true, "the retry lands the verdict");
+	assert.equal(calls, 2, "exactly one retry");
+});
+
+test("a second transport failure records the judge error without a third call", async () => {
+	let calls = 0;
+	const registry = stubRegistry(async () => {
+		calls += 1;
+		throw new TypeError("fetch failed");
+	});
+	const result = await runJudge(registry, judgeSlot, task.classify, { prompt: "p", artifact: {} });
+	assert.equal(result.pass, false);
+	assert.equal(result.judgeError, "fetch failed");
+	assert.equal(calls, 2, "one retry, then out");
+});
+
+test("API-level and non-transport throws never retry", async () => {
+	let apiCalls = 0;
+	const apiError = stubRegistry(async () => {
+		apiCalls += 1;
+		return { stopReason: "error", errorMessage: "System One API error (404)" };
+	});
+	const apiResult = await runJudge(apiError, judgeSlot, task.classify, { prompt: "p", artifact: {} });
+	assert.equal(apiResult.judgeError, "System One API error (404)");
+	assert.equal(apiCalls, 1, "an API-level answer is deterministic — no retry");
+
+	let throwCalls = 0;
+	const otherThrow = stubRegistry(async () => {
+		throwCalls += 1;
+		throw new Error("network gone");
+	});
+	const throwResult = await runJudge(otherThrow, judgeSlot, task.classify, { prompt: "p", artifact: {} });
+	assert.match(throwResult.judgeError, /network gone/);
+	assert.equal(throwCalls, 1, "only the fetch-failed class retries");
+});
+
 test("a judge answer that is not a bool shape fails the check", async () => {
 	const registry = stubRegistry(async () => ({ stopReason: "stop", answers: { [task.classify.id]: "yes" } }));
 	const result = await runJudge(registry, judgeSlot, task.classify, { prompt: "p", artifact: {} });

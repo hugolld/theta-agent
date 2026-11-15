@@ -179,7 +179,7 @@ export const BENCH_TASKS = Object.freeze([
 		// session one staged. No gateway path exists on a benchmark leg —
 		// the prompt stages offline and says so.
 		sessions: [
-			`We will predict structures for two peptide sequences with AlphaFold 3 on our compute cluster in a later session. Stage everything that submission will need in the workspace now: the job script and the sequence input it would consume, for the sequences ACDEFGHIKLMN and MKTAYIAKQRQISFVK. Record what was staged for the project so a later session can pick it up and submit. Do not submit anything now and do not contact any compute gateway. Run each command as one plain call -- no trailing status echoes; ${READ_HEADROOM}`,
+			`We will predict structures for two peptide sequences with AlphaFold 3 on our compute cluster in a later session. Stage everything that submission will need in the workspace now: the job script, and a separate sequence input file that the job script reads, holding the sequences ACDEFGHIKLMN and MKTAYIAKQRQISFVK. Record what was staged for the project so a later session can pick it up and submit. Do not submit anything now and do not contact any compute gateway. Run each command as one plain call -- no trailing status echoes; ${READ_HEADROOM}`,
 			`Review what you staged earlier for the structure prediction job. Make the staged input and the job script consistent with each other if they are not, and make sure the project record reflects the final staged state. Run each command as one plain call -- no trailing status echoes; ${READ_HEADROOM}`,
 		],
 		checks: [

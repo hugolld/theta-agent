@@ -139,14 +139,38 @@ export function resolveJudge(registry, judge) {
 // A bool classify() verdict lands as { type: "bool", probability } (pi-ai
 // dist/types.d.ts ClassifierBoolAnswer); probability >= 0.5 reads true.
 // The threshold lives here, once, beside the shape it thresholds.
+//
+// One bounded retry rides transport-level failures only (measured live
+// 2026-11-15: the suite's first run lost three mid-run judge calls to
+// `fetch failed` after the first two landed — the pooled keep-alive
+// class, not an outage). One retry after a short backoff opens a fresh
+// socket. API-level outcomes — a stopReason error, a malformed answer —
+// are answers, not transport: they return as judge errors and never
+// retry, because a 404 or a 4xx is deterministic and the suite's live
+// cluster doctrine ("never a retry loop") stays honored — this is one
+// bounded retry on a stateless classifier call, not a loop over a
+// connection.
 const BOOL_PASS_PROBABILITY = 0.5;
+const TRANSPORT_RETRY_DELAY_MS = 2000;
+
+function isTransportError(error) {
+	return error instanceof TypeError && error.message === "fetch failed";
+}
 
 export async function runJudge(registry, model, classify, state) {
 	let settled;
 	try {
 		settled = await registry.classify(model, { state, questions: { [classify.id]: classify.question } });
 	} catch (error) {
-		return { pass: false, judgeError: String(error?.message ?? error) };
+		if (!isTransportError(error)) {
+			return { pass: false, judgeError: String(error?.message ?? error) };
+		}
+		await new Promise((resolve) => setTimeout(resolve, TRANSPORT_RETRY_DELAY_MS));
+		try {
+			settled = await registry.classify(model, { state, questions: { [classify.id]: classify.question } });
+		} catch (retryError) {
+			return { pass: false, judgeError: String(retryError?.message ?? retryError) };
+		}
 	}
 	if (settled.stopReason !== "stop") {
 		return {
