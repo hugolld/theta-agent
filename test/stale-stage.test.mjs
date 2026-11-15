@@ -54,7 +54,7 @@ function makeRepo(t) {
 	writeFileSync(path.join(root, "a.txt"), "one\n");
 	git(["add", "a.txt"]);
 	git(["commit", "--message", "base"]);
-	return root;
+	return { git, root };
 }
 
 function runScript(cwd) {
@@ -62,9 +62,9 @@ function runScript(cwd) {
 }
 
 test("a stale-staged file warns, naming it, and exits zero", (t) => {
-	const root = makeRepo(t);
+	const { git, root } = makeRepo(t);
 	writeFileSync(path.join(root, "a.txt"), "worktree newer\n");
-	assert.equal(spawnSync("git", ["add", "a.txt"], { cwd: root, encoding: "utf8" }).status, 0);
+	git(["add", "a.txt"]);
 	writeFileSync(path.join(root, "a.txt"), "worktree newer still\n");
 	const run = runScript(root);
 	assert.equal(run.status, 0, "the warning never blocks the commit");
@@ -73,7 +73,7 @@ test("a stale-staged file warns, naming it, and exits zero", (t) => {
 });
 
 test("a clean repo says nothing and exits zero", (t) => {
-	const root = makeRepo(t);
+	const { root } = makeRepo(t);
 	const run = runScript(root);
 	assert.equal(run.status, 0);
 	assert.equal(run.stderr.trim(), "");
