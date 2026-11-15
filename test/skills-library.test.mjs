@@ -6,6 +6,7 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { YAMLParseError } from "yaml";
 import { GATEWAY_ANNOTATIONS } from "./fixtures/gateway/annotations.mjs";
+import { childDirs } from "./helpers/child-dirs.mjs";
 import { escapeRegExp } from "./helpers/escape-regexp.mjs";
 import { parseFrontmatter } from "./helpers/frontmatter.mjs";
 import { sortedTreeFiles } from "./helpers/tree-walk.mjs";
@@ -53,17 +54,11 @@ test("invalid frontmatter fails loudly under the real YAML engine", async () => 
 	assert.throws(() => parseFrontmatter(invalid), YAMLParseError);
 });
 
-const shipped = (await readdir(skillsRoot, { withFileTypes: true }))
-	.filter((entry) => entry.isDirectory())
-	.map((entry) => entry.name)
-	.sort();
+const shipped = childDirs(skillsRoot);
 
 // Pool trees sit one level deeper (pack/skill); the enumeration is the same
 // directory read, two passes.
-const poolPacks = (await readdir(poolRoot, { withFileTypes: true }))
-	.filter((entry) => entry.isDirectory())
-	.map((entry) => entry.name)
-	.sort();
+const poolPacks = childDirs(poolRoot);
 const poolTrees = [];
 for (const pack of poolPacks) {
 	const entries = await readdir(new URL(`${pack}/`, poolRoot), { withFileTypes: true });
