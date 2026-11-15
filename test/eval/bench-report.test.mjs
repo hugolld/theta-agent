@@ -7,9 +7,11 @@
 // grade, judge tier, and usage totals.
 
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 import { parseSessionEntries } from "@earendil-works/pi-coding-agent";
 import { BOOL_ANSWER_SAMPLE } from "./bench-answer-shape.mjs";
@@ -248,6 +250,28 @@ test("the judge child module exposes the protocol surface the parent drives", as
 	assert.equal(typeof child.judgeMain, "function");
 	assert.equal(typeof child.isTransportError, "function");
 	assert.equal(typeof child.transportMessage, "function");
+});
+
+test("the judge child loaded under the test runner does nothing, promptly", async () => {
+	// The regression this pins: the runner discovers every .mjs under
+	// test/ and loads it in a child with stdin held open; the old main
+	// guard read stdin there and hung the suite's commit hook for 36
+	// minutes. With the runner's marker set, the child must exit at once
+	// — the 5s spawn timeout turns a regression into a fast red, and the
+	// verdict is "malformed" (the child answers nothing), never a hang.
+	const run = spawnSync(
+		process.execPath,
+		[fileURLToPath(new URL("./bench-judge.mjs", import.meta.url)), judgeSlot.provider, judgeSlot.model],
+		{
+			input: JSON.stringify({ state: {}, classify: task.classify }),
+			encoding: "utf8",
+			timeout: 5000,
+			env: { ...process.env, NODE_TEST_CONTEXT: "child-v8" },
+		},
+	);
+	assert.equal(run.error, undefined, "the child must exit, not ride the spawn timeout");
+	assert.equal(run.signal, null);
+	assert.throws(() => JSON.parse(run.stdout), SyntaxError, "a loaded-not-invoked child answers no verdict");
 });
 
 test("resolveJudge names the fix for a missing model and for a missing credential", () => {

@@ -53,7 +53,14 @@ export async function judgeMain(argv, input) {
 	}
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
+// The main guard needs two conditions, not one: the node test runner
+// discovers every .mjs under test/ as a test file and loads it in a
+// child where argv[1] is this file and stdin is the runner's pipe,
+// open forever — a bare argv check hung the suite's commit hook for 36
+// minutes (2026-11-15) on the stdin read. NODE_TEST_CONTEXT is the
+// runner's own marker in its child processes; a loaded-not-invoked
+// child must do nothing, exactly like every other helper in test/.
+if (process.env.NODE_TEST_CONTEXT === undefined && import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
 	try {
 		const chunks = [];
 		for await (const chunk of process.stdin) chunks.push(chunk);
