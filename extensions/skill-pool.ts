@@ -154,14 +154,18 @@ function sortedChildDirs(root: string, sub?: string): string[] {
 }
 
 /**
- * The class map read. A map that is missing, unparsable, or carries a value
- * outside the class vocabulary is one invalid read — the sound-rest
- * discipline then contributes nothing from any enabled pack, and the
- * diagnosis block carries one aggregate line naming the file, not one line
- * per skill.
+ * The one read shape both JSON inputs share (the tree-wide extraction rule:
+ * the second caller is where the shared helper is born): missing file reads
+ * as absent, an unreadable/unparsable/non-object file reads as invalid with
+ * its why, and only a JSON object reads as ok. Callers layer their own
+ * vocabulary on top of the value.
  */
-export function readClassesMap(root: string): ClassesRead {
-	const file = path.join(root, CLASSES_FILE);
+type JsonObjectRead =
+	| { kind: "absent" }
+	| { kind: "invalid"; why: string }
+	| { kind: "ok"; value: Record<string, unknown> };
+
+function readJsonObject(file: string): JsonObjectRead {
 	let raw: string;
 	try {
 		raw = fs.readFileSync(file, "utf8");
@@ -178,8 +182,21 @@ export function readClassesMap(root: string): ClassesRead {
 	if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
 		return { kind: "invalid", why: "not a JSON object" };
 	}
+	return { kind: "ok", value: parsed as Record<string, unknown> };
+}
+
+/**
+ * The class map read. A map that is missing, unparsable, or carries a value
+ * outside the class vocabulary is one invalid read — the sound-rest
+ * discipline then contributes nothing from any enabled pack, and the
+ * diagnosis block carries one aggregate line naming the file, not one line
+ * per skill.
+ */
+export function readClassesMap(root: string): ClassesRead {
+	const read = readJsonObject(path.join(root, CLASSES_FILE));
+	if (read.kind !== "ok") return read;
 	const classes: Record<string, SkillClass> = {};
-	for (const [key, value] of Object.entries(parsed)) {
+	for (const [key, value] of Object.entries(read.value)) {
 		if (!SKILL_CLASSES.includes(value as SkillClass)) {
 			return {
 				kind: "invalid",
@@ -200,24 +217,9 @@ export function readClassesMap(root: string): ClassesRead {
  * invalid state contributes nothing and is never partially honored.
  */
 export function readSkillsState(cwd: string): StateRead {
-	const file = path.join(cwd, STATE_DIR, STATE_FILE);
-	let raw: string;
-	try {
-		raw = fs.readFileSync(file, "utf8");
-	} catch (error) {
-		if ((error as NodeJS.ErrnoException).code === "ENOENT") return { kind: "absent" };
-		return { kind: "invalid", why: `unreadable (${errorMessage(error)})` };
-	}
-	let parsed: unknown;
-	try {
-		parsed = JSON.parse(raw);
-	} catch (error) {
-		return { kind: "invalid", why: `unparsable JSON (${errorMessage(error)})` };
-	}
-	if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
-		return { kind: "invalid", why: "not a JSON object" };
-	}
-	const shape = parsed as Record<string, unknown>;
+	const read = readJsonObject(path.join(cwd, STATE_DIR, STATE_FILE));
+	if (read.kind !== "ok") return read;
+	const shape = read.value;
 	if (shape.version !== STATE_VERSION) {
 		return {
 			kind: "invalid",
@@ -521,17 +523,26 @@ function togglePack(decision: "on" | "off", pack: string, ctx: SkillsContext): v
  * re-fires with reason "reload" and re-reads the state file.
  */
 export async function runSkillsCommand(args: string, ctx: SkillsContext): Promise<void> {
-	const tokens = args.trim().split(/\s+/).filter((token) => token !== "");
-	const command = tokens[0];
-	if (command === undefined) {
-		renderStatus(ctx);
-		return;
+	try {
+		const tokens = args.trim().split(/\s+/).filter((token) => token !== "");
+		const command = tokens[0];
+		if (command === undefined) {
+			renderStatus(ctx);
+			return;
+		}
+		if ((command === "on" || command === "off") && tokens.length === 2) {
+			togglePack(command, tokens[1], ctx);
+			return;
+		}
+		ctx.ui.notify(
+			`usage: /${SKILLS_COMMAND} — or /${SKILLS_COMMAND} on <pack> | off <pack>`,
+			"error",
+		);
+	} catch (error) {
+		// The never-throw floor, mirroring discovery's backstop: a bug in the
+		// command degrades to an error notice, never a thrown handler.
+		ctx.ui.notify(`/${SKILLS_COMMAND} failed: ${errorMessage(error)}`, "error");
 	}
-	if ((command === "on" || command === "off") && tokens.length === 2) {
-		togglePack(command, tokens[1], ctx);
-		return;
-	}
-	ctx.ui.notify(`usage: /${SKILLS_COMMAND} — or /${SKILLS_COMMAND} on <pack> | off <pack>`, "error");
 }
 
 export default function registerSkillPool(pi: ExtensionAPI) {
