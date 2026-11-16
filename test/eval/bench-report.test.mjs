@@ -29,21 +29,21 @@ test("the usage ledger sums a real session's entries to the pinned totals", () =
 	// ledger semantics or a fixture recapture reds here on purpose.
 	assert.deepEqual(summed.byModel, {
 		"zai-coding-cn/glm-5.3-flash": {
-			input: 37759,
-			output: 6171,
-			cacheRead: 95680,
+			input: 25715,
+			output: 6393,
+			cacheRead: 58816,
 			cacheWrite: 0,
-			cost: 0.01161975,
-			totalTokens: 139610,
+			cost: 0.00881823,
+			totalTokens: 90924,
 		},
 	});
 	assert.deepEqual(summed.totals, {
-		input: 37759,
-		output: 6171,
-		cacheRead: 95680,
+		input: 25715,
+		output: 6393,
+		cacheRead: 58816,
 		cacheWrite: 0,
-		cost: 0.01161975,
-		totalTokens: 139610,
+		cost: 0.00881823,
+		totalTokens: 90924,
 	});
 });
 
@@ -74,7 +74,7 @@ test("sumSessionUsage walks the transcript name grammar and counts sessions", ()
 		writeFileSync(path.join(dir, "gate.jsonl"), "{}\n"); // not a transcript
 		const summed = sumSessionUsage(dir);
 		assert.equal(summed.sessions, 1);
-		assert.equal(summed.totals.totalTokens, 139610);
+		assert.equal(summed.totals.totalTokens, 90924);
 	} finally {
 		rmSync(dir, { recursive: true, force: true });
 	}
