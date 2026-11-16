@@ -11,7 +11,7 @@ ADR 0001 sets the policy: re-syncs happen at milestone boundaries, driven by ups
    ```
 
 3. Vendor each changed skill tree into `skills/`, then insert the six-line provenance header after `metadata:` in its `SKILL.md` (mirror `skills/literature-review/SKILL.md`; `date` is the vendoring date, not the release date).
-4. Verify verbatim per tree: `diff -r` against the pin. The only allowed delta is the six-line header insert — nothing removed or changed.
+4. Verify verbatim per tree: `diff -r` against the pin. Tree scope is the upstream skill directory, `skills/<slug>/` — upstream keeps test runners and fixtures in a centralized `tests/<slug>/` sibling of `skills/`, CI furniture that is never tree content, so a comparison that matches the slug anywhere in the path reports phantom gaps. The only allowed delta is the six-line header insert — nothing removed or changed.
 5. Recompute `tree-sha256` for every changed tree in `test/expected-skills.json`. The algorithm is `treeDigest` in `test/skills-library.test.mjs`; replicate it exactly — any mismatch fails CI loudly.
 6. Update the README "Vendored skills" list and its release/commit line. Then sweep prose count claims elsewhere — the README Status paragraph, CLAUDE.md's current-state text — so no hard count drifts.
 7. Pin the release in a comment on the parent spec issue; record skip decisions there, with reasons.
