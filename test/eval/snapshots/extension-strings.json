@@ -211,8 +211,12 @@
 			"content": [
 				{
 					"type": "thinking",
-					"thinking": "The user wants me to submit a staged validation run named \"smoke-check\" through the cluster gateway. The guidance for cluster work is the theta-compute skill. Let me read that skill file first, wholly, in a single call with a limit larger than its line count.\n\nLet me start by reading the theta-compute skill.",
+					"thinking": "The user wants me to submit a staged validation run named \"smoke-check\" through the cluster gateway. They mention \"following the guidance this environment provides for cluster work\" — that's the theta-compute skill. I should read the skill file first, whole, in a single call with a limit larger than its line count.\n\nLet me start by reading the theta-compute SKILL.md. The instruction says: \"Before you rely on any instruction or reference file, read it whole in a single call, with a limit larger than its line count -- never an exact-count or fragmented read.\"\n\nSo I should read __REPO__/skills/theta-compute/SKILL.md with a generous limit, e.g., limit = 10000.\n\nAlso there's the AGENTS.md which says the steering doc is CLAUDE.md and I should read it in full before working. That's a project instruction file. Let me read both. AGENTS.md is already provided in the project context, but it says to read CLAUDE.md in full. Let me read CLAUDE.md too, whole in a single call.\n\nLet me do these reads. They're independent, so I can batch them in one block.",
 					"thinkingSignature": "reasoning_content"
+				},
+				{
+					"type": "text",
+					"text": "I'll follow the environment's cluster guidance: first the `theta-compute` skill, plus the repo's steering doc `CLAUDE.md` (per `AGENTS.md`). Each file read whole in one call, with a limit well above its line count."
 				},
 				{
 					"type": "toolCall",
@@ -221,7 +225,17 @@
 					"arguments": {
 						"path": "__REPO__/skills/theta-compute/SKILL.md",
 						"offset": 1,
-						"limit": 2000
+						"limit": 10000
+					}
+				},
+				{
+					"type": "toolCall",
+					"id": "<id#8>",
+					"name": "read",
+					"arguments": {
+						"path": "__REPO__/CLAUDE.md",
+						"offset": 1,
+						"limit": 10000
 					}
 				}
 			],
@@ -230,22 +244,22 @@
 			"model": "<model>",
 			"usage": {
 				"input": 5826,
-				"output": 105,
+				"output": 372,
 				"cacheRead": 0,
 				"cacheWrite": 0,
-				"reasoning": 67,
-				"totalTokens": 5931,
+				"reasoning": 249,
+				"totalTokens": 6198,
 				"cost": {
 					"input": 0.0008738999999999999,
-					"output": 0.000052499999999999995,
+					"output": 0.000186,
 					"cacheRead": 0,
 					"cacheWrite": 0,
-					"total": 0.0009264
+					"total": 0.0010599
 				}
 			},
 			"stopReason": "toolUse",
 			"timestamp": "<timestamp>",
-			"responseId": "202611161326134123616c0c2f4375",
+			"responseId": "20261116211716792f52021a2540ad",
 			"rawStopReason": "tool_calls",
 			"durationMs": "<duration>",
 			"thinkingLevel": "high"
@@ -253,7 +267,7 @@
 	},
 	{
 		"type": "message",
-		"id": "<id#8>",
+		"id": "<id#9>",
 		"parentId": "<id#6>",
 		"timestamp": "<timestamp>",
 		"message": {
@@ -273,76 +287,12 @@
 	},
 	{
 		"type": "message",
-		"id": "<id#9>",
-		"parentId": "<id#8>",
-		"timestamp": "<timestamp>",
-		"message": {
-			"role": "assistant",
-			"content": [
-				{
-					"type": "thinking",
-					"thinking": "I've read the theta-compute skill. Now, the lifecycle:\n\n1. First, `list_environments` before anything.\n2. The run \"smoke-check\" is already staged — so I skip staging.\n3. Submit via `submit_job(run_name, directives?)`.\n4. Poll with `job_status(job_id)`.\n5. Fetch artifacts with `fetch_artifacts(run_name)`.\n6. Record in the project notebook via theta-notebook's recorder.\n\nThe submit gate will ask the researcher before every destructive call (submit_job). I need to state what is about to run and let the answer land. If refused, it stays refused — don't retry.\n\nAlso there might be a HOLD (submit capability off) or THROTTLE refusal. If so, report and stop.\n\nThe user said \"tell me exactly what happened — including anything that stopped it.\" So I should report honestly whatever happens.\n\nLet me first check the gateway tools via codemode. I should call `list_environments` first. Let me also check codemode docs first? The skill says codemode is the normal case for compute tasks. The docs say to read <path>@earendil-works/pi-coding-agent/docs/codemode.md first when using codemode. Let me read that file wholly too (single call, limit larger than line count).\n\nAlso, the AGENTS.md says the repo's steering doc is CLAUDE.md — read it in full before working. Let me read that too. The user said \"Before you rely on any instruction or reference file, read it whole in a single call, with a limit larger than its line count.\" So read CLAUDE.md fully in a single call.\n\nLet me batch: read CLAUDE.md and codemode.md in one block (independent calls).",
-					"thinkingSignature": "reasoning_content"
-				},
-				{
-					"type": "text",
-					"text": "The compute guidance is loaded. Per the repo's own instruction, I also need to read `CLAUDE.md` in full before working, and per pi's docs I should read the codemode doc before scripting gateway calls. Reading both whole, in single unfragmented calls:"
-				},
-				{
-					"type": "toolCall",
-					"id": "<id#10>",
-					"name": "read",
-					"arguments": {
-						"limit": 2000,
-						"offset": 1,
-						"path": "__REPO__/CLAUDE.md"
-					}
-				},
-				{
-					"type": "toolCall",
-					"id": "<id#11>",
-					"name": "read",
-					"arguments": {
-						"limit": 2000,
-						"offset": 1,
-						"path": "<path>@earendil-works/pi-coding-agent/docs/codemode.md"
-					}
-				}
-			],
-			"api": "openai-completions",
-			"provider": "<provider>",
-			"model": "<model>",
-			"usage": {
-				"input": 7576,
-				"output": 503,
-				"cacheRead": 64,
-				"cacheWrite": 0,
-				"reasoning": 372,
-				"totalTokens": 8143,
-				"cost": {
-					"input": 0.0011363999999999999,
-					"output": 0.0002515,
-					"cacheRead": 0.00000192,
-					"cacheWrite": 0,
-					"total": 0.00138982
-				}
-			},
-			"stopReason": "toolUse",
-			"timestamp": "<timestamp>",
-			"responseId": "2026111613261799c4556201294337",
-			"rawStopReason": "tool_calls",
-			"durationMs": "<duration>",
-			"thinkingLevel": "high"
-		}
-	},
-	{
-		"type": "message",
-		"id": "<id#12>",
+		"id": "<id#10>",
 		"parentId": "<id#9>",
 		"timestamp": "<timestamp>",
 		"message": {
 			"role": "toolResult",
-			"toolCallId": "<id#10>",
+			"toolCallId": "<id#8>",
 			"toolName": "read",
 			"content": [
 				{
@@ -357,12 +307,66 @@
 	},
 	{
 		"type": "message",
+		"id": "<id#11>",
+		"parentId": "<id#10>",
+		"timestamp": "<timestamp>",
+		"message": {
+			"role": "assistant",
+			"content": [
+				{
+					"type": "thinking",
+					"thinking": "I've read the skill and the steering doc. Now I understand the flow:\n\n1. Start every compute task with `list_environments` — shows partitions and their state.\n2. Stage — but the run \"smoke-check\" is already staged. So skip staging.\n3. Submit — `submit_job(run_name)` — but this crosses the submit gate, which asks the researcher before every destructive gateway call. The user has already explicitly asked to submit it (\"Submit it through the cluster gateway now\"), and the submit gate extension will confirm. Also note: \"A refused call stays refused — never retry it unprompted.\"\n4. Poll — `job_status(job_id)` with discipline.\n5. Fetch — `fetch_artifacts(run_name)`.\n6. Record — through theta-notebook's recorder.\n\nThe gateway tools are MCP tools under `mcp__theta_compute` (codemode). I should call them via codemode scripts. Let me first check what tools are available via `searchTools` or just call directly. The codemode doc says to read <path>@earendil-works/pi-coding-agent/docs/codemode.md first — that's for codemode usage. The skill says \"call the gateway's tools directly\" — no wrapper scripts.\n\nBefore codemode usage, the docs say: \"Read <path>@earendil-works/pi-coding-agent/docs/codemode.md first.\" The user said: \"Before you rely on any instruction or reference file, read it whole in a single call, with a limit larger than its line count.\" So if I read codemode.md, I should read it whole in one call with a large limit.\n\nPlan:\n1. Read codemode.md whole (single call, large limit).\n2. Call `list_environments` via codemode to check partitions.\n3. Check that smoke-check is staged — hmm, is there a way to check? There's no \"list staged\" tool mentioned; the seven tools: environments/status pair + stage–submit–logs–cancel–fetch lifecycle. Actually the CLAUDE.md says \"the seven generic tools (the read-only environments/status pair plus the stage–submit–logs–cancel–fetch lifecycle)\". Wait, that's list_environments, job_status, stage_files, submit_job, job_logs, cancel_job, fetch_artifacts — that's 7, plus run_alphafold3 as the 8th typed tool. Maybe I can verify staging via fetch_artifacts or by listing... Actually I could check the staging root via fetch_artifacts? fetch_artifacts brings the run directory back — but the run hasn't run yet. Hmm. The user says it's already staged; I can trust but verify — maybe fetch_artifacts on the run name to see what's in the staging directory? That's a read-only call, harmless. Actually, let me first do list_environments, then submit.\n\nLet me first read the codemode doc, then find the tool names. Let me use `searchTools` within codemode to find the gateway tools' exact names.\n\nAlso the submit gate: \"The package's submit gate extension asks the researcher before every destructive gateway call — submit_job, cancel_job, and run_alphafold3. That confirm dialog is part of the flow... state what is about to run and let the answer land.\" Since I'm running in this session, the submit gate will presumably surface a confirm dialog to the user. I should state what's about to run before making the call. The user already said \"submit it now\", and the gate will ask them anyway.\n\nAlso worth noting: codemode nested calls cross the pipeline and the submit gate confirms them like direct calls.\n\nOrder of operations:\n1. Read codemode.md (whole, single call, large limit).\n2. In codemode: `searchTools('theta_compute')` or describeNamespace to discover tool names; then `list_environments`.\n3. Possibly verify staging (maybe via fetch_artifacts — read-only; but that fetches artifacts to workspace; it might be fine. Actually for a smoke-check run that hasn't run yet, the run directory should contain the staged inputs. fetch_artifacts would copy them back into the workspace. That's read-only on the cluster but writes to the workspace. Hmm, it's allowed without prompts. But is it needed? The user asked to submit the staged run. Verifying staging is prudent but fetch_artifacts is designed for post-run artifacts. I might instead just submit. But if staging is missing, submit_job would fail with some error which is fine. Actually, let me check whether there's a tool to list the staging directory. Let me describe the namespace first.\n4. Submit: `submit_job('smoke-check')` — possibly with no directives (defaults are production values; \"pass directives only when the task genuinely needs them\").\n5. Poll `job_status(job_id)` with discipline.\n6. `job_logs(job_id)` on failure.\n7. `fetch_artifacts('smoke-check')` on completion.\n8. Record via theta-notebook recorder with --method and --job-record, graded re-executed (if artifacts fetched) — assemble job record JSON, save as file, append through recorder. Need to read theta-notebook SKILL.md before using it (whole, single call). That's step \"Record\".\n9. Report job ID, final state, artifacts location.\n\nLet me begin: read codemode.md whole first.",
+					"thinkingSignature": "reasoning_content"
+				},
+				{
+					"type": "text",
+					"text": "Both files are read. The skill gives the lifecycle: `list_environments` first, then submit (already-staged run → no staging), poll with discipline, fetch artifacts, and record the job in the notebook. Gateway tools are called through codemode, so I'll read the codemode doc first — whole, in one call, well past its line count — before relying on it."
+				},
+				{
+					"type": "toolCall",
+					"id": "<id#12>",
+					"name": "read",
+					"arguments": {
+						"limit": 10000,
+						"offset": 1,
+						"path": "<path>@earendil-works/pi-coding-agent/docs/codemode.md"
+					}
+				}
+			],
+			"api": "openai-completions",
+			"provider": "<provider>",
+			"model": "<model>",
+			"usage": {
+				"input": 7649,
+				"output": 1248,
+				"cacheRead": 5824,
+				"cacheWrite": 0,
+				"reasoning": 1126,
+				"totalTokens": 14721,
+				"cost": {
+					"input": 0.0011473499999999999,
+					"output": 0.000624,
+					"cacheRead": 0.00017471999999999998,
+					"cacheWrite": 0,
+					"total": 0.0019460699999999998
+				}
+			},
+			"stopReason": "toolUse",
+			"timestamp": "<timestamp>",
+			"responseId": "20261116211731f34840f84524489b",
+			"rawStopReason": "tool_calls",
+			"durationMs": "<duration>",
+			"thinkingLevel": "high"
+		}
+	},
+	{
+		"type": "message",
 		"id": "<id#13>",
-		"parentId": "<id#12>",
+		"parentId": "<id#11>",
 		"timestamp": "<timestamp>",
 		"message": {
 			"role": "toolResult",
-			"toolCallId": "<id#11>",
+			"toolCallId": "<id#12>",
 			"toolName": "read",
 			"content": [
 				{
@@ -385,19 +389,19 @@
 			"content": [
 				{
 					"type": "thinking",
-					"thinking": "Both files are read. Now I know the doctrine:\n\n1. Start with `list_environments` — shows partitions and state.\n2. The run \"smoke-check\" is already staged — skip staging (or verify via fetch? No — fetch is for after the run). Actually the skill says \"One `run_name` per compute task; reuse a name only to restage\" — the run is already staged, so I just submit.\n3. Submit via `submit_job(run_name, directives?)` — the submit gate will confirm. \"state what is about to run and let the answer land.\"\n4. Poll `job_status(job_id)` with discipline.\n5. Fetch artifacts with `fetch_artifacts(run_name)`.\n6. Record via theta-notebook's recorder with `--method` and `--job-record`, graded `re-executed` when artifacts fetched.\n\nThe gateway tools are MCP tools in namespace `mcp__theta_compute` (codemode server). Names are sanitized to `[A-Za-z0-9_]`, so likely `tools.mcp__theta_compute.list_environments`, etc. I should use `describeNamespace(\"theta_compute\")` or searchTools to find exact names.\n\nLet me start: in codemode, describe the namespace and list environments. Actually the first call per doctrine: `list_environments`. Let me do both: describeNamespace and list_environments in one script.\n\nNote the theta-notebook skill will need to be read before recording. I'll read it when I get to step 5.\n\nLet me write the first codemode script.",
+					"thinking": "Now I know how to call the gateway tools via codemode. Let me discover the theta_compute namespace tools first, and then call `list_environments`. The MCP tools are codemode-exposed, so I need searchTools/describeNamespace.\n\nLet me do that: describeNamespace('theta_compute') — the namespace name might be 'mcp__theta_compute'. Let me try both in one script.",
 					"thinkingSignature": "reasoning_content"
 				},
 				{
 					"type": "text",
-					"text": "Both docs are in. Doctrine is clear: start with `list_environments`, then submit the already-staged run, poll, fetch, record. Let me discover the gateway tools and check partition state first:"
+					"text": "Now I'll discover the gateway's tools and start the lifecycle with `list_environments`, per the skill's \"before the first call\" doctrine."
 				},
 				{
 					"type": "toolCall",
 					"id": "<id#15>",
 					"name": "codemode",
 					"arguments": {
-						"code": "const ns = await describeNamespace(\"theta_compute\");\nconsole.log(\"namespace:\", ns ? ns.name : \"NOT FOUND\", ns && ns.description ? \"| \" + ns.description : \"\");\nif (ns) {\n  for (const t of ns.tools) console.log(\"tool:\", t.name, \"-\", (t.description || \"\").slice(0, 120));\n}\nconst env = await tools.mcp__theta_compute.list_environments();\nreturn { namespaceFound: !!ns, environments: env };"
+						"code": "const ns = await describeNamespace('mcp__theta_compute');\nif (!ns) {\n  // fall back: search for gateway tools\n  const found = await searchTools('theta_compute submit job');\n  return { fallback: true, found };\n}\nreturn {\n  name: ns.name,\n  instructions: ns.instructions,\n  tools: ns.tools.map(t => ({ name: t.name, description: t.description?.slice(0, 300) })),\n};"
 					}
 				}
 			],
@@ -405,23 +409,23 @@
 			"provider": "<provider>",
 			"model": "<model>",
 			"usage": {
-				"input": 9592,
-				"output": 473,
-				"cacheRead": 7616,
+				"input": 4780,
+				"output": 216,
+				"cacheRead": 13440,
 				"cacheWrite": 0,
-				"reasoning": 322,
-				"totalTokens": 17681,
+				"reasoning": 82,
+				"totalTokens": 18436,
 				"cost": {
-					"input": 0.0014387999999999998,
-					"output": 0.0002365,
-					"cacheRead": 0.00022847999999999998,
+					"input": 0.000717,
+					"output": 0.000108,
+					"cacheRead": 0.0004032,
 					"cacheWrite": 0,
-					"total": 0.0019037799999999999
+					"total": 0.0012282
 				}
 			},
 			"stopReason": "toolUse",
 			"timestamp": "<timestamp>",
-			"responseId": "20261116132628a2772a5e9c934d1e",
+			"responseId": "20261116211757a25a8f4f1f1f42fb",
 			"rawStopReason": "tool_calls",
 			"durationMs": "<duration>",
 			"thinkingLevel": "high"
@@ -439,17 +443,17 @@
 			"content": [
 				{
 					"type": "text",
-					"text": "Script failed\nWall time 0.1 seconds\nOutput:\n"
+					"text": "Script completed\nWall time 0.1 seconds\nOutput:\n"
 				},
 				{
 					"type": "text",
-					"text": "<console_output>\nnamespace: mcp__theta_compute \ntool: undefined - \ntool: undefined - \ntool: undefined - \ntool: undefined - \ntool: undefined - \ntool: undefined - \ntool: undefined - \n</console_output>\nScript error:\nTypeError: tools.mcp__theta_compute does not exist. Did you mean tools.mcp__theta_compute__list_environments, tools.mcp__theta_compute__job_status, tools.mcp__theta_compute__stage_files, tools.mcp__theta_compute__submit_job, tools.mcp__theta_compute__job_logs? ALL_TOOLS lists every tool; searchTools(query) finds tools by topic. Check for a member with \"mcp__theta_compute\" in tools.\n    at <anonymous> (codemode.js:6:19)\n\nNo tool calls were made."
+					"text": "{\"name\":\"mcp__theta_compute\",\"instructions\":\"The Theta compute gateway: staged Slurm runs. Stage input files, submit a guarded job, watch it, fetch its artifacts — every call is authenticated and audited; see gateway/README.md.\",\"tools\":[{},{},{},{},{},{},{}]}"
 				}
 			],
 			"details": {
 				"calls": []
 			},
-			"isError": true,
+			"isError": false,
 			"durationMs": "<duration>",
 			"timestamp": "<timestamp>"
 		}
@@ -464,19 +468,19 @@
 			"content": [
 				{
 					"type": "thinking",
-					"thinking": "The tools are named `tools.mcp__theta_compute__list_environments` etc. Let me fix and call list_environments.",
+					"thinking": "The tools array came back with empty objects — the description slice returned undefined objects. Let me get the actual tool declarations with describeTool for each. The namespace has 7 tools. Let me list ALL_TOOLS filtered.",
 					"thinkingSignature": "reasoning_content"
 				},
 				{
 					"type": "text",
-					"text": "Tools use the flat naming `mcp__theta_compute__<tool>`. Checking partition state now:"
+					"text": "The namespace has 7 tools but their details didn't come through. Let me get their exact names and signatures."
 				},
 				{
 					"type": "toolCall",
 					"id": "<id#18>",
 					"name": "codemode",
 					"arguments": {
-						"code": "const env = await tools.mcp__theta_compute__list_environments();\nreturn env;"
+						"code": "const all = ALL_TOOLS.filter(t => t.name.startsWith('mcp__theta_compute'));\nconst lines = [];\nfor (const t of all) {\n  const d = await describeTool(t.name);\n  lines.push('### ' + t.name + '\\n' + (d ? (typeof d === 'string' ? d : JSON.stringify(d)).slice(0, 700) : 'no details'));\n}\nreturn lines.join('\\n\\n');"
 					}
 				}
 			],
@@ -484,23 +488,23 @@
 			"provider": "<provider>",
 			"model": "<model>",
 			"usage": {
-				"input": 717,
-				"output": 77,
-				"cacheRead": 17152,
+				"input": 339,
+				"output": 170,
+				"cacheRead": 18176,
 				"cacheWrite": 0,
-				"reasoning": 27,
-				"totalTokens": 17946,
+				"reasoning": 44,
+				"totalTokens": 18685,
 				"cost": {
-					"input": 0.00010755,
-					"output": 0.0000385,
-					"cacheRead": 0.00051456,
+					"input": 0.000050849999999999996,
+					"output": 0.00008499999999999999,
+					"cacheRead": 0.00054528,
 					"cacheWrite": 0,
-					"total": 0.00066061
+					"total": 0.00068113
 				}
 			},
 			"stopReason": "toolUse",
 			"timestamp": "<timestamp>",
-			"responseId": "20261116132638998a5a1982c24ff9",
+			"responseId": "202611162118025536dde47cbd43ae",
 			"rawStopReason": "tool_calls",
 			"durationMs": "<duration>",
 			"thinkingLevel": "high"
@@ -518,110 +522,11 @@
 			"content": [
 				{
 					"type": "text",
-					"text": "Script completed\nWall time 0.2 seconds\nOutput:\n"
+					"text": "Script completed\nWall time 0.1 seconds\nOutput:\n"
 				},
 				{
 					"type": "text",
-					"text": "{\"content\":[{\"text\":\"{\\\"environments\\\":[{\\\"partition\\\":\\\"cpu\\\",\\\"default\\\":true,\\\"availability\\\":\\\"up\\\",\\\"time_limit\\\":\\\"20-00:00:00\\\",\\\"nodes\\\":3,\\\"state\\\":\\\"down*\\\",\\\"node_list\\\":\\\"__HOST_NODES_CPU_A__\\\"},{\\\"partition\\\":\\\"cpu\\\",\\\"default\\\":true,\\\"availability\\\":\\\"up\\\",\\\"time_limit\\\":\\\"20-00:00:00\\\",\\\"nodes\\\":2,\\\"state\\\":\\\"drain\\\",\\\"node_list\\\":\\\"__HOST_NODES_CPU_B__\\\"},{\\\"partition\\\":\\\"cpu\\\",\\\"default\\\":true,\\\"availability\\\":\\\"up\\\",\\\"time_limit\\\":\\\"20-00:00:00\\\",\\\"nodes\\\":1,\\\"state\\\":\\\"mix\\\",\\\"node_list\\\":\\\"__HOST_NODES_CPU_C__\\\"},{\\\"partition\\\":\\\"cpu\\\",\\\"default\\\":true,\\\"availability\\\":\\\"up\\\",\\\"time_limit\\\":\\\"20-00:00:00\\\",\\\"nodes\\\":12,\\\"state\\\":\\\"idle\\\",\\\"node_list\\\":\\\"__HOST_NODES_CPU_D__\\\"},{\\\"partition\\\":\\\"cpu-2\\\",\\\"default\\\":false,\\\"availability\\\":\\\"up\\\",\\\"time_limit\\\":\\\"10-00:00:00\\\",\\\"nodes\\\":12,\\\"state\\\":\\\"idle\\\",\\\"node_list\\\":\\\"__HOST_NODES_CPU_E__\\\"},{\\\"partition\\\":\\\"gpu\\\",\\\"default\\\":false,\\\"availability\\\":\\\"up\\\",\\\"time_limit\\\":\\\"20-00:00:00\\\",\\\"nodes\\\":1,\\\"state\\\":\\\"mix\\\",\\\"node_list\\\":\\\"__HOST_NODES_GPU_A__\\\"},{\\\"partition\\\":\\\"gpu\\\",\\\"default\\\":false,\\\"availability\\\":\\\"up\\\",\\\"time_limit\\\":\\\"20-00:00:00\\\",\\\"nodes\\\":1,\\\"state\\\":\\\"alloc\\\",\\\"node_list\\\":\\\"__HOST_NODES_GPU_B__\\\"}]}\",\"type\":\"text\"}],\"isError\":false,\"structuredContent\":{\"environments\":[{\"partition\":\"cpu\",\"default\":true,\"availability\":\"up\",\"time_limit\":\"20-00:00:00\",\"nodes\":3,\"state\":\"down*\",\"node_list\":\"__HOST_NODES_CPU_A__\"},{\"partition\":\"cpu\",\"default\":true,\"availability\":\"up\",\"time_limit\":\"20-00:00:00\",\"nodes\":2,\"state\":\"drain\",\"node_list\":\"__HOST_NODES_CPU_B__\"},{\"partition\":\"cpu\",\"default\":true,\"availability\":\"up\",\"time_limit\":\"20-00:00:00\",\"nodes\":1,\"state\":\"mix\",\"node_list\":\"__HOST_NODES_CPU_C__\"},{\"partition\":\"cpu\",\"default\":true,\"availability\":\"up\",\"time_limit\":\"20-00:00:00\",\"nodes\":12,\"state\":\"idle\",\"node_list\":\"__HOST_NODES_CPU_D__\"},{\"partition\":\"cpu-2\",\"default\":false,\"availability\":\"up\",\"time_limit\":\"10-00:00:00\",\"nodes\":12,\"state\":\"idle\",\"node_list\":\"__HOST_NODES_CPU_E__\"},{\"partition\":\"gpu\",\"default\":false,\"availability\":\"up\",\"time_limit\":\"20-00:00:00\",\"nodes\":1,\"state\":\"mix\",\"node_list\":\"__HOST_NODES_GPU_A__\"},{\"partition\":\"gpu\",\"default\":false,\"availability\":\"up\",\"time_limit\":\"20-00:00:00\",\"nodes\":1,\"state\":\"alloc\",\"node_list\":\"__HOST_NODES_GPU_B__\"}]}}"
-				}
-			],
-			"details": {
-				"calls": [
-					{
-						"id": "<id#20>",
-						"name": "mcp__theta_compute__list_environments",
-						"args": "",
-						"status": "ok",
-						"durationMs": "<duration>"
-					}
-				]
-			},
-			"isError": false,
-			"durationMs": "<duration>",
-			"timestamp": "<timestamp>",
-			"nestedCalls": {
-				"calls": [
-					{
-						"id": "<id#20>",
-						"name": "mcp__theta_compute__list_environments",
-						"status": "ok",
-						"arguments": {},
-						"durationMs": "<duration>"
-					}
-				],
-				"complete": true
-			}
-		}
-	},
-	{
-		"type": "message",
-		"id": "<id#21>",
-		"parentId": "<id#19>",
-		"timestamp": "<timestamp>",
-		"message": {
-			"role": "assistant",
-			"content": [
-				{
-					"type": "thinking",
-					"thinking": "Partitions: `cpu` is up with plenty of idle nodes (__HOST_NODES_CPU_D__ idle), some down/drained, but that doesn't block the plan — the default `cpu` partition has 12 idle nodes. Good.\n\nNow, the submit. Per the submit gate doctrine: the gate extension asks the researcher before every destructive call. I should state what is about to run and let the answer land. The gate will presumably surface a confirm dialog (or, in print/headless mode, refuse). I must make the submit call and see what happens.\n\nBefore submitting, let me describe the submit_job tool to know its args.",
-					"thinkingSignature": "reasoning_content"
-				},
-				{
-					"type": "text",
-					"text": "Partitions look workable — the default `cpu` partition is up with 12 idle nodes (a few down/drained nodes exist but they don't block the plan). Now let me check the exact `submit_job` signature before calling it:"
-				},
-				{
-					"type": "toolCall",
-					"id": "<id#22>",
-					"name": "codemode",
-					"arguments": {
-						"code": "const t = await describeTool(\"mcp__theta_compute__submit_job\");\nreturn t;"
-					}
-				}
-			],
-			"api": "openai-completions",
-			"provider": "<provider>",
-			"model": "<model>",
-			"usage": {
-				"input": 723,
-				"output": 214,
-				"cacheRead": 17856,
-				"cacheWrite": 0,
-				"reasoning": 134,
-				"totalTokens": 18793,
-				"cost": {
-					"input": 0.00010845,
-					"output": 0.000107,
-					"cacheRead": 0.00053568,
-					"cacheWrite": 0,
-					"total": 0.00075113
-				}
-			},
-			"stopReason": "toolUse",
-			"timestamp": "<timestamp>",
-			"responseId": "20261116132643d61d8d3134f84c47",
-			"rawStopReason": "tool_calls",
-			"durationMs": "<duration>",
-			"thinkingLevel": "high"
-		}
-	},
-	{
-		"type": "message",
-		"id": "<id#23>",
-		"parentId": "<id#21>",
-		"timestamp": "<timestamp>",
-		"message": {
-			"role": "toolResult",
-			"toolCallId": "<id#22>",
-			"toolName": "codemode",
-			"content": [
-				{
-					"type": "text",
-					"text": "Script completed\nWall time 0.0 seconds\nOutput:\n"
-				},
-				{
-					"type": "text",
-					"text": "Submit the run's guarded batch script to Slurm; answers the job id.\n\nDirectives are scheduler sizing only — partition, time, mem, ntasks,\ncpus-per-task, gres — each inside a ceiling; the job name (the\nper-user theta- prefix), the log paths, and the script body are\ngateway-forced. This spends cluster time: the theta side confirms\nit before the call leaves.\n\ncodemode tool declaration:\n```ts\ndeclare const tools: { mcp__theta_compute__submit_job(args: { directives?: { [key: string]: string | number; } | null; run_name: string; }): Promise<{ content: Array<{ data?: string; mimeType?: string; text?: string; type: \"text\" | \"image\" | \"audio\" | \"resource_link\" | \"resource\"; [key: string]: unknown; }>; isError?: boolean; structuredContent?: { [key: string]: unknown; }; [key: string]: unknown; }>; };\n```"
+					"text": "### mcp__theta_compute__list_environments\nList the cluster's partition-state groups: where a job can run.\n\nReturns one record per sinfo partition-state group — partition name,\nwhether it is the default, availability, time limit, node count,\nstate, and node list.\n\ncodemode tool declaration:\n```ts\ndeclare const tools: { mcp__theta_compute__list_environments(args: {}): Promise<{ content: Array<{ data?: string; mimeType?: string; text?: string; type: \"text\" | \"image\" | \"audio\" | \"resource_link\" | \"resource\"; [key: string]: unknown; }>; isError?: boolean; structuredContent?: { [key: string]: unknown; }; [key: string]: unknown; }>; };\n```\n\n### mcp__theta_compute__job_status\nRead one Slurm job's status by job id (digits only).\n\nAnswers found: false when the id is well formed but not in the\nqueue; a malformed id is refused before Slurm is touched.\n\ncodemode tool declaration:\n```ts\ndeclare const tools: { mcp__theta_compute__job_status(args: { job_id: string; }): Promise<{ content: Array<{ data?: string; mimeType?: string; text?: string; type: \"text\" | \"image\" | \"audio\" | \"resource_link\" | \"resource\"; [key: string]: unknown; }>; isError?: boolean; structuredContent?: { [key: string]: unknown; }; [key: string]: unknown; }>; };\n```\n\n### mcp__theta_compute__stage_files\nStage input files into one run's directory under the staging root.\n\nFiles travel in-band as base64 (32 MiB per call by default) and the\npath sandbox confines them to the run directory. Past the cap the\nrefusal names the out-of-band path: scp to the run directory on the\ncluster. Staging lands whole or not at all.\n\ncodemode tool declaration:\n```ts\ndeclare const tools: { mcp__theta_compute__stage_files(args: { files: Array<{ [key: string]: unknown; }>; run_name: string; }): Promise<{ content: Array<{ data?: string; mimeType?: string; text?: string; type: \"text\" | \"image\" | \"audio\" | \"resource_link\" | \"resource\"; [key: string]: unknown; }>; isError?: boolean; structuredContent?: { [key: string]:\n\n### mcp__theta_compute__submit_job\nSubmit the run's guarded batch script to Slurm; answers the job id.\n\nDirectives are scheduler sizing only — partition, time, mem, ntasks,\ncpus-per-task, gres — each inside a ceiling; the job name (the\nper-user theta- prefix), the log paths, and the script body are\ngateway-forced. This spends cluster time: the theta side confirms\nit before the call leaves.\n\ncodemode tool declaration:\n```ts\ndeclare const tools: { mcp__theta_compute__submit_job(args: { directives?: { [key: string]: string | number; } | null; run_name: string; }): Promise<{ content: Array<{ data?: string; mimeType?: string; text?: string; type: \"text\" | \"image\" | \"audio\" | \"resource_link\" | \"resource\"; [key: string]: unknown; }>\n\n### mcp__theta_compute__job_logs\nRead one job's stdout and stderr from its run directory.\n\nReturns the last tail_lines of each (100 by default, 1000 at most).\nAnswers found: false when no run in the staging tree holds a log\nfor the id — a job that never started, or not a gateway job.\n\ncodemode tool declaration:\n```ts\ndeclare const tools: { mcp__theta_compute__job_logs(args: {\n  job_id: string;\n  // @integer\n  tail_lines?: number | null;\n}): Promise<{ content: Array<{ data?: string; mimeType?: string; text?: string; type: \"text\" | \"image\" | \"audio\" | \"resource_link\" | \"resource\"; [key: string]: unknown; }>; isError?: boolean; structuredContent?: { [key: string]: unknown; }; [key: string]: unknown; }>; };\n```\n\n### mcp__theta_compute__cancel_job\nCancel one gateway-owned job (the theta- prefix marks ownership).\n\nOnly jobs whose name carries this user's theta-<user>- prefix are\ncancelled; anything else is refused. Answers found: false when the\nqueue no longer holds the id — nothing to cancel, not an error.\n\ncodemode tool declaration:\n```ts\ndeclare const tools: { mcp__theta_compute__cancel_job(args: { job_id: string; }): Promise<{ content: Array<{ data?: string; mimeType?: string; text?: string; type: \"text\" | \"image\" | \"audio\" | \"resource_link\" | \"resource\"; [key: string]: unknown; }>; isError?: boolean; structuredContent?: { [key: string]: unknown; }; [key: string]: unknown; }>; };\n```\n\n### mcp__theta_compute__fetch_artifacts\nFetch one run's files back in-band: the whole run directory by\ndefault, or the named picks.\n\nThe answer is whole or not at all — every file is read and sized\nwithin the in-band cap before anything returns. Past the cap the\nrefusal names the out-of-band path: scp from the run directory on\nthe cluster.\n\ncodemode tool declaration:\n```ts\ndeclare const tools: { mcp__theta_compute__fetch_artifacts(args: { paths?: Array<string> | null; run_name: string; }): Promise<{ content: Array<{ data?: string; mimeType?: string; text?: string; type: \"text\" | \"image\" | \"audio\" | \"resource_link\" | \"resource\"; [key: string]: unknown; }>; isError?: boolean; structuredContent?: { [key: string]: unknown; }; [key: st"
 				}
 			],
 			"details": {
@@ -634,27 +539,27 @@
 	},
 	{
 		"type": "message",
-		"id": "<id#24>",
-		"parentId": "<id#23>",
+		"id": "<id#20>",
+		"parentId": "<id#19>",
 		"timestamp": "<timestamp>",
 		"message": {
 			"role": "assistant",
 			"content": [
 				{
 					"type": "thinking",
-					"thinking": "Now I submit the run. The run name is `smoke-check`. Directives: the doctrine says \"the fixed partition/gres defaults are the cluster's own production values, so pass directives only when the task genuinely needs them.\" A smoke-check staged run — no indication it needs specific directives. So submit without directives.\n\nThe submit gate will confirm — \"state what is about to run and let the answer land.\" In this interactive session, the gate should present a confirm dialog to the user. Let me make the call and let the answer land. If it's refused, it stays refused — no retry.",
+					"thinking": "I have the seven tools. Now, per the doctrine:\n\n1. Start with `list_environments`.\n2. Then submit `smoke-check` (already staged). The submit gate will confirm with the researcher — I should state what's about to run first, and the gate dialog will land.\n\nLet me call list_environments now.",
 					"thinkingSignature": "reasoning_content"
 				},
 				{
 					"type": "text",
-					"text": "Signature confirmed. Now the submit — the theta-side submit gate will ask you to confirm this destructive call before it leaves. Stating what is about to run: **submitting the already-staged run `smoke-check` as a raw batch job, no directives (the gateway's fixed partition/gres defaults apply)**."
+					"text": "All seven gateway tools are in hand. Following the doctrine — `list_environments` first to see partition state before any job is created:"
 				},
 				{
 					"type": "toolCall",
-					"id": "<id#25>",
+					"id": "<id#21>",
 					"name": "codemode",
 					"arguments": {
-						"code": "const res = await tools.mcp__theta_compute__submit_job({ run_name: \"smoke-check\", directives: null });\nreturn res;"
+						"code": "const res = await tools.mcp__theta_compute__list_environments({});\nreturn { isError: res.isError, structuredContent: res.structuredContent, content: res.content?.map(c => c.text ?? c.type) };"
 					}
 				}
 			],
@@ -662,23 +567,122 @@
 			"provider": "<provider>",
 			"model": "<model>",
 			"usage": {
-				"input": 459,
-				"output": 228,
-				"cacheRead": 18560,
+				"input": 1464,
+				"output": 153,
+				"cacheRead": 18496,
 				"cacheWrite": 0,
-				"reasoning": 123,
-				"totalTokens": 19247,
+				"reasoning": 68,
+				"totalTokens": 20113,
 				"cost": {
-					"input": 0.00006884999999999999,
-					"output": 0.00011399999999999999,
-					"cacheRead": 0.0005568,
+					"input": 0.0002196,
+					"output": 0.0000765,
+					"cacheRead": 0.00055488,
 					"cacheWrite": 0,
-					"total": 0.0007396499999999999
+					"total": 0.00085098
 				}
 			},
 			"stopReason": "toolUse",
 			"timestamp": "<timestamp>",
-			"responseId": "20261116132655a6f7d3d7993a4495",
+			"responseId": "20261116211806f3bad58f41014b2d",
+			"rawStopReason": "tool_calls",
+			"durationMs": "<duration>",
+			"thinkingLevel": "high"
+		}
+	},
+	{
+		"type": "message",
+		"id": "<id#22>",
+		"parentId": "<id#20>",
+		"timestamp": "<timestamp>",
+		"message": {
+			"role": "toolResult",
+			"toolCallId": "<id#21>",
+			"toolName": "codemode",
+			"content": [
+				{
+					"type": "text",
+					"text": "Script completed\nWall time 0.1 seconds\nOutput:\n"
+				},
+				{
+					"type": "text",
+					"text": "{\"isError\":false,\"structuredContent\":{\"environments\":[{\"partition\":\"cpu\",\"default\":true,\"availability\":\"up\",\"time_limit\":\"20-00:00:00\",\"nodes\":3,\"state\":\"down*\",\"node_list\":\"__HOST_NODES_CPU_A__\"},{\"partition\":\"cpu\",\"default\":true,\"availability\":\"up\",\"time_limit\":\"20-00:00:00\",\"nodes\":2,\"state\":\"drain\",\"node_list\":\"__HOST_NODES_CPU_B__\"},{\"partition\":\"cpu\",\"default\":true,\"availability\":\"up\",\"time_limit\":\"20-00:00:00\",\"nodes\":1,\"state\":\"mix\",\"node_list\":\"__HOST_NODES_CPU_C__\"},{\"partition\":\"cpu\",\"default\":true,\"availability\":\"up\",\"time_limit\":\"20-00:00:00\",\"nodes\":12,\"state\":\"idle\",\"node_list\":\"__HOST_NODES_CPU_D__\"},{\"partition\":\"cpu-2\",\"default\":false,\"availability\":\"up\",\"time_limit\":\"10-00:00:00\",\"nodes\":12,\"state\":\"idle\",\"node_list\":\"__HOST_NODES_CPU_E__\"},{\"partition\":\"gpu\",\"default\":false,\"availability\":\"up\",\"time_limit\":\"20-00:00:00\",\"nodes\":1,\"state\":\"mix\",\"node_list\":\"__HOST_NODES_GPU_A__\"},{\"partition\":\"gpu\",\"default\":false,\"availability\":\"up\",\"time_limit\":\"20-00:00:00\",\"nodes\":1,\"state\":\"alloc\",\"node_list\":\"__HOST_NODES_GPU_B__\"}]},\"content\":[\"{\\\"environments\\\":[{\\\"partition\\\":\\\"cpu\\\",\\\"default\\\":true,\\\"availability\\\":\\\"up\\\",\\\"time_limit\\\":\\\"20-00:00:00\\\",\\\"nodes\\\":3,\\\"state\\\":\\\"down*\\\",\\\"node_list\\\":\\\"__HOST_NODES_CPU_A__\\\"},{\\\"partition\\\":\\\"cpu\\\",\\\"default\\\":true,\\\"availability\\\":\\\"up\\\",\\\"time_limit\\\":\\\"20-00:00:00\\\",\\\"nodes\\\":2,\\\"state\\\":\\\"drain\\\",\\\"node_list\\\":\\\"__HOST_NODES_CPU_B__\\\"},{\\\"partition\\\":\\\"cpu\\\",\\\"default\\\":true,\\\"availability\\\":\\\"up\\\",\\\"time_limit\\\":\\\"20-00:00:00\\\",\\\"nodes\\\":1,\\\"state\\\":\\\"mix\\\",\\\"node_list\\\":\\\"__HOST_NODES_CPU_C__\\\"},{\\\"partition\\\":\\\"cpu\\\",\\\"default\\\":true,\\\"availability\\\":\\\"up\\\",\\\"time_limit\\\":\\\"20-00:00:00\\\",\\\"nodes\\\":12,\\\"state\\\":\\\"idle\\\",\\\"node_list\\\":\\\"__HOST_NODES_CPU_D__\\\"},{\\\"partition\\\":\\\"cpu-2\\\",\\\"default\\\":false,\\\"availability\\\":\\\"up\\\",\\\"time_limit\\\":\\\"10-00:00:00\\\",\\\"nodes\\\":12,\\\"state\\\":\\\"idle\\\",\\\"node_list\\\":\\\"__HOST_NODES_CPU_E__\\\"},{\\\"partition\\\":\\\"gpu\\\",\\\"default\\\":false,\\\"availability\\\":\\\"up\\\",\\\"time_limit\\\":\\\"20-00:00:00\\\",\\\"nodes\\\":1,\\\"state\\\":\\\"mix\\\",\\\"node_list\\\":\\\"__HOST_NODES_GPU_A__\\\"},{\\\"partition\\\":\\\"gpu\\\",\\\"default\\\":false,\\\"availability\\\":\\\"up\\\",\\\"time_limit\\\":\\\"20-00:00:00\\\",\\\"nodes\\\":1,\\\"state\\\":\\\"alloc\\\",\\\"node_list\\\":\\\"__HOST_NODES_GPU_B__\\\"}]}\"]}"
+				}
+			],
+			"details": {
+				"calls": [
+					{
+						"id": "<id#23>",
+						"name": "mcp__theta_compute__list_environments",
+						"args": "{}",
+						"status": "ok",
+						"durationMs": "<duration>"
+					}
+				]
+			},
+			"isError": false,
+			"durationMs": "<duration>",
+			"timestamp": "<timestamp>",
+			"nestedCalls": {
+				"calls": [
+					{
+						"id": "<id#23>",
+						"name": "mcp__theta_compute__list_environments",
+						"status": "ok",
+						"arguments": {},
+						"durationMs": "<duration>"
+					}
+				],
+				"complete": true
+			}
+		}
+	},
+	{
+		"type": "message",
+		"id": "<id#24>",
+		"parentId": "<id#22>",
+		"timestamp": "<timestamp>",
+		"message": {
+			"role": "assistant",
+			"content": [
+				{
+					"type": "thinking",
+					"thinking": "Environments look fine: default `cpu` partition is up, with 12 idle nodes (some down/drain, but 12 idle available). No blocker.\n\nNow the submit. The run `smoke-check` is already staged. The doctrine says:\n- Submit via `submit_job(run_name, directives?)`. Directives only when genuinely needed — a smoke check doesn't, so pass none.\n- The submit gate will ask the researcher before the call leaves. I should state what's about to run and let the answer land.\n\nThe user already explicitly asked to submit it, and the gate dialog is part of the flow. I'll make the call; the gate will surface a confirm to the user.\n\nIf the submit is refused (HOLD for submit capability off, THROTTLE for ceiling), I report and stop — no retries.\n\nLet me submit now, in its own codemode call (a destructive call, single and explicit).",
+					"thinkingSignature": "reasoning_content"
+				},
+				{
+					"type": "text",
+					"text": "Partition state is healthy — the default `cpu` partition is up with 12 idle nodes (3 down, 2 drained; not blockers). No directives needed: the fixed defaults are the cluster's production values, and a smoke check needs nothing special.\n\nNow the submit. Per the submit-gate doctrine, I state what is about to run: **`submit_job` on run `smoke-check`, the already-staged batch script, with no directives (gateway-forced defaults)** — this spends cluster time and the gate will ask you to confirm before the call leaves."
+				},
+				{
+					"type": "toolCall",
+					"id": "<id#25>",
+					"name": "codemode",
+					"arguments": {
+						"code": "const res = await tools.mcp__theta_compute__submit_job({ run_name: 'smoke-check' });\nreturn { isError: res.isError, structuredContent: res.structuredContent, content: res.content?.map(c => c.text ?? c.type) };"
+					}
+				}
+			],
+			"api": "openai-completions",
+			"provider": "<provider>",
+			"model": "<model>",
+			"usage": {
+				"input": 835,
+				"output": 372,
+				"cacheRead": 19904,
+				"cacheWrite": 0,
+				"reasoning": 191,
+				"totalTokens": 21111,
+				"cost": {
+					"input": 0.00012524999999999998,
+					"output": 0.000186,
+					"cacheRead": 0.0005971199999999999,
+					"cacheWrite": 0,
+					"total": 0.0009083699999999999
+				}
+			},
+			"stopReason": "toolUse",
+			"timestamp": "<timestamp>",
+			"responseId": "202611162118102615a869d97c42fc",
 			"rawStopReason": "tool_calls",
 			"durationMs": "<duration>",
 			"thinkingLevel": "high"
@@ -696,11 +700,11 @@
 			"content": [
 				{
 					"type": "text",
-					"text": "Script failed\nWall time 0.0 seconds\nOutput:\n"
+					"text": "Script failed\nWall time 0.1 seconds\nOutput:\n"
 				},
 				{
 					"type": "text",
-					"text": "Script error:\nError: submit_job for run \"smoke-check\" (nested under tool call call_c0e6198488d04b03a350b141) was refused by the submit gate — ask the user to approve it in the confirm dialog, never retry it unprompted\n\nTool calls made before the failure (they are not undone): mcp__theta_compute__submit_job (error)"
+					"text": "Script error:\nError: submit_job for run \"smoke-check\" (nested under tool call call_4364c9a2f34245bcb3ff4040) was refused by the submit gate — ask the user to approve it in the confirm dialog, never retry it unprompted\n\nTool calls made before the failure (they are not undone): mcp__theta_compute__submit_job (error)"
 				}
 			],
 			"details": {
@@ -708,10 +712,10 @@
 					{
 						"id": "<id#27>",
 						"name": "mcp__theta_compute__submit_job",
-						"args": "{\"run_name\":\"smoke-check\",\"directives\":null}",
+						"args": "{\"run_name\":\"smoke-check\"}",
 						"status": "error",
 						"durationMs": "<duration>",
-						"error": "submit_job for run \"smoke-check\" (nested under tool call call_c0e6198488d04b03a350b141) was refused by the submit gate — ask the user to approve it in the confirm dialog, never retry it unprompted"
+						"error": "submit_job for run \"smoke-check\" (nested under tool call call_4364c9a2f34245bcb3ff4040) was refused by the submit gate — ask the user to approve it in the confirm dialog, never retry it unprompted"
 					}
 				]
 			},
@@ -725,11 +729,10 @@
 						"name": "mcp__theta_compute__submit_job",
 						"status": "error",
 						"arguments": {
-							"run_name": "smoke-check",
-							"directives": null
+							"run_name": "smoke-check"
 						},
 						"durationMs": "<duration>",
-						"error": "submit_job for run \"smoke-check\" (nested under tool call call_c0e6198488d04b03a350b141) was refused by the submit gate — ask the user to approve it in the confirm dialog, never retry it unprompted"
+						"error": "submit_job for run \"smoke-check\" (nested under tool call call_4364c9a2f34245bcb3ff4040) was refused by the submit gate — ask the user to approve it in the confirm dialog, never retry it unprompted"
 					}
 				],
 				"complete": true
@@ -746,35 +749,35 @@
 			"content": [
 				{
 					"type": "thinking",
-					"thinking": "The submit gate refused the call because the confirm dialog was not answered — or it surfaced the dialog and the answer hadn't landed yet. The error says: \"was refused by the submit gate — ask the user to approve it in the confirm dialog, never retry it unprompted.\"\n\nPer doctrine: \"A refused call stays refused — never retry it unprompted.\" So I must ask the user to approve it in the confirm dialog. But wait — the error message says \"ask the user to approve it in the confirm dialog\". So there is presumably a pending confirm dialog in the UI. Actually, the nested call was refused because the gate prompts and the user must answer. Since I'm running inside a codemode script, the dialog should have been surfaced via `parentToolCallId` linking... but the call was refused — perhaps because the dialog timed out or the session is headless/print mode?\n\nHmm. The doctrine says the gate asks the researcher before every destructive call. The refusal here means the gate did not get an approval. I must stop and ask the user explicitly: approve the submission of smoke-check in the confirm dialog, then I can make the call again (prompted by the user's approval — \"never retry it unprompted\" means once the user approves/prompt me, I can retry).\n\nSo now I should report to the user: the submission is pending your approval; a confirm dialog was raised; approve it and I'll resubmit.\n\nActually wait — maybe the dialog is still open in the TUI and the user can approve it now. The refusal means this specific call is dead, but with the user's approval I can issue a new one, which will cross the gate and this time be approved.\n\nLet me pause and tell the user exactly what happened.",
+					"thinking": "The submit was refused by the submit gate — the confirm dialog needs user approval. The error says: \"ask the user to approve it in the confirm dialog, never retry it unprompted.\"\n\nThe gate refused the call and the doctrine says: \"A refused call stays refused — never retry it unprompted.\"\n\nSo I must stop here and report to the user. The gate dialog was shown (or is pending) — the refusal says \"ask the user to approve it in the confirm dialog\". Since the call was refused (the dialog either was declined or the call returned refusal), I must not retry it unprompted.\n\nWait — let me think about how the submit gate works. The confirm dialog is part of the flow. The error indicates the gate refused the nested submit. The instruction from the error itself: ask the user to approve it in the confirm dialog, never retry it unprompted.\n\nSo the correct action: stop, report to the researcher what happened, and ask them to approve the submit when the confirm dialog appears (or to tell me to proceed so the gate's answer lands). I should NOT retry now.\n\nAlso, I should not proceed with anything else — the rest of the lifecycle (poll, fetch, record) depends on the job existing. There is no job ID. So the run stopped at the submit step.\n\nPer doctrine: \"On a held submission, report the hold to the researcher and stop\" — that's for HOLD capability refusals, but the same principle applies: report and stop.\n\nAlso: should I record anything in the notebook? The record step is for completed/started runs with job IDs. There's no job ID — nothing durable to record. The lifecycle's record step assembles a job record from answers in hand; without a job ID there's no job record. I'll skip recording — nothing was created on the cluster.\n\nLet me write the report:\n\n1. What I did:\n   - Read theta-compute SKILL.md, CLAUDE.md, codemode.md whole before acting.\n   - Discovered the gateway namespace (7 tools).\n   - `list_environments` — partitions healthy; default cpu partition up, 12 idle nodes; 3 down (__HOST_NODES_CPU_A__), 2 drained (__HOST_NODES_CPU_B__) — no blocker.\n   - Attempted `submit_job(run_name='smoke-check')` with no directives.\n2. What stopped it:\n   - The theta-side submit gate refused the call. It's the stacked gate framework's confirm dialog — the destructive call requires the researcher's approval in the confirm dialog, and the nested (codemode) call was refused because the dialog wasn't approved. The error explicitly says: never retry unprompted.\n   - No job was created; no job ID exists; nothing to poll, fetch, or record.\n3. What's needed to proceed:\n   - The user should approve the submit in the gate's confirm dialog (or tell me to raise it again), and I'll re-run the submit once approved — the doctrine says a refused call stays refused unless the researcher's answer lands; with explicit approval I can call again.\n\nActually, careful: \"A refused call stays refused — never retry it unprompted.\" — \"unprompted\" means I can retry if the user explicitly approves. So I should ask the user to approve it and tell me to go ahead.\n\nKeep the report concise, clear file paths where relevant. No cluster account/node names should matter here — the report is to the researcher (not a public surface), but CLAUDE.md says cluster facts never enter public surfaces — this is a chat report, fine to include node lists? The node lists came from the gateway. The rule: \"PR bodies, repo prose, and committed fixtures are public surfaces\". Chat with the researcher is not a public surface. I'll keep it factual.",
 					"thinkingSignature": "reasoning_content"
 				},
 				{
 					"type": "text",
-					"text": "The submit gate stopped the call — this is expected gate behavior, but it needs your answer to proceed. Here's exactly where things stand:\n\n## What happened so far\n\n1. **Gateway reachable, partitions checked.** `list_environments` succeeded: the default `cpu` partition is up with 12 idle nodes (`__HOST_NODES_CPU_D__`); `__HOST_NODES_CPU_A__` are down and `__HOST_NODES_CPU_B__` drained, but that doesn't block a default-partition job.\n2. **Submit refused by the submit gate — not by the cluster.** My `submit_job(run_name=\"smoke-check\", directives=null)` call was refused **before leaving this session**: the theta-side submit gate raises a confirm dialog for every job-creating call, and this call was refused because your approval hasn't landed. The gateway itself never saw it — no job was created, no HOLD/THROTTLE was involved.\n\n## What I need from you\n\nApprove the submission in the confirm dialog (or just tell me to go ahead), and I'll issue the submit again — with your approval it will cross the gate this time. The call waiting for your confirmation is:\n\n- **Run:** `smoke-check` (already staged)\n- **Action:** raw batch submit, no directives — gateway-forced defaults for partition/gres, log paths, and script body\n\nPer doctrine I won't retry unprompted — the refused call stays refused."
+					"text": "The submit stopped at the gate. Here is exactly what happened, in order:\n\n## What ran\n\n1. **Read the guidance first** (each whole, in a single call, above its line count): `skills/theta-compute/SKILL.md`, `CLAUDE.md` (the repo's steering doc, per `AGENTS.md`), and pi's `docs/codemode.md` — the gateway is driven through codemode scripts, and its doctrine says call the tools directly.\n2. **`list_environments`** — succeeded. The default `cpu` partition is up with 12 idle nodes; 3 nodes are down and 2 drained, which doesn't block a submit. Nothing in the environment argued against proceeding.\n3. **`submit_job(run_name: \"smoke-check\")`, no directives** — the run was already staged, so staging was skipped per the lifecycle; the gateway's fixed production defaults fit a smoke check, so I passed no sizing directives.\n\n## What stopped it\n\nThe **theta-side submit gate refused the call** — it never reached the cluster:\n\n> `submit_job for run \"smoke-check\" ... was refused by the submit gate — ask the user to approve it in the confirm dialog, never retry it unprompted`\n\nThis is the designed flow, not a malfunction: `submit_job` is a destructive call, and the stacked gate framework (`extensions/submit-gate.ts`) requires your approval in its confirm dialog before the call leaves the session. The nested call's refusal landed as an error, and both the skill doctrine and the gate's own message say a refused call **stays refused — no unprompted retry**. This was not a HOLD (deploy-time capability off) or THROTTLE (ceiling spent) refusal from the gateway itself — the audit trail shows the call died at the inner gate, before the server saw it.\n\n## Current state\n\n- **No job was created.** No job ID exists, so there is nothing to poll, no logs to read, no artifacts to fetch, and no job record for the notebook — the record step only closes out a run that answered a job ID.\n- The staged inputs for `smoke-check` are untouched in the staging tree.\n\n## To proceed\n\nApprove the submit when the gate's confirm dialog appears (or tell me explicitly to raise the submit again). With your answer on record, I'll re-issue `submit_job` once — then poll `smoke-check` with sane intervals, fetch its artifacts, and record the job ID in the project notebook, exactly as the doctrine lays out."
 				}
 			],
 			"api": "openai-completions",
 			"provider": "<provider>",
 			"model": "<model>",
 			"usage": {
-				"input": 341,
-				"output": 669,
-				"cacheRead": 19008,
+				"input": 480,
+				"output": 1330,
+				"cacheRead": 20736,
 				"cacheWrite": 0,
-				"reasoning": 362,
-				"totalTokens": 20018,
+				"reasoning": 790,
+				"totalTokens": 22546,
 				"cost": {
-					"input": 0.000051149999999999996,
-					"output": 0.0003345,
-					"cacheRead": 0.00057024,
+					"input": 0.000072,
+					"output": 0.000665,
+					"cacheRead": 0.0006220799999999999,
 					"cacheWrite": 0,
-					"total": 0.0009558899999999999
+					"total": 0.00135908
 				}
 			},
 			"stopReason": "stop",
 			"timestamp": "<timestamp>",
-			"responseId": "2026111613270148cc0d0c720a4a6e",
+			"responseId": "20261116211819e4e71889b44b49af",
 			"rawStopReason": "stop",
 			"durationMs": "<duration>",
 			"thinkingLevel": "high"
