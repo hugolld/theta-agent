@@ -601,6 +601,10 @@ const scanSurfaces = [
 	// extensions/submit-gate.ts carries the Submit gate headword's working
 	// vocabulary — the confirm dialog's title and the refusal/drift reasons.
 	"extensions/submit-gate.ts",
+	// extensions/skill-pool.ts carries the pool headwords' working vocabulary
+	// (skill pool, domain pack) — the status table, the toggle replies, and
+	// the diagnosis block.
+	"extensions/skill-pool.ts",
 	"test/manifest.test.mjs",
 	"test/skills-library.test.mjs",
 ];

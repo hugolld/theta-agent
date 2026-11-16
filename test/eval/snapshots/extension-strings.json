@@ -211,31 +211,17 @@
 			"content": [
 				{
 					"type": "thinking",
-					"thinking": "The user wants me to submit a small validation run named \"smoke-check\" through the cluster gateway. The environment provides guidance for cluster work — that's the theta-compute skill. I should read that skill file whole in a single call with a limit larger than its line count.\n\nAlso, the project instructions say the repo's steering doc is CLAUDE.md, and I should read it in full before working. Let me read both files. Also the AGENTS.md mentions two rules: secrets ride files, never argv; cluster facts never enter public surfaces.\n\nLet me start by reading the skill and CLAUDE.md. The user explicitly says: before relying on any instruction or reference file, read it whole in a single call, with a limit larger than its line count — never an exact-count or fragmented read.\n\nSo I should:\n1. Read __REPO__/skills/theta-compute/SKILL.md (whole, single call, limit larger than line count).\n2. Read __REPO__/CLAUDE.md (whole).\n\nLet me do both in parallel.",
+					"thinking": "The user wants me to submit a staged validation run named \"smoke-check\" through the cluster gateway. The guidance for cluster work is the theta-compute skill. Let me read that skill file first, wholly, in a single call with a limit larger than its line count.\n\nLet me start by reading the theta-compute skill.",
 					"thinkingSignature": "reasoning_content"
-				},
-				{
-					"type": "text",
-					"text": "I'll follow the environment's guidance: first read the steering doc and the cluster-work skill in full, each in a single call with a limit larger than the file's line count."
 				},
 				{
 					"type": "toolCall",
 					"id": "<id#7>",
 					"name": "read",
 					"arguments": {
-						"limit": 2000,
+						"path": "__REPO__/skills/theta-compute/SKILL.md",
 						"offset": 1,
-						"path": "__REPO__/skills/theta-compute/SKILL.md"
-					}
-				},
-				{
-					"type": "toolCall",
-					"id": "<id#8>",
-					"name": "read",
-					"arguments": {
-						"limit": 2000,
-						"offset": 1,
-						"path": "__REPO__/CLAUDE.md"
+						"limit": 2000
 					}
 				}
 			],
@@ -244,22 +230,22 @@
 			"model": "<model>",
 			"usage": {
 				"input": 5826,
-				"output": 330,
+				"output": 105,
 				"cacheRead": 0,
 				"cacheWrite": 0,
-				"reasoning": 224,
-				"totalTokens": 6156,
+				"reasoning": 67,
+				"totalTokens": 5931,
 				"cost": {
 					"input": 0.0008738999999999999,
-					"output": 0.000165,
+					"output": 0.000052499999999999995,
 					"cacheRead": 0,
 					"cacheWrite": 0,
-					"total": 0.0010389
+					"total": 0.0009264
 				}
 			},
 			"stopReason": "toolUse",
 			"timestamp": "<timestamp>",
-			"responseId": "202611151923039bad196ad0c04bc1",
+			"responseId": "202611161326134123616c0c2f4375",
 			"rawStopReason": "tool_calls",
 			"durationMs": "<duration>",
 			"thinkingLevel": "high"
@@ -267,7 +253,7 @@
 	},
 	{
 		"type": "message",
-		"id": "<id#9>",
+		"id": "<id#8>",
 		"parentId": "<id#6>",
 		"timestamp": "<timestamp>",
 		"message": {
@@ -287,12 +273,76 @@
 	},
 	{
 		"type": "message",
-		"id": "<id#10>",
+		"id": "<id#9>",
+		"parentId": "<id#8>",
+		"timestamp": "<timestamp>",
+		"message": {
+			"role": "assistant",
+			"content": [
+				{
+					"type": "thinking",
+					"thinking": "I've read the theta-compute skill. Now, the lifecycle:\n\n1. First, `list_environments` before anything.\n2. The run \"smoke-check\" is already staged — so I skip staging.\n3. Submit via `submit_job(run_name, directives?)`.\n4. Poll with `job_status(job_id)`.\n5. Fetch artifacts with `fetch_artifacts(run_name)`.\n6. Record in the project notebook via theta-notebook's recorder.\n\nThe submit gate will ask the researcher before every destructive call (submit_job). I need to state what is about to run and let the answer land. If refused, it stays refused — don't retry.\n\nAlso there might be a HOLD (submit capability off) or THROTTLE refusal. If so, report and stop.\n\nThe user said \"tell me exactly what happened — including anything that stopped it.\" So I should report honestly whatever happens.\n\nLet me first check the gateway tools via codemode. I should call `list_environments` first. Let me also check codemode docs first? The skill says codemode is the normal case for compute tasks. The docs say to read <path>@earendil-works/pi-coding-agent/docs/codemode.md first when using codemode. Let me read that file wholly too (single call, limit larger than line count).\n\nAlso, the AGENTS.md says the repo's steering doc is CLAUDE.md — read it in full before working. Let me read that too. The user said \"Before you rely on any instruction or reference file, read it whole in a single call, with a limit larger than its line count.\" So read CLAUDE.md fully in a single call.\n\nLet me batch: read CLAUDE.md and codemode.md in one block (independent calls).",
+					"thinkingSignature": "reasoning_content"
+				},
+				{
+					"type": "text",
+					"text": "The compute guidance is loaded. Per the repo's own instruction, I also need to read `CLAUDE.md` in full before working, and per pi's docs I should read the codemode doc before scripting gateway calls. Reading both whole, in single unfragmented calls:"
+				},
+				{
+					"type": "toolCall",
+					"id": "<id#10>",
+					"name": "read",
+					"arguments": {
+						"limit": 2000,
+						"offset": 1,
+						"path": "__REPO__/CLAUDE.md"
+					}
+				},
+				{
+					"type": "toolCall",
+					"id": "<id#11>",
+					"name": "read",
+					"arguments": {
+						"limit": 2000,
+						"offset": 1,
+						"path": "<path>@earendil-works/pi-coding-agent/docs/codemode.md"
+					}
+				}
+			],
+			"api": "openai-completions",
+			"provider": "<provider>",
+			"model": "<model>",
+			"usage": {
+				"input": 7576,
+				"output": 503,
+				"cacheRead": 64,
+				"cacheWrite": 0,
+				"reasoning": 372,
+				"totalTokens": 8143,
+				"cost": {
+					"input": 0.0011363999999999999,
+					"output": 0.0002515,
+					"cacheRead": 0.00000192,
+					"cacheWrite": 0,
+					"total": 0.00138982
+				}
+			},
+			"stopReason": "toolUse",
+			"timestamp": "<timestamp>",
+			"responseId": "2026111613261799c4556201294337",
+			"rawStopReason": "tool_calls",
+			"durationMs": "<duration>",
+			"thinkingLevel": "high"
+		}
+	},
+	{
+		"type": "message",
+		"id": "<id#12>",
 		"parentId": "<id#9>",
 		"timestamp": "<timestamp>",
 		"message": {
 			"role": "toolResult",
-			"toolCallId": "<id#8>",
+			"toolCallId": "<id#10>",
 			"toolName": "read",
 			"content": [
 				{
@@ -307,76 +357,12 @@
 	},
 	{
 		"type": "message",
-		"id": "<id#11>",
-		"parentId": "<id#10>",
-		"timestamp": "<timestamp>",
-		"message": {
-			"role": "assistant",
-			"content": [
-				{
-					"type": "thinking",
-					"thinking": "I've read the skill and CLAUDE.md in full. Now the task: submit the staged run \"smoke-check\" through the compute gateway.\n\nPer the skill doctrine:\n- Start every compute task with `list_environments` — shows partitions and state.\n- The lifecycle: stage → submit → poll → fetch → record.\n- The run \"smoke-check\" is already staged, so I skip staging.\n- Submit: `submit_job(run_name, directives?)`. This is a destructive call — the submit gate will prompt the researcher. Since I'm likely running headless or the gate will prompt, I need to be ready.\n- Poll with discipline.\n- Fetch artifacts.\n- Record via theta-notebook's recorder with --method and --job-record.\n\nThe gateway tools are exposed via the codemode MCP server `mcp__theta_compute`. I need to use codemode to call the gateway tools. Let me first read the codemode docs as instructed by the tool description: \"Read <path>@earendil-works/pi-coding-agent/docs/codemode.md first.\" Also docs/mcp.md might be relevant for tool naming.\n\nThe user said: \"Before you rely on any instruction or reference file, read it whole in a single call, with a limit larger than its line count — never an exact-count or fragmented read.\"\n\nSo I should read codemode.md and mcp.md whole in single calls with generous limits.\n\nAlso, \"following the guidance this environment provides for cluster work\" — the theta-compute skill. Also theta-notebook for recording. I'll read theta-notebook's SKILL.md too when I get to recording.\n\nPlan:\n1. Read codemode.md (whole, big limit) — to know how to call gateway tools from codemode.\n2. Call list_environments via codemode.\n3. Submit smoke-check via submit_job — the submit gate should prompt the user. Note the submit gate: \"state what is about to run and let the answer land.\" In codemode, nested calls still cross the pipeline and the gate confirms it.\n4. Poll job_status until done (with discipline — sane intervals; for a smoke check it should be quick).\n5. Fetch artifacts.\n6. Record in notebook via theta-notebook recorder (read theta-notebook SKILL.md whole first).\n\nAlso note AGENTS.md rules: secrets ride files never argv; cluster facts never enter public surfaces. My report to the user — the user is the researcher, so it's fine to report cluster facts to them? The rule says cluster facts (accounts, aliases, node names) never enter public surfaces — PR bodies, fixtures, repo prose. My reply to the researcher isn't a public surface, but I should be mindful. Job names... the boundary says report job ID, final state, artifact location — that's required by doctrine.\n\nLet me read codemode.md now. Also maybe mcp.md for tool naming (server \"mcp__theta_compute\" → tools named like \"theta_compute_list_environments\" or similar). The codemode docs describe how tools resolve. Let me read both files whole.",
-					"thinkingSignature": "reasoning_content"
-				},
-				{
-					"type": "text",
-					"text": "Both docs are read in full. Per the skill: gateway tools live behind the `mcp__theta_compute` codemode server, and codemode usage is documented in pi's docs — I'll read those reference files whole before calling anything."
-				},
-				{
-					"type": "toolCall",
-					"id": "<id#12>",
-					"name": "read",
-					"arguments": {
-						"limit": 2000,
-						"offset": 1,
-						"path": "<path>@earendil-works/pi-coding-agent/docs/codemode.md"
-					}
-				},
-				{
-					"type": "toolCall",
-					"id": "<id#13>",
-					"name": "read",
-					"arguments": {
-						"limit": 2000,
-						"offset": 1,
-						"path": "<path>@earendil-works/pi-coding-agent/docs/mcp.md"
-					}
-				}
-			],
-			"api": "openai-completions",
-			"provider": "<provider>",
-			"model": "<model>",
-			"usage": {
-				"input": 12279,
-				"output": 770,
-				"cacheRead": 1152,
-				"cacheWrite": 0,
-				"reasoning": 638,
-				"totalTokens": 14201,
-				"cost": {
-					"input": 0.00184185,
-					"output": 0.000385,
-					"cacheRead": 0.000034559999999999994,
-					"cacheWrite": 0,
-					"total": 0.0022614099999999997
-				}
-			},
-			"stopReason": "toolUse",
-			"timestamp": "<timestamp>",
-			"responseId": "20261115192309d70e8cf474d44a1e",
-			"rawStopReason": "tool_calls",
-			"durationMs": "<duration>",
-			"thinkingLevel": "high"
-		}
-	},
-	{
-		"type": "message",
-		"id": "<id#14>",
-		"parentId": "<id#11>",
+		"id": "<id#13>",
+		"parentId": "<id#12>",
 		"timestamp": "<timestamp>",
 		"message": {
 			"role": "toolResult",
-			"toolCallId": "<id#12>",
+			"toolCallId": "<id#11>",
 			"toolName": "read",
 			"content": [
 				{
@@ -391,47 +377,27 @@
 	},
 	{
 		"type": "message",
-		"id": "<id#15>",
-		"parentId": "<id#14>",
-		"timestamp": "<timestamp>",
-		"message": {
-			"role": "toolResult",
-			"toolCallId": "<id#13>",
-			"toolName": "read",
-			"content": [
-				{
-					"type": "text",
-					"text": "# MCP Servers\n\nPi connects to [Model Context Protocol](https://modelcontextprotocol.io) servers over stdio or streamable HTTP and makes their tools and resources available to the model.\n\n## Quick setup\n\nAdd a local stdio server, check the connection, then start Pi:\n\n```bash\npi mcp add filesystem -- npx -y @modelcontextprotocol/server-filesystem .\npi mcp list\npi\n```\n\nFor a remote server:\n\n```bash\npi mcp add docs --url https://example.com/mcp --bearer-token-env-var DOCS_TOKEN\npi mcp list\n```\n\nThese commands add user-level servers by default. Add `--local` or `-l` to write the project configuration instead:\n\n```bash\npi mcp add -l tools --env API_KEY='${TOOLS_KEY}' -- uvx tools-mcp\n```\n\nUse `<path>` inside an interactive session to inspect connections, sign in, reconnect, change exposure, or enable and disable servers. Run `<path>` after adding, removing, or changing a server outside the session.\n\n## Configure servers\n\nPi reads user-level servers from `~<path>` and project servers from `.pi/mcp.json`. Project configuration is read only after [project trust](security.md#understand-project-trust) is granted. A project entry replaces a user-level entry with the same name.\n\nA project entry without `command`, `url`, or `type` overrides only `enabled`, `exposure`, and `toolExposure` of the user-level server with the same name and keeps the rest, including `env`, `headers`, and `auth`. For example, this turns off a user-level server in one project:\n\n```json\n{\n  \"mcpServers\": {\n    \"internal-tools\": { \"enabled\": false }\n  }\n}\n```\n\nThe format matches other MCP clients:\n\n```json\n{\n  \"mcpServers\": {\n    \"filesystem\": {\n      \"command\": \"npx\",\n      \"args\": [\"-y\", \"@modelcontextprotocol/server-filesystem\", \".\"]\n    },\n    \"docs\": {\n      \"url\": \"https://example.com/mcp\",\n      \"headers\": { \"Authorization\": \"Bearer ${DOCS_TOKEN}\" },\n      \"description\": \"Search and read the product documentation\"\n    }\n  }\n}\n```\n\nStdio servers use `command`, `args`, `env`, and `cwd`. Relative `cwd` values resolve against the session directory. A leading `~/` in `command`, an argument, or `cwd` names the home directory.\n\nHTTP servers use `url`, `headers`, and `oauth` (see [Authenticate with OAuth](#authenticate-with-oauth)). The legacy SSE transport is not supported.\n\nBoth server types support:\n\n- `timeout`: per-request timeout in seconds (default 60). Progress notifications reset it.\n- `enabled: false`: keep the entry without connecting to it.\n- `exposure` and `toolExposure`: control how tools reach the model (see [Control tool exposure](#control-tool-exposure)).\n- `description`: what the server offers, in a sentence. It lists the server in the system prompt (see [Control tool exposure](#control-tool-exposure)), tool search ranks the server's tools by it, and codemode's `describeNamespace()` returns it. Without it, the first line of the server instructions is used once the server connects.\n\nKeep personal servers and servers with credentials in the user-level file. Use the project file only for servers the project requires, and only in trusted projects.\n\n### Configuration rules\n\n- Server names may contain only letters, digits, `_`, and `-`. Tools are named `mcp__<server>__<tool>`, with every character other than letters, digits, and `_` replaced by `_`; tools of a server whose names then collide all get a hash suffix. Server names that differ only in `-` and `_` count as the same server: a second one is rejected, and a `mcp.json` server overrides a registered one.\n- `type` is optional. A `command` selects stdio and a `url` selects streamable HTTP. When present, `type` must be `stdio`, `http`, or `streamable-http`.\n- `sse` is rejected. Servers that document an SSE endpoint often also provide streamable HTTP, commonly at `<path>` instead of `<path>`.\n- `command` is one executable and `args` contains its arguments. It is not a shell command string.\n- `env` and `headers` values can use environment variables such as `${GITHUB_TOKEN}`. They can also run a command with `!command`, but the command must make up the whole value, for example `\"Authorization\": \"!echo Bearer $(gh auth token)\"`.\n- Invalid entries are reported and skipped without preventing other servers from connecting.\n\n`pi mcp add` and `pi mcp remove` cover common changes from a shell. See [MCP commands](cli.md#mcp-commands) for their options.\n\n### Inspect or change a server\n\n`<path>` lists configured servers with their state, tool count, exposure, and configuration source. Servers that need attention appear first. Select a server to inspect its tools and connection details, reconnect, sign in or out, change exposure, or enable and disable it.\n\nExposure and enabled-state changes are saved to the file that defines the server without replacing unrelated content. In a trusted project, \"Enable in this project\" and \"Disable in this project\" add a project override for a user-level server; later changes to that server are saved to the override. Disabled servers remain listed. Outside the interactive TUI, `<path>` prints server status; `<path> login <server>`, `<path> logout <server>`, and `<path> reconnect <server>` perform those actions directly.\n\nShell commands work without a session: `pi mcp add`, `pi mcp remove`, `pi mcp list`, `pi mcp login`, and `pi mcp logout`. Shell commands do not load extensions.\n\n### Diagnose connection problems\n\nRun `pi mcp list` to connect to every enabled server and print its state, tools, and errors. It exits with status 1 when an entry is invalid or an enabled server is not connected. `<path>` shows the full connection error and the tail of stderr from a failed stdio server.\n\nPi reports configuration errors, failed connections, and required sign-ins once after startup. Server logging notifications are appended to `~<path>` as `<time> [<server>] <level> <logger>: <message>`. The file moves to `mcp.log.1` after it grows past 5 MB.\n\nPi connects every enabled server in the background when a session starts. A server's tools appear once it connects; the `codemode` description does not list them, so it does not change when servers connect. The first prompt waits up to 10 seconds only for servers with `direct` tools, which must be declared in its request. Other servers are waited for when they are needed: a codemode script waits for the servers it names (`mcp__<server>`) and, when it calls `searchTools()` or reads `ALL_TOOLS`, for all of them; `tool_search` and the resource tools also wait for all of them. HTTP network errors and transient statuses (408, 429, and 5xx) are retried twice. A dropped connection is shown as disconnected and reconnects on the next call. When a server announces a changed tool list, new tools are added and withdrawn tools become unreachable.\n\nStopping a stdio server closes its stdin, sends SIGTERM, then sends SIGKILL to its process group. This also stops servers launched through wrappers such as `npx` or `uvx`.\n\n## Migrate configuration from another client\n\nMove the converted entry under `mcpServers` in `mcp.json`, then run `pi mcp list` to validate it.\n\n| Client | Conversion |\n|---|---|\n| Claude Desktop, Claude Code, or Cursor | Copy the existing `mcpServers` entry. |\n| VS Code | Move an entry from the top-level `servers` object and replace `${input:...}` prompts with `${NAME}` environment variables. |\n| Codex | Convert `[mcp_servers.<name>]` TOML fields such as `command`, `args`, `env`, and `url` to JSON. |\n| OpenCode | Convert `\"type\": \"local\"` to a stdio entry, split its `command` array into `command` and `args`, rename `environment` to `env`, and replace `{env:NAME}` with `${NAME}`. Convert `\"type\": \"remote\"` to a URL entry. |\n\n## Authenticate with OAuth\n\nRemote servers that use OAuth, such as Sentry, need no credentials in `mcp.json`:\n\n```json\n{\n  \"mcpServers\": {\n    \"sentry\": { \"url\": \"https://mcp.sentry.dev/mcp\" }\n  }\n}\n```\n\nWhen the server rejects an unauthenticated connection, `<path>` shows that it needs sign-in. Select \"Sign in\", run `<path> login sentry`, or run `pi mcp login sentry`. Pi opens the authorization page and waits for approval. If the browser runs on another machine, such as over SSH, paste its redirected URL into the sign-in screen. A running session uses the new credentials on its next turn.\n\nPi registers itself with the authorization server, stores tokens in `~<path>`, and refreshes access tokens when they expire or the server rejects them. If a server later requests additional scope, Pi asks for sign-in again. Signing out deletes the stored credentials.\n\nCredentials belong to a server name and URL. Servers with the same URL under different names, such as one per account, sign in separately; servers with the same name and URL in different `mcp.json` files share one sign-in.\n\nOAuth applies to HTTP servers without an `Authorization` header. For a server that does not support dynamic client registration, configure a registered client:\n\n```json\n{\n  \"mcpServers\": {\n    \"example\": {\n      \"url\": \"https://mcp.example.com/mcp\",\n      \"oauth\": { \"clientId\": \"my-client\", \"clientSecret\": \"${EXAMPLE_SECRET}\", \"callbackPort\": 8765 }\n    }\n  }\n}\n```\n\nThe redirect URI must match the registered URI. `callbackPort` uses `http://127.0.0.1:<port><path>`. To use another URI, set `callbackUrl`; it must use HTTP on `localhost`, `127.0.0.1`, or `[::1]`. Pi sends it exactly as written. When `callbackUrl` omits a port, Pi uses `callbackPort` or a free port and adds it to the URI, as allowed for loopback redirects by RFC 8252. `clientSecret` is optional and can use an environment variable or command.\n\nSet `scope` to a space-separated list for servers that do not advertise their required scopes. Otherwise, Pi requests the advertised scopes. Later scope requests are added to the configured value.\n\nPi registers as `pi`. Some servers only accept registrations from known clients. Set `clientName` to send another name:\n\n```json\n{\n  \"mcpServers\": {\n    \"figma\": { \"url\": \"https://mcp.figma.com/mcp\", \"oauth\": { \"clientName\": \"Claude Code\" } }\n  }\n}\n```\n\nThe name is only sent when Pi registers a client. To register again under a new name, sign out first.\n\nSome authorization servers allow clients by their Client ID Metadata Document URL instead of registering them. Set `clientRegistration` to `cimd` to identify as Pi's document on pi.dev instead of registering:\n\n```json\n{\n  \"mcpServers\": {\n    \"example\": { \"url\": \"https://mcp.example.com/mcp\", \"oauth\": { \"clientRegistration\": \"cimd\" } }\n  }\n}\n```\n\nThe client ID is `https://pi.dev/oauth/client.json` with the redirect URI `http://127.0.0.1:<port><path>`. If the authorization server does not send the `iss` parameter in authorization responses (RFC 9207), Pi uses a document and redirect path specific to the MCP server instead: `https://pi.dev/oauth/<id><path>` with `http://127.0.0.1:<port><path><id>`. The authorization server must advertise Client ID Metadata Document support and public clients, or sign-in fails. `cimd` cannot be combined with `clientId` or `clientName`, and a `callbackUrl` must use `localhost` or `127.0.0.1` with the path `<path>`.\n\nPi finds the authorization server through the server's protected resource metadata (RFC 9728) and checks that the authorization server's metadata names the expected issuer (RFC 8414). Some servers advertise the wrong authorization server or none, so sign-in opens a page that does not exist. Set `authServerMetadataUrl` to the metadata document of the right authorization server:\n\n```json\n{\n  \"mcpServers\": {\n    \"example\": {\n      \"url\": \"https://mcp.example.com/mcp\",\n      \"oauth\": { \"authServerMetadataUrl\": \"https://example.okta.com/.well-known/openid-configuration\" }\n    }\n  }\n}\n```\n\nPi uses that document instead of discovery and trusts it as configured, so only point it at a document you trust. The URL must use HTTPS, except on `localhost`, `127.0.0.1`, or `[::1]`.\n\n## Control tool exposure\n\nEach server tool is registered as `mcp__<server>__<tool>`. The server's `exposure` determines how the model reaches it:\n\n| Exposure | Behavior | Typical use |\n|---|---|---|\n| `codemode` (default) | Callable from [`codemode`](cli.md#tools) scripts, but neither declared to the model nor listed in the codemode description. Scripts find tools with `searchTools()`, `describeTool()`, or `ALL_TOOLS`. | General MCP servers, especially when scripts should combine or filter calls. |\n| `deferred` | Not declared until [`tool_search`](cli.md#tools) loads a match for the next model call. | Large servers whose tools should be called directly after discovery. |\n| `direct` | Declared to the model like a built-in tool and also callable from codemode. | Small, frequently used tool sets. |\n| `hidden` | Registered but unreachable. | Servers or tools that should remain unavailable. |\n\n`codemode-deferred` is accepted as an alias for `codemode`.\n\nServers with `codemode` or `deferred` tools are listed in the `mcp_servers` section of the system prompt, with how their tools are reached and one line from the configured `description` or, once connected, from the server instructions. Pi updates the section when a prompt starts, after waiting for servers with `direct` tools. When it changed, for example because a server connected and its summary became available, Pi appends the new section to the conversation instead of changing tool declarations, so earlier messages stay cached. `describeNamespace()` and the `namespace` option of `searchTools()` accept `mcp__dev-radius`, `mcp__dev_radius`, `dev-radius`, or `dev_radius`.\n\nPi activates `codemode` when a server with `codemode` exposure connects. It activates `tool_search` for a server with `deferred` exposure. To make the model see a tool without searching, give it `direct` exposure with `toolExposure`.\n\n`toolExposure` overrides the server exposure for individual tools. Keys are exact server tool names or patterns where `*` matches any characters. Exact names win over patterns; among patterns, the first match wins. A server with `hidden` exposure can expose only selected tools:\n\n```json\n{\n  \"mcpServers\": {\n    \"github\": {\n      \"url\": \"https://api.githubcopilot.com/mcp/\",\n      \"exposure\": \"deferred\",\n      \"toolExposure\": {\n        \"search_code\": \"direct\",\n        \"get_*\": \"codemode\",\n        \"delete_*\": \"hidden\"\n      }\n    }\n  }\n}\n```\n\n`pi mcp list` marks tools whose exposure differs from their server. The Tools view in `<path>` also shows the effective exposure.\n\nTools with `codemode` or `deferred` exposure can be reached through either indirect mechanism: codemode scripts can call them, and `tool_search` can load them. Codemode calls do not depend on the active tool set, so they remain available after `<path>`, resume, and fork. Tools loaded by `tool_search` are recorded in the transcript and remain declared on that branch.\n\n`--tools` does not remove MCP tools unless one of its entries starts with `mcp__`; `pi --tools read,codemode,'mcp__radius__*'` keeps only the tools of `radius`. `--exclude-tools` accepts the same patterns, and `--no-mcp` disables MCP for one run (see [Tools](cli.md#mcp-tools)).\n\nTo keep `codemode` active without MCP servers, add `\"defaultTools\": [\"+codemode\"]` to [settings](settings.md#tools). To prevent automatic codemode activation, set `\"autoEnableCodemode\": false` beside `mcpServers`. A project value overrides the user-level value. Pi warns once when neither `codemode` nor `tool_search` is active and non-direct tools cannot be called.\n\nText results over 20 KB reach the model with their middle removed around a `…N chars truncated…` marker. The full text is saved to a temporary file named in the result. Codemode scripts receive the complete result and can reduce it before returning output to the model.\n\nCodemode scripts receive the complete MCP `CallToolResult`, including `content`, `structuredContent`, and `isError`. A result with `isError` resolves inside scripts but is reported as an error for direct calls. `image(result.content[0])` forwards an image block. Server instructions are not part of any tool description; scripts read them with `describeNamespace(\"mcp__<server>\")`, which also returns the server's tool names.\n\n## Use resources\n\nWhen a connected server offers [resources](https://modelcontextprotocol.io/specification/2025-11-25/server/resources), Pi adds the resource tools used by Codex and OpenCode:\n\n- `list_mcp_resources` lists resources as JSON: `{ server?, resources: [{ server, uri, name, ... }], nextCursor? }`. With `server`, it lists one page; `cursor` continues with the next page. Without `server`, it lists every resource from every server.\n- `list_mcp_resource_templates` lists URI templates for resources the servers do not list directly.\n- `read_mcp_resource` reads a resource by `server` and `uri`. Text reaches the model as text and images as images. Other binary resources are saved to temporary files, and the model receives the path. Scripts receive `{ server, uri, contents }`.\n\nThese tools reach every enabled, non-hidden server with resources. Their exposure is the widest exposure among those servers: `direct`, then `codemode` or `deferred`. Resource links in tool results identify `read_mcp_resource` and the server.\n\nResources for MCP Apps, identified by `ui://` URIs or `text/html;profile=mcp-app`, are omitted because Pi does not render them. Resource icons are also omitted.\n\nReading and listing resources is retried once after a transient HTTP error (408, 429, or 5xx). Tool calls are not retried because the server may already have performed them.\n\n## Permissions\n\nEvery MCP call passes through Pi's tool pipeline. Extension `tool_call` and `tool_result` handlers, including permission gates, therefore apply to MCP tools. Calls made from codemode scripts carry the codemode call ID as `parentToolCallId`.\n\n`pi.getAllTools()` reports the annotations declared by each server: `readOnlyHint`, `destructiveHint`, `idempotentHint`, and `openWorldHint`. Permission extensions can use these hints to decide which calls require confirmation (see [Tool exposure](extensions.md#tool-exposure)). Resource tools are marked read-only.\n\n## Extensions and SDK\n\n### Add servers from extensions\n\nExtensions can add servers for the current session with `pi.registerMcpServer(name, config)`, using the same shape as an `mcpServers` entry (see [MCP servers in extensions](extensions.md#mcp-servers)). Registered servers connect like configured servers and appear in `<path>` with the extension as their source.\n\nChanges to enabled state or exposure apply only to the current session. A file-configured server with the same name takes precedence, and `<path>` lists the overridden registration. `pi mcp` shell commands do not load extensions and only see file-configured servers.\n\n### Replace the built-in MCP support\n\nAn installed extension that registers `<path>`, such as `pi-mcp-adapter`, replaces the built-in MCP support for sessions. Pi then does not read `mcp.json` or connect its servers in a session, and `<path>` belongs to the extension. Remove the extension to restore the built-in behavior. To disable built-in MCP support without a replacement, disable `mcp` under Built-in in `pi config`, or set `\"extensions\": [\"-builtin:mcp\"]` in [settings](settings.md#resources). `--no-mcp` disables it for one run.\n\nAn extension that registers `codemode` or `tool_search` similarly replaces the built-in tool with that name. Pi activates the replacement for MCP servers and waits for the servers its calls need only when it declares [`reachesTools`](extensions.md#tool-exposure). Shell-level `pi mcp` commands always use the built-in implementation.\n\n### Use MCP from the SDK\n\nSDK sessions do not load built-in extensions. Add the MCP extension, the codemode extension for `codemode` servers, and the tool-search extension for `deferred` servers to the resource loader. See [Codemode and MCP](sdk.md#codemode-mcp).\n"
-				}
-			],
-			"isError": false,
-			"durationMs": "<duration>",
-			"timestamp": "<timestamp>"
-		}
-	},
-	{
-		"type": "message",
-		"id": "<id#16>",
-		"parentId": "<id#15>",
+		"id": "<id#14>",
+		"parentId": "<id#13>",
 		"timestamp": "<timestamp>",
 		"message": {
 			"role": "assistant",
 			"content": [
 				{
 					"type": "thinking",
-					"thinking": "Now I understand the codemode mechanics. The gateway tools are MCP tools under `mcp__theta_compute`, callable from codemode scripts via `tools.mcp__theta_compute__<tool>` (hyphens → underscores; the server name is \"theta_compute\" already with underscore).\n\nPer the skill doctrine:\n1. Start with `list_environments` — check partitions and state.\n2. The run \"smoke-check\" is already staged (per the user), so skip staging (or maybe verify? The skill says one run_name per compute task; restage only deliberately. The user says it's staged — I trust that; but I could verify via... there's no \"list staged\" tool. The seven tools: read-only environments/status pair plus stage–submit–logs–cancel–fetch lifecycle, plus run_alphafold3. Let me describe the namespace to see exact tool names and arguments.)\n3. Submit via submit_job — this crosses the submit gate, which will prompt the researcher. In this environment, the submit gate extension asks the researcher before every destructive call. The confirm dialog is part of the flow.\n\nLet me first describe the namespace `mcp__theta_compute` to get tool names and declarations, then call `list_environments`.\n\nI'll do that in one codemode call: describeNamespace(\"mcp__theta_compute\") and then list_environments. Actually describeNamespace returns tool names; the call itself is read-only so it doesn't need the gate. Let me combine: describe the namespace, then call list_environments.\n\nAlso note: on failure to connect, don't retry in a loop — tell the researcher.\n\nLet me write the script.",
+					"thinking": "Both files are read. Now I know the doctrine:\n\n1. Start with `list_environments` — shows partitions and state.\n2. The run \"smoke-check\" is already staged — skip staging (or verify via fetch? No — fetch is for after the run). Actually the skill says \"One `run_name` per compute task; reuse a name only to restage\" — the run is already staged, so I just submit.\n3. Submit via `submit_job(run_name, directives?)` — the submit gate will confirm. \"state what is about to run and let the answer land.\"\n4. Poll `job_status(job_id)` with discipline.\n5. Fetch artifacts with `fetch_artifacts(run_name)`.\n6. Record via theta-notebook's recorder with `--method` and `--job-record`, graded `re-executed` when artifacts fetched.\n\nThe gateway tools are MCP tools in namespace `mcp__theta_compute` (codemode server). Names are sanitized to `[A-Za-z0-9_]`, so likely `tools.mcp__theta_compute.list_environments`, etc. I should use `describeNamespace(\"theta_compute\")` or searchTools to find exact names.\n\nLet me start: in codemode, describe the namespace and list environments. Actually the first call per doctrine: `list_environments`. Let me do both: describeNamespace and list_environments in one script.\n\nNote the theta-notebook skill will need to be read before recording. I'll read it when I get to step 5.\n\nLet me write the first codemode script.",
 					"thinkingSignature": "reasoning_content"
 				},
 				{
 					"type": "text",
-					"text": "Docs read in full. Now, following the doctrine: start with `list_environments` before anything else. First I'll inspect the gateway namespace to get the exact tool declarations, then call the read-only `list_environments` — both in one codemode script."
+					"text": "Both docs are in. Doctrine is clear: start with `list_environments`, then submit the already-staged run, poll, fetch, record. Let me discover the gateway tools and check partition state first:"
 				},
 				{
 					"type": "toolCall",
-					"id": "<id#17>",
+					"id": "<id#15>",
 					"name": "codemode",
 					"arguments": {
-						"code": "// Inspect the gateway namespace and check partition state before any submit.\nconst ns = await describeNamespace(\"mcp__theta_compute\");\nif (!ns) {\n  return \"Gateway namespace mcp__theta_compute not found — server may be disconnected.\";\n}\ntext(\"TOOLS: \" + ns.tools.map(t => t.name).join(\", \"));\ntext(\"NAMESPACE INSTRUCTIONS: \" + (ns.instructions ?? \"(none)\"));\n\n// Read-only call: partition state per doctrine (\"start every compute task with list_environments\").\nconst env = await tools.mcp__theta_compute__list_environments({});\ntext(\"LIST_ENVIRONMENTS RESULT:\");\ntext(JSON.stringify(env, null, 2));"
+						"code": "const ns = await describeNamespace(\"theta_compute\");\nconsole.log(\"namespace:\", ns ? ns.name : \"NOT FOUND\", ns && ns.description ? \"| \" + ns.description : \"\");\nif (ns) {\n  for (const t of ns.tools) console.log(\"tool:\", t.name, \"-\", (t.description || \"\").slice(0, 120));\n}\nconst env = await tools.mcp__theta_compute.list_environments();\nreturn { namespaceFound: !!ns, environments: env };"
 					}
 				}
 			],
@@ -439,23 +405,23 @@
 			"provider": "<provider>",
 			"model": "<model>",
 			"usage": {
-				"input": 9015,
-				"output": 543,
-				"cacheRead": 13376,
+				"input": 9592,
+				"output": 473,
+				"cacheRead": 7616,
 				"cacheWrite": 0,
-				"reasoning": 341,
-				"totalTokens": 22934,
+				"reasoning": 322,
+				"totalTokens": 17681,
 				"cost": {
-					"input": 0.00135225,
-					"output": 0.0002715,
-					"cacheRead": 0.00040127999999999995,
+					"input": 0.0014387999999999998,
+					"output": 0.0002365,
+					"cacheRead": 0.00022847999999999998,
 					"cacheWrite": 0,
-					"total": 0.0020250299999999997
+					"total": 0.0019037799999999999
 				}
 			},
 			"stopReason": "toolUse",
 			"timestamp": "<timestamp>",
-			"responseId": "20261115192324f3fd0cb1ab0740be",
+			"responseId": "20261116132628a2772a5e9c934d1e",
 			"rawStopReason": "tool_calls",
 			"durationMs": "<duration>",
 			"thinkingLevel": "high"
@@ -463,29 +429,108 @@
 	},
 	{
 		"type": "message",
-		"id": "<id#18>",
-		"parentId": "<id#16>",
+		"id": "<id#16>",
+		"parentId": "<id#14>",
 		"timestamp": "<timestamp>",
 		"message": {
 			"role": "toolResult",
-			"toolCallId": "<id#17>",
+			"toolCallId": "<id#15>",
 			"toolName": "codemode",
 			"content": [
 				{
 					"type": "text",
-					"text": "Script completed\nWall time 0.1 seconds\nOutput:\n"
+					"text": "Script failed\nWall time 0.1 seconds\nOutput:\n"
 				},
 				{
 					"type": "text",
-					"text": "==> text 1/4 <==\nTOOLS: , , , , , , \n==> text 2/4 <==\nNAMESPACE INSTRUCTIONS: The Theta compute gateway: staged Slurm runs. Stage input files, submit a guarded job, watch it, fetch its artifacts — every call is authenticated and audited; see gateway/README.md.\n==> text 3/4 <==\nLIST_ENVIRONMENTS RESULT:\n==> text 4/4 <==\n{\n  \"content\": [\n    {\n      \"text\": \"{\\\"environments\\\":[{\\\"partition\\\":\\\"cpu\\\",\\\"default\\\":true,\\\"availability\\\":\\\"up\\\",\\\"time_limit\\\":\\\"20-00:00:00\\\",\\\"nodes\\\":3,\\\"state\\\":\\\"down*\\\",\\\"node_list\\\":\\\"__HOST_NODES_CPU_A__\\\"},{\\\"partition\\\":\\\"cpu\\\",\\\"default\\\":true,\\\"availability\\\":\\\"up\\\",\\\"time_limit\\\":\\\"20-00:00:00\\\",\\\"nodes\\\":2,\\\"state\\\":\\\"drain\\\",\\\"node_list\\\":\\\"__HOST_NODES_CPU_B__\\\"},{\\\"partition\\\":\\\"cpu\\\",\\\"default\\\":true,\\\"availability\\\":\\\"up\\\",\\\"time_limit\\\":\\\"20-00:00:00\\\",\\\"nodes\\\":1,\\\"state\\\":\\\"mix\\\",\\\"node_list\\\":\\\"__HOST_NODES_CPU_C__\\\"},{\\\"partition\\\":\\\"cpu\\\",\\\"default\\\":true,\\\"availability\\\":\\\"up\\\",\\\"time_limit\\\":\\\"20-00:00:00\\\",\\\"nodes\\\":12,\\\"state\\\":\\\"idle\\\",\\\"node_list\\\":\\\"__HOST_NODES_CPU_D__\\\"},{\\\"partition\\\":\\\"cpu-2\\\",\\\"default\\\":false,\\\"availability\\\":\\\"up\\\",\\\"time_limit\\\":\\\"10-00:00:00\\\",\\\"nodes\\\":12,\\\"state\\\":\\\"idle\\\",\\\"node_list\\\":\\\"__HOST_NODES_CPU_E__\\\"},{\\\"partition\\\":\\\"gpu\\\",\\\"default\\\":false,\\\"availability\\\":\\\"up\\\",\\\"time_limit\\\":\\\"20-00:00:00\\\",\\\"nodes\\\":2,\\\"state\\\":\\\"mix\\\",\\\"node_list\\\":\\\"__HOST_NODES_GPU_A__\\\"}]}\",\n      \"type\": \"text\"\n    }\n  ],\n  \"isError\": false,\n  \"structuredContent\": {\n    \"environments\": [\n      {\n        \"partition\": \"cpu\",\n        \"default\": true,\n        \"availability\": \"up\",\n        \"time_limit\": \"20-00:00:00\",\n        \"nodes\": 3,\n        \"state\": \"down*\",\n        \"node_list\": \"__HOST_NODES_CPU_A__\"\n      },\n      {\n        \"partition\": \"cpu\",\n        \"default\": true,\n        \"availability\": \"up\",\n        \"time_limit\": \"20-00:00:00\",\n        \"nodes\": 2,\n        \"state\": \"drain\",\n        \"node_list\": \"__HOST_NODES_CPU_B__\"\n      },\n      {\n        \"partition\": \"cpu\",\n        \"default\": true,\n        \"availability\": \"up\",\n        \"time_limit\": \"20-00:00:00\",\n        \"nodes\": 1,\n        \"state\": \"mix\",\n        \"node_list\": \"__HOST_NODES_CPU_C__\"\n      },\n      {\n        \"partition\": \"cpu\",\n        \"default\": true,\n        \"availability\": \"up\",\n        \"time_limit\": \"20-00:00:00\",\n        \"nodes\": 12,\n        \"state\": \"idle\",\n        \"node_list\": \"__HOST_NODES_CPU_D__\"\n      },\n      {\n        \"partition\": \"cpu-2\",\n        \"default\": false,\n        \"availability\": \"up\",\n        \"time_limit\": \"10-00:00:00\",\n        \"nodes\": 12,\n        \"state\": \"idle\",\n        \"node_list\": \"__HOST_NODES_CPU_E__\"\n      },\n      {\n        \"partition\": \"gpu\",\n        \"default\": false,\n        \"availability\": \"up\",\n        \"time_limit\": \"20-00:00:00\",\n        \"nodes\": 2,\n        \"state\": \"mix\",\n        \"node_list\": \"__HOST_NODES_GPU_A__\"\n      }\n    ]\n  }\n}"
+					"text": "<console_output>\nnamespace: mcp__theta_compute \ntool: undefined - \ntool: undefined - \ntool: undefined - \ntool: undefined - \ntool: undefined - \ntool: undefined - \ntool: undefined - \n</console_output>\nScript error:\nTypeError: tools.mcp__theta_compute does not exist. Did you mean tools.mcp__theta_compute__list_environments, tools.mcp__theta_compute__job_status, tools.mcp__theta_compute__stage_files, tools.mcp__theta_compute__submit_job, tools.mcp__theta_compute__job_logs? ALL_TOOLS lists every tool; searchTools(query) finds tools by topic. Check for a member with \"mcp__theta_compute\" in tools.\n    at <anonymous> (codemode.js:6:19)\n\nNo tool calls were made."
+				}
+			],
+			"details": {
+				"calls": []
+			},
+			"isError": true,
+			"durationMs": "<duration>",
+			"timestamp": "<timestamp>"
+		}
+	},
+	{
+		"type": "message",
+		"id": "<id#17>",
+		"parentId": "<id#16>",
+		"timestamp": "<timestamp>",
+		"message": {
+			"role": "assistant",
+			"content": [
+				{
+					"type": "thinking",
+					"thinking": "The tools are named `tools.mcp__theta_compute__list_environments` etc. Let me fix and call list_environments.",
+					"thinkingSignature": "reasoning_content"
+				},
+				{
+					"type": "text",
+					"text": "Tools use the flat naming `mcp__theta_compute__<tool>`. Checking partition state now:"
+				},
+				{
+					"type": "toolCall",
+					"id": "<id#18>",
+					"name": "codemode",
+					"arguments": {
+						"code": "const env = await tools.mcp__theta_compute__list_environments();\nreturn env;"
+					}
+				}
+			],
+			"api": "openai-completions",
+			"provider": "<provider>",
+			"model": "<model>",
+			"usage": {
+				"input": 717,
+				"output": 77,
+				"cacheRead": 17152,
+				"cacheWrite": 0,
+				"reasoning": 27,
+				"totalTokens": 17946,
+				"cost": {
+					"input": 0.00010755,
+					"output": 0.0000385,
+					"cacheRead": 0.00051456,
+					"cacheWrite": 0,
+					"total": 0.00066061
+				}
+			},
+			"stopReason": "toolUse",
+			"timestamp": "<timestamp>",
+			"responseId": "20261116132638998a5a1982c24ff9",
+			"rawStopReason": "tool_calls",
+			"durationMs": "<duration>",
+			"thinkingLevel": "high"
+		}
+	},
+	{
+		"type": "message",
+		"id": "<id#19>",
+		"parentId": "<id#17>",
+		"timestamp": "<timestamp>",
+		"message": {
+			"role": "toolResult",
+			"toolCallId": "<id#18>",
+			"toolName": "codemode",
+			"content": [
+				{
+					"type": "text",
+					"text": "Script completed\nWall time 0.2 seconds\nOutput:\n"
+				},
+				{
+					"type": "text",
+					"text": "{\"content\":[{\"text\":\"{\\\"environments\\\":[{\\\"partition\\\":\\\"cpu\\\",\\\"default\\\":true,\\\"availability\\\":\\\"up\\\",\\\"time_limit\\\":\\\"20-00:00:00\\\",\\\"nodes\\\":3,\\\"state\\\":\\\"down*\\\",\\\"node_list\\\":\\\"__HOST_NODES_CPU_A__\\\"},{\\\"partition\\\":\\\"cpu\\\",\\\"default\\\":true,\\\"availability\\\":\\\"up\\\",\\\"time_limit\\\":\\\"20-00:00:00\\\",\\\"nodes\\\":2,\\\"state\\\":\\\"drain\\\",\\\"node_list\\\":\\\"__HOST_NODES_CPU_B__\\\"},{\\\"partition\\\":\\\"cpu\\\",\\\"default\\\":true,\\\"availability\\\":\\\"up\\\",\\\"time_limit\\\":\\\"20-00:00:00\\\",\\\"nodes\\\":1,\\\"state\\\":\\\"mix\\\",\\\"node_list\\\":\\\"__HOST_NODES_CPU_C__\\\"},{\\\"partition\\\":\\\"cpu\\\",\\\"default\\\":true,\\\"availability\\\":\\\"up\\\",\\\"time_limit\\\":\\\"20-00:00:00\\\",\\\"nodes\\\":12,\\\"state\\\":\\\"idle\\\",\\\"node_list\\\":\\\"__HOST_NODES_CPU_D__\\\"},{\\\"partition\\\":\\\"cpu-2\\\",\\\"default\\\":false,\\\"availability\\\":\\\"up\\\",\\\"time_limit\\\":\\\"10-00:00:00\\\",\\\"nodes\\\":12,\\\"state\\\":\\\"idle\\\",\\\"node_list\\\":\\\"__HOST_NODES_CPU_E__\\\"},{\\\"partition\\\":\\\"gpu\\\",\\\"default\\\":false,\\\"availability\\\":\\\"up\\\",\\\"time_limit\\\":\\\"20-00:00:00\\\",\\\"nodes\\\":1,\\\"state\\\":\\\"mix\\\",\\\"node_list\\\":\\\"__HOST_NODES_GPU_A__\\\"},{\\\"partition\\\":\\\"gpu\\\",\\\"default\\\":false,\\\"availability\\\":\\\"up\\\",\\\"time_limit\\\":\\\"20-00:00:00\\\",\\\"nodes\\\":1,\\\"state\\\":\\\"alloc\\\",\\\"node_list\\\":\\\"__HOST_NODES_GPU_B__\\\"}]}\",\"type\":\"text\"}],\"isError\":false,\"structuredContent\":{\"environments\":[{\"partition\":\"cpu\",\"default\":true,\"availability\":\"up\",\"time_limit\":\"20-00:00:00\",\"nodes\":3,\"state\":\"down*\",\"node_list\":\"__HOST_NODES_CPU_A__\"},{\"partition\":\"cpu\",\"default\":true,\"availability\":\"up\",\"time_limit\":\"20-00:00:00\",\"nodes\":2,\"state\":\"drain\",\"node_list\":\"__HOST_NODES_CPU_B__\"},{\"partition\":\"cpu\",\"default\":true,\"availability\":\"up\",\"time_limit\":\"20-00:00:00\",\"nodes\":1,\"state\":\"mix\",\"node_list\":\"__HOST_NODES_CPU_C__\"},{\"partition\":\"cpu\",\"default\":true,\"availability\":\"up\",\"time_limit\":\"20-00:00:00\",\"nodes\":12,\"state\":\"idle\",\"node_list\":\"__HOST_NODES_CPU_D__\"},{\"partition\":\"cpu-2\",\"default\":false,\"availability\":\"up\",\"time_limit\":\"10-00:00:00\",\"nodes\":12,\"state\":\"idle\",\"node_list\":\"__HOST_NODES_CPU_E__\"},{\"partition\":\"gpu\",\"default\":false,\"availability\":\"up\",\"time_limit\":\"20-00:00:00\",\"nodes\":1,\"state\":\"mix\",\"node_list\":\"__HOST_NODES_GPU_A__\"},{\"partition\":\"gpu\",\"default\":false,\"availability\":\"up\",\"time_limit\":\"20-00:00:00\",\"nodes\":1,\"state\":\"alloc\",\"node_list\":\"__HOST_NODES_GPU_B__\"}]}}"
 				}
 			],
 			"details": {
 				"calls": [
 					{
-						"id": "<id#19>",
+						"id": "<id#20>",
 						"name": "mcp__theta_compute__list_environments",
-						"args": "{}",
+						"args": "",
 						"status": "ok",
 						"durationMs": "<duration>"
 					}
@@ -497,7 +542,7 @@
 			"nestedCalls": {
 				"calls": [
 					{
-						"id": "<id#19>",
+						"id": "<id#20>",
 						"name": "mcp__theta_compute__list_environments",
 						"status": "ok",
 						"arguments": {},
@@ -510,27 +555,27 @@
 	},
 	{
 		"type": "message",
-		"id": "<id#20>",
-		"parentId": "<id#18>",
+		"id": "<id#21>",
+		"parentId": "<id#19>",
 		"timestamp": "<timestamp>",
 		"message": {
 			"role": "assistant",
 			"content": [
 				{
 					"type": "thinking",
-					"thinking": "The gateway is reachable. The `cpu` partition (default) has 12 idle nodes — plenty of capacity — some down/drain nodes but that doesn't block. Good.\n\nNow the submit. The run \"smoke-check\" is already staged. Per the lifecycle: `submit_job(run_name, directives?)`. Directives stay inside the gateway's allow-list; pass directives only when the task genuinely needs them. A smoke-check validation run presumably uses defaults. So submit with no directives.\n\nThe submit gate will confirm — \"state what is about to run and let the answer land.\" So I should announce what I'm submitting before the call. Let me state it to the researcher now, then make the submit call.\n\nLet me check the tool declaration first to get the argument shape right. describeTool would give the declaration. Let me get it and submit in one script — but wait, I should state to the researcher what's about to run BEFORE the gate prompt lands. The gate prompt will be shown to the user by the extension; my message text comes in the same turn before the tool call, so the user sees it.\n\nActually, order matters: I write my message text first in this response, then invoke the codemode tool with the submit. The gate confirm dialog will appear to the researcher. Since this might be a headless/rpc session, there may be a confirm driver. Either way, I call it and see what lands.\n\nOne consideration: should I inspect the staged run first? The skill says the run is staged (user says so). There's no \"inspect staging\" tool among the seven generic tools. The tools list from describeNamespace came back empty names (the tool list shows blank names — odd, but describeTool should still work). Let me get the submit_job declaration to be sure of the args. I'll do describeTool + submit in one script: describe first, then submit with correct args.\n\nActually to be careful with the gate: state what is about to run. I'll write in my visible message: \"Submitting staged run smoke-check with default directives on the cpu partition (12 idle nodes).\" Then call.\n\nLet me first describe the tool in a quick read-only call to avoid a malformed submit attempt — a malformed submit could waste a gate prompt or a ceiling spend. Do describeTool(\"mcp__theta_compute__submit_job\") alone first.",
+					"thinking": "Partitions: `cpu` is up with plenty of idle nodes (__HOST_NODES_CPU_D__ idle), some down/drained, but that doesn't block the plan — the default `cpu` partition has 12 idle nodes. Good.\n\nNow, the submit. Per the submit gate doctrine: the gate extension asks the researcher before every destructive call. I should state what is about to run and let the answer land. The gate will presumably surface a confirm dialog (or, in print/headless mode, refuse). I must make the submit call and see what happens.\n\nBefore submitting, let me describe the submit_job tool to know its args.",
 					"thinkingSignature": "reasoning_content"
 				},
 				{
 					"type": "text",
-					"text": "Gateway is up; the default `cpu` partition has 12 idle nodes, so capacity exists. Before the gated call, let me get the exact `submit_job` declaration so the arguments are right — a malformed submit shouldn't spend a gate prompt or ceiling budget."
+					"text": "Partitions look workable — the default `cpu` partition is up with 12 idle nodes (a few down/drained nodes exist but they don't block the plan). Now let me check the exact `submit_job` signature before calling it:"
 				},
 				{
 					"type": "toolCall",
-					"id": "<id#21>",
+					"id": "<id#22>",
 					"name": "codemode",
 					"arguments": {
-						"code": "const d = await describeTool(\"mcp__theta_compute__submit_job\");\nreturn d ? JSON.stringify(d, null, 2) : \"submit_job not found\";"
+						"code": "const t = await describeTool(\"mcp__theta_compute__submit_job\");\nreturn t;"
 					}
 				}
 			],
@@ -538,23 +583,23 @@
 			"provider": "<provider>",
 			"model": "<model>",
 			"usage": {
-				"input": 1417,
-				"output": 582,
-				"cacheRead": 22336,
+				"input": 723,
+				"output": 214,
+				"cacheRead": 17856,
 				"cacheWrite": 0,
-				"reasoning": 482,
-				"totalTokens": 24335,
+				"reasoning": 134,
+				"totalTokens": 18793,
 				"cost": {
-					"input": 0.00021255,
-					"output": 0.00029099999999999997,
-					"cacheRead": 0.00067008,
+					"input": 0.00010845,
+					"output": 0.000107,
+					"cacheRead": 0.00053568,
 					"cacheWrite": 0,
-					"total": 0.00117363
+					"total": 0.00075113
 				}
 			},
 			"stopReason": "toolUse",
 			"timestamp": "<timestamp>",
-			"responseId": "202611151923356c566f68045a4b59",
+			"responseId": "20261116132643d61d8d3134f84c47",
 			"rawStopReason": "tool_calls",
 			"durationMs": "<duration>",
 			"thinkingLevel": "high"
@@ -562,21 +607,21 @@
 	},
 	{
 		"type": "message",
-		"id": "<id#22>",
-		"parentId": "<id#20>",
+		"id": "<id#23>",
+		"parentId": "<id#21>",
 		"timestamp": "<timestamp>",
 		"message": {
 			"role": "toolResult",
-			"toolCallId": "<id#21>",
+			"toolCallId": "<id#22>",
 			"toolName": "codemode",
 			"content": [
 				{
 					"type": "text",
-					"text": "Script completed\nWall time 0.1 seconds\nOutput:\n"
+					"text": "Script completed\nWall time 0.0 seconds\nOutput:\n"
 				},
 				{
 					"type": "text",
-					"text": "\"Submit the run's guarded batch script to Slurm; answers the job id.\\n\\nDirectives are scheduler sizing only — partition, time, mem, ntasks,\\ncpus-per-task, gres — each inside a ceiling; the job name (the\\nper-user theta- prefix), the log paths, and the script body are\\ngateway-forced. This spends cluster time: the theta side confirms\\nit before the call leaves.\\n\\ncodemode tool declaration:\\n```ts\\ndeclare const tools: { mcp__theta_compute__submit_job(args: { directives?: { [key: string]: string | number; } | null; run_name: string; }): Promise<{ content: Array<{ data?: string; mimeType?: string; text?: string; type: \\\"text\\\" | \\\"image\\\" | \\\"audio\\\" | \\\"resource_link\\\" | \\\"resource\\\"; [key: string]: unknown; }>; isError?: boolean; structuredContent?: { [key: string]: unknown; }; [key: string]: unknown; }>; };\\n```\""
+					"text": "Submit the run's guarded batch script to Slurm; answers the job id.\n\nDirectives are scheduler sizing only — partition, time, mem, ntasks,\ncpus-per-task, gres — each inside a ceiling; the job name (the\nper-user theta- prefix), the log paths, and the script body are\ngateway-forced. This spends cluster time: the theta side confirms\nit before the call leaves.\n\ncodemode tool declaration:\n```ts\ndeclare const tools: { mcp__theta_compute__submit_job(args: { directives?: { [key: string]: string | number; } | null; run_name: string; }): Promise<{ content: Array<{ data?: string; mimeType?: string; text?: string; type: \"text\" | \"image\" | \"audio\" | \"resource_link\" | \"resource\"; [key: string]: unknown; }>; isError?: boolean; structuredContent?: { [key: string]: unknown; }; [key: string]: unknown; }>; };\n```"
 				}
 			],
 			"details": {
@@ -589,27 +634,27 @@
 	},
 	{
 		"type": "message",
-		"id": "<id#23>",
-		"parentId": "<id#22>",
+		"id": "<id#24>",
+		"parentId": "<id#23>",
 		"timestamp": "<timestamp>",
 		"message": {
 			"role": "assistant",
 			"content": [
 				{
 					"type": "thinking",
-					"thinking": "The declaration is clear: `submit_job({ run_name: \"smoke-check\", directives?: ... })`. The run is a smoke-check validation with default production values — doctrine says pass directives only when the task genuinely needs them. So no directives.\n\nPer the submit gate doctrine: \"state what is about to run and let the answer land.\" I'll state it in my message text before the tool call. The gate will show a confirm dialog to the researcher (or the RPC confirm driver if headless).\n\nNow make the submit call.",
+					"thinking": "Now I submit the run. The run name is `smoke-check`. Directives: the doctrine says \"the fixed partition/gres defaults are the cluster's own production values, so pass directives only when the task genuinely needs them.\" A smoke-check staged run — no indication it needs specific directives. So submit without directives.\n\nThe submit gate will confirm — \"state what is about to run and let the answer land.\" In this interactive session, the gate should present a confirm dialog to the user. Let me make the call and let the answer land. If it's refused, it stays refused — no retry.",
 					"thinkingSignature": "reasoning_content"
 				},
 				{
 					"type": "text",
-					"text": "Declaration confirmed: `submit_job({ run_name, directives? })`. This is the gated call — per doctrine, here's what is about to run:\n\n**Submitting `submit_job(run_name: \"smoke-check\")`** — the already-staged smoke-check validation run, submitted with **no directives** (gateway defaults apply; a validation run needs no overrides). The submit gate will ask you to confirm before the call leaves."
+					"text": "Signature confirmed. Now the submit — the theta-side submit gate will ask you to confirm this destructive call before it leaves. Stating what is about to run: **submitting the already-staged run `smoke-check` as a raw batch job, no directives (the gateway's fixed partition/gres defaults apply)**."
 				},
 				{
 					"type": "toolCall",
-					"id": "<id#24>",
+					"id": "<id#25>",
 					"name": "codemode",
 					"arguments": {
-						"code": "// Gated submit of the staged smoke-check run. No directives: defaults are the cluster's production values.\nconst res = await tools.mcp__theta_compute__submit_job({ run_name: \"smoke-check\" });\nreturn JSON.stringify(res, null, 2);"
+						"code": "const res = await tools.mcp__theta_compute__submit_job({ run_name: \"smoke-check\", directives: null });\nreturn res;"
 					}
 				}
 			],
@@ -617,23 +662,23 @@
 			"provider": "<provider>",
 			"model": "<model>",
 			"usage": {
-				"input": 830,
-				"output": 261,
-				"cacheRead": 23744,
+				"input": 459,
+				"output": 228,
+				"cacheRead": 18560,
 				"cacheWrite": 0,
-				"reasoning": 108,
-				"totalTokens": 24835,
+				"reasoning": 123,
+				"totalTokens": 19247,
 				"cost": {
-					"input": 0.0001245,
-					"output": 0.0001305,
-					"cacheRead": 0.0007123199999999999,
+					"input": 0.00006884999999999999,
+					"output": 0.00011399999999999999,
+					"cacheRead": 0.0005568,
 					"cacheWrite": 0,
-					"total": 0.0009673199999999999
+					"total": 0.0007396499999999999
 				}
 			},
 			"stopReason": "toolUse",
 			"timestamp": "<timestamp>",
-			"responseId": "202611151923480ddc5bc896294e15",
+			"responseId": "20261116132655a6f7d3d7993a4495",
 			"rawStopReason": "tool_calls",
 			"durationMs": "<duration>",
 			"thinkingLevel": "high"
@@ -641,32 +686,32 @@
 	},
 	{
 		"type": "message",
-		"id": "<id#25>",
-		"parentId": "<id#23>",
+		"id": "<id#26>",
+		"parentId": "<id#24>",
 		"timestamp": "<timestamp>",
 		"message": {
 			"role": "toolResult",
-			"toolCallId": "<id#24>",
+			"toolCallId": "<id#25>",
 			"toolName": "codemode",
 			"content": [
 				{
 					"type": "text",
-					"text": "Script failed\nWall time 0.1 seconds\nOutput:\n"
+					"text": "Script failed\nWall time 0.0 seconds\nOutput:\n"
 				},
 				{
 					"type": "text",
-					"text": "Script error:\nError: submit_job for run \"smoke-check\" (nested under tool call call_6bc58a67247946608ff65f45) was refused by the submit gate — ask the user to approve it in the confirm dialog, never retry it unprompted\n\nTool calls made before the failure (they are not undone): mcp__theta_compute__submit_job (error)"
+					"text": "Script error:\nError: submit_job for run \"smoke-check\" (nested under tool call call_c0e6198488d04b03a350b141) was refused by the submit gate — ask the user to approve it in the confirm dialog, never retry it unprompted\n\nTool calls made before the failure (they are not undone): mcp__theta_compute__submit_job (error)"
 				}
 			],
 			"details": {
 				"calls": [
 					{
-						"id": "<id#26>",
+						"id": "<id#27>",
 						"name": "mcp__theta_compute__submit_job",
-						"args": "{\"run_name\":\"smoke-check\"}",
+						"args": "{\"run_name\":\"smoke-check\",\"directives\":null}",
 						"status": "error",
 						"durationMs": "<duration>",
-						"error": "submit_job for run \"smoke-check\" (nested under tool call call_6bc58a67247946608ff65f45) was refused by the submit gate — ask the user to approve it in the confirm dialog, never retry it unprompted"
+						"error": "submit_job for run \"smoke-check\" (nested under tool call call_c0e6198488d04b03a350b141) was refused by the submit gate — ask the user to approve it in the confirm dialog, never retry it unprompted"
 					}
 				]
 			},
@@ -676,14 +721,15 @@
 			"nestedCalls": {
 				"calls": [
 					{
-						"id": "<id#26>",
+						"id": "<id#27>",
 						"name": "mcp__theta_compute__submit_job",
 						"status": "error",
 						"arguments": {
-							"run_name": "smoke-check"
+							"run_name": "smoke-check",
+							"directives": null
 						},
 						"durationMs": "<duration>",
-						"error": "submit_job for run \"smoke-check\" (nested under tool call call_6bc58a67247946608ff65f45) was refused by the submit gate — ask the user to approve it in the confirm dialog, never retry it unprompted"
+						"error": "submit_job for run \"smoke-check\" (nested under tool call call_c0e6198488d04b03a350b141) was refused by the submit gate — ask the user to approve it in the confirm dialog, never retry it unprompted"
 					}
 				],
 				"complete": true
@@ -692,43 +738,43 @@
 	},
 	{
 		"type": "message",
-		"id": "<id#27>",
-		"parentId": "<id#25>",
+		"id": "<id#28>",
+		"parentId": "<id#26>",
 		"timestamp": "<timestamp>",
 		"message": {
 			"role": "assistant",
 			"content": [
 				{
 					"type": "thinking",
-					"thinking": "The submit gate refused the call. The error says \"ask the user to approve it in the confirm dialog, never retry it unprompted.\"\n\nHmm — interesting. The gate refused the nested call. The error says the confirm dialog should be answered by the user. In this session, the confirm dialog apparently was shown (or the refusal came because the nested call needed confirmation and the dialog... was refused/declined, or there's no interactive UI to answer it and the driver didn't confirm).\n\nPer doctrine: \"A refused call stays refused — never retry it unprompted.\"\n\nSo the situation: the submit was blocked by the theta-side submit gate. The user asked me to \"submit it through the cluster gateway now\" — that IS the explicit request/approval. But the gate refused the call, and the doctrine is explicit: never retry unprompted. The gate's answer is the answer.\n\nWait — but let me think. The user explicitly asked to submit. Does that count as the approval? The gate mechanism works through a confirm dialog in the UI. If I'm running headless, the dialog may have been auto-refused or there was no dialog mechanism. The error message says \"ask the user to approve it in the confirm dialog\". So the right move per the error text itself is: tell the user the gate refused, and ask them to approve in the confirm dialog.\n\nBut hold on — maybe the dialog is presented interactively to the user right now, and the refusal means the user declined it? The message \"ask the user to approve it in the confirm dialog, never retry it unprompted\" suggests the call was refused without user approval — perhaps auto-refused because no dialog could be shown (headless), or the user dismissed it.\n\nEither way, the doctrine and the error agree: report to the researcher, do not retry unprompted.\n\nShould I check whether there's other evidence? The skill says on a HOLD (server-side submit capability off), the refusal is a HOLD audit line — but that refusal comes from the gateway itself (the tool call would resolve with a refusal text, not throw). Here the call was refused by the theta-side submit gate (the client-side extension), not the gateway — the error names the submit gate.\n\nSo what happened: the submit gate extension refused the nested submit because the confirm dialog wasn't approved. The submit never reached the cluster. No job was created.\n\nWhat should I do now? Per the error and doctrine: ask the user to approve it in the confirm dialog; don't retry unprompted.\n\nI should also consider: is there anything else in the flow I can do meanwhile? The lifecycle stages after submit (poll, fetch, record) all depend on a job existing. Nothing else to do. Staging is already done (per the user). I could verify... there's no staging-inspection tool. job_status needs a job_id, which we don't have.\n\nAlso, per the doctrine on long jobs and the audit: nothing to record yet — no job ID, no final state. The notebook records a job record from \"the answers in hand\" — there are none (no job). So no notebook entry either; the doctrine's record stage applies to a completed run with a job ID. I could note that the submit was refused... but the recorder is for research provenance entries, and the compute job-record path requires the assembled gateway job record (job ID etc.), which doesn't exist. I'll skip recording and say so.\n\nSo my report:\n\n1. Read the steering doc + skill + pi docs in full first (done).\n2. `list_environments`: gateway reachable, partitions healthy enough (cpu: 12 idle; some nodes down/drain but that's normal operational state).\n3. `submit_job(\"smoke-check\")` — refused by the submit gate before the call left this session. The confirm dialog was not approved (in a headless session there's no one to answer it; the error says to ask the user to approve in the confirm dialog).\n4. Nothing ran on the cluster. No job ID. No spend.\n5. Per doctrine, the refused call stays refused — I will not retry it unprompted.\n6. To proceed: the user needs to approve the submit in the confirm dialog (or run this through a path where the gate can be answered, e.g. the interactive confirm, or the rig's RPC confirm driver for headless legs). Then I can resubmit when they prompt me to.\n\nThe user asked \"tell me exactly what happened — including anything that stopped it\". The thing that stopped it: the theta-side submit gate (the stacked confirm framework, extensions/submit-gate.ts) refused the nested submit because the confirm dialog went unapproved.\n\nOne more consideration: should I try a direct (non-codemode) submit? The tools aren't declared directly to me (codemode exposure), so I can only call them via codemode — and the gate treats nested calls the same as direct ones (\"the submit gate confirms it like a direct call\"). So a different call path wouldn't bypass the gate, and trying to route around the gate would violate the doctrine anyway. Don't.\n\nAlso, the boundary \"A live step blocked on the cluster path parks — one scheduled re-probe, never a retry loop\". That's about connection issues, not the gate. For the gate: \"A refused call stays refused — never retry it unprompted.\" Clear.\n\nLet me write the final report concisely, with exact facts:\n\n- What I read first.\n- Environment check result.\n- The submit call and its exact refusal text.\n- What stopped it: the submit gate, awaiting user approval in the confirm dialog; the run never reached Slurm.\n- What state things are in: staging intact (untouched), no job created, no ceiling spend? Actually — does a gated refusal spend the ceiling? The ceiling is server-side and counts submits; the call never left, so no. The gate log records the decision (gate.jsonl in session dir).\n- Next step: approve in the confirm dialog and tell me to go again; I'll resubmit on their word.\n\nI should not pretend the job exists. Report exactly.",
+					"thinking": "The submit gate refused the call because the confirm dialog was not answered — or it surfaced the dialog and the answer hadn't landed yet. The error says: \"was refused by the submit gate — ask the user to approve it in the confirm dialog, never retry it unprompted.\"\n\nPer doctrine: \"A refused call stays refused — never retry it unprompted.\" So I must ask the user to approve it in the confirm dialog. But wait — the error message says \"ask the user to approve it in the confirm dialog\". So there is presumably a pending confirm dialog in the UI. Actually, the nested call was refused because the gate prompts and the user must answer. Since I'm running inside a codemode script, the dialog should have been surfaced via `parentToolCallId` linking... but the call was refused — perhaps because the dialog timed out or the session is headless/print mode?\n\nHmm. The doctrine says the gate asks the researcher before every destructive call. The refusal here means the gate did not get an approval. I must stop and ask the user explicitly: approve the submission of smoke-check in the confirm dialog, then I can make the call again (prompted by the user's approval — \"never retry it unprompted\" means once the user approves/prompt me, I can retry).\n\nSo now I should report to the user: the submission is pending your approval; a confirm dialog was raised; approve it and I'll resubmit.\n\nActually wait — maybe the dialog is still open in the TUI and the user can approve it now. The refusal means this specific call is dead, but with the user's approval I can issue a new one, which will cross the gate and this time be approved.\n\nLet me pause and tell the user exactly what happened.",
 					"thinkingSignature": "reasoning_content"
 				},
 				{
 					"type": "text",
-					"text": "The submit did **not** go through. Here is exactly what happened, in order:\n\n## What happened\n\n**1. Guidance read first (whole, single-call reads, limits above line counts)**\n- `__REPO__/skills/theta-compute/SKILL.md` — the cluster-work doctrine\n- `__REPO__/CLAUDE.md` — the repo steering doc\n- pi's `docs/codemode.md` and `docs/mcp.md` — how the gateway's MCP tools are reached from scripts\n\n**2. Pre-flight check — `list_environments` ✅**\nThe gateway answered. The default `cpu` partition is `up` with 12 idle nodes (`__HOST_NODES_CPU_D__`); a few nodes are `down*`/`drain` but that doesn't block a submit. Capacity exists — no reason to hold at this stage.\n\n**3. Submit — `submit_job(run_name: \"smoke-check\")` ❌ — REFUSED**\n\nThe call was refused by the **theta-side submit gate** (the confirm extension, not the cluster). The exact refusal:\n\n> `submit_job for run \"smoke-check\" (nested under tool call call_6bc58a67247946608ff65f45) was refused by the submit gate — ask the user to approve it in the confirm dialog, never retry it unprompted`\n\n## What stopped it\n\nThe package's **submit gate** requires your explicit approval in a confirm dialog before any destructive gateway call (`submit_job`, `cancel_job`, `run_alphafold3`). That approval never landed — the dialog went unapproved in this session — so the gate refused the call and **nothing ever reached Slurm**.\n\n## Current state\n\n- **No job was created** — there is no job ID, nothing queued or running, no cluster spend. The submit ceiling was not touched (the call never left this session).\n- The staged `smoke-check` inputs are untouched — staging is unaffected by a gated refusal.\n- The gate's decision is recorded in the session's `gate.jsonl` gate log, per the stacked-gate design.\n- Per doctrine, **a refused call stays refused** — I have not and will not retry it unprompted.\n\n## How to proceed\n\nThis needs your answer, not mine. Either approve the submit when the confirm dialog is presented (e.g. run this in the interactive TUI where the dialog can be answered), or — for a headless leg — use the rig's checked-in RPC confirm driver. Once you've approved and tell me to go, I'll resubmit `smoke-check` and then follow the rest of the lifecycle: poll `job_status`, `fetch_artifacts`, and record the job ID in the project notebook via `theta-notebook`."
+					"text": "The submit gate stopped the call — this is expected gate behavior, but it needs your answer to proceed. Here's exactly where things stand:\n\n## What happened so far\n\n1. **Gateway reachable, partitions checked.** `list_environments` succeeded: the default `cpu` partition is up with 12 idle nodes (`__HOST_NODES_CPU_D__`); `__HOST_NODES_CPU_A__` are down and `__HOST_NODES_CPU_B__` drained, but that doesn't block a default-partition job.\n2. **Submit refused by the submit gate — not by the cluster.** My `submit_job(run_name=\"smoke-check\", directives=null)` call was refused **before leaving this session**: the theta-side submit gate raises a confirm dialog for every job-creating call, and this call was refused because your approval hasn't landed. The gateway itself never saw it — no job was created, no HOLD/THROTTLE was involved.\n\n## What I need from you\n\nApprove the submission in the confirm dialog (or just tell me to go ahead), and I'll issue the submit again — with your approval it will cross the gate this time. The call waiting for your confirmation is:\n\n- **Run:** `smoke-check` (already staged)\n- **Action:** raw batch submit, no directives — gateway-forced defaults for partition/gres, log paths, and script body\n\nPer doctrine I won't retry unprompted — the refused call stays refused."
 				}
 			],
 			"api": "openai-completions",
 			"provider": "<provider>",
 			"model": "<model>",
 			"usage": {
-				"input": 425,
-				"output": 1870,
-				"cacheRead": 24512,
+				"input": 341,
+				"output": 669,
+				"cacheRead": 19008,
 				"cacheWrite": 0,
-				"reasoning": 1275,
-				"totalTokens": 26807,
+				"reasoning": 362,
+				"totalTokens": 20018,
 				"cost": {
-					"input": 0.00006374999999999999,
-					"output": 0.000935,
-					"cacheRead": 0.0007353599999999999,
+					"input": 0.000051149999999999996,
+					"output": 0.0003345,
+					"cacheRead": 0.00057024,
 					"cacheWrite": 0,
-					"total": 0.0017341099999999996
+					"total": 0.0009558899999999999
 				}
 			},
 			"stopReason": "stop",
 			"timestamp": "<timestamp>",
-			"responseId": "202611151923581609b43bcef84ab6",
+			"responseId": "2026111613270148cc0d0c720a4a6e",
 			"rawStopReason": "stop",
 			"durationMs": "<duration>",
 			"thinkingLevel": "high"
