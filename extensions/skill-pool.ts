@@ -4,8 +4,11 @@ import { fileURLToPath } from "node:url";
 import type {
 	ExtensionAPI,
 	ExtensionCommandContext,
+	ExtensionContext,
+	ModelRegistry,
 	ResourcesDiscoverEvent,
 	ResourcesDiscoverResult,
+	SessionStartEvent,
 } from "@earendil-works/pi-coding-agent";
 
 /**
@@ -51,11 +54,29 @@ export const SKILLS_COMMAND = "theta:skills";
 /** The history actor for entries the command itself writes. */
 export const COMMAND_ACTOR = "command:theta:skills";
 
+/** The gate record's actor: the classifier judgment, not a human act. */
+export const GATE_ACTOR = "classify:jev";
+
+/** The classifier slot the gate resolves — the named OpenRouter Jev slot. */
+export const GATE_CLASSIFIER = { provider: "openrouter", id: "typesafe/jev-1.13" } as const;
+
+/** The auto gate fires only when classAllow is exactly this — a human widening outranks it. */
+export const DEFAULT_CLASS_ALLOW = ["local"] as const;
+
+/** The notebook's last entries feeding the classify state, capped per the spec. */
+const NOTEBOOK_WINDOW = 10;
+
+/** Each notebook entry's text cap in the classify state. */
+const NOTEBOOK_TEXT_CAP = 500;
+
+/** A bool answer at or above this probability includes the class. */
+const ANSWER_THRESHOLD = 0.5;
+
 export type SkillClass = "local" | "key" | "cloud";
 
 const SKILL_CLASSES: readonly SkillClass[] = ["local", "key", "cloud"];
 
-/** One append-on-write history entry; S2's classify gate appends its own. */
+/** One append-on-write history entry; the command writes these. */
 export interface HistoryEntry {
 	at: string;
 	actor: string;
@@ -69,14 +90,32 @@ export interface PackState {
 }
 
 /**
- * The state file's shape v1 (spec #160). `classAllow` is the S2 gate's
+ * The gate record (spec #162): one top-level object in the state file, the
+ * latest decision — `skills.json` is committed state, so git carries the
+ * trail. `decision` is the `classAllow` the run set; the rationale is
+ * composed by the gate from input counts and the answer's probability,
+ * never model prose.
+ */
+export interface GateRecord {
+	at: string;
+	actor: string;
+	decision: string[];
+	rationale: string;
+}
+
+/**
+ * The state file's shape v1 (spec #160). `classAllow` is the gate's
  * decision state from day one — the command never widens it, it only
- * toggles pack enablement.
+ * toggles pack enablement. `gate` (spec #162) is optional: an S1-era file
+ * without it reads fine, and its absence is the auto gate's eligibility
+ * signal, so `readSkillsState` must carry it through every typed rebuild
+ * or the first toggle write erases the record.
  */
 export interface SkillsState {
 	version: number;
 	classAllow: string[];
 	packs: Record<string, PackState>;
+	gate?: GateRecord;
 }
 
 /** One skip, named for the diagnosis block. */
@@ -236,8 +275,9 @@ export function readSkillsState(cwd: string): StateRead {
 		return { kind: "invalid", why: "packs is not a JSON object" };
 	}
 	const packs: Record<string, PackState> = {};
-	// History entries stay unvalidated beyond object-ness: S2's classify gate
-	// appends entries of its own, and the loader only re-writes them.
+	// History entries stay unvalidated beyond object-ness beyond what the
+	// toggle needs (enabled boolean, history array): the loader only
+	// re-writes them, never interprets them.
 	for (const [name, pack] of Object.entries(shape.packs as Record<string, unknown>)) {
 		if (pack === null || typeof pack !== "object" || Array.isArray(pack)) {
 			return { kind: "invalid", why: `pack ${name} is not an object` };
@@ -248,10 +288,49 @@ export function readSkillsState(cwd: string): StateRead {
 		}
 		packs[name] = { enabled: packShape.enabled, history: packShape.history as HistoryEntry[] };
 	}
+	// The gate record (spec #162), optional: validated like the rest, so a
+	// typed rebuild carries it — the S1 rebuild would drop an unknown
+	// top-level field, and the first /theta:skills on|off write would erase
+	// the decision. An invalid gate record invalidates the state: the gate
+	// is the classAllow's provenance, and a state whose record disagrees
+	// with its own classAllow semantics must never be honored partially.
+	const gate = validateGateRecord(shape.gate);
+	if (gate !== undefined && gate.invalid !== undefined) return { kind: "invalid", why: gate.invalid };
 	return {
 		kind: "ok",
-		state: { version: STATE_VERSION, classAllow: shape.classAllow as string[], packs },
+		state: {
+			version: STATE_VERSION,
+			classAllow: shape.classAllow as string[],
+			packs,
+			...(gate?.record !== undefined ? { gate: gate.record } : {}),
+		},
 	};
+}
+
+/**
+ * The gate record's own validation: an object with a string `at`, the
+ * `classify:jev` actor, a string-array decision, and a string rationale.
+ * Anything else is one invalid read — the record is the classAllow's
+ * provenance, so a broken record must refuse the state, never load the
+ * widening it claims to license. Undefined (the absent field) reads as
+ * absent; every other shape is validated or refused.
+ */
+function validateGateRecord(value: unknown): { invalid: string; record?: undefined } | { invalid?: undefined; record?: GateRecord } {
+	if (value === undefined) return {};
+	if (value === null || typeof value !== "object" || Array.isArray(value)) {
+		return { invalid: "gate is not a JSON object" };
+	}
+	const record = value as Record<string, unknown>;
+	if (
+		typeof record.at !== "string" ||
+		record.actor !== GATE_ACTOR ||
+		!Array.isArray(record.decision) ||
+		!record.decision.every((entry) => typeof entry === "string") ||
+		typeof record.rationale !== "string"
+	) {
+		return { invalid: "gate is not an at/actor/decision/rationale record" };
+	}
+	return { record: value as GateRecord };
 }
 
 function mixFor(
@@ -369,13 +448,308 @@ export function planPoolLoading(root: string, cwd: string): PoolPlan {
 }
 
 /**
- * The `resources_discover` handler: the plan's sorted skillPaths, nothing
- * else. The backstop catch is the never-throw floor — planPoolLoading is
- * written to catch its own failure modes, but a bug in it must degrade to an
- * empty contribution rather than fail session startup; the status command
- * recomputes the same plan, so the diagnosis block stays the user-visible
- * surface for whatever went wrong.
+ * The classify seam (spec #162): the gate's whole reach into the
+ * classifier, one injected function. The default resolves the classifier
+ * slot and calls `ctx.modelRegistry.classify()`; the keyless test suite
+ * injects its own, so the whole suite runs without the key — and the
+ * spy pin (the seam never called across the suite) holds by
+ * construction. Named export, the S1 jiti pattern: the test imports this
+ * module's exports through jiti exactly like pi loads the extension.
  */
+export type Classify = (context: {
+	state: Record<string, unknown>;
+	questions: Record<string, { type: "bool"; instructions: string; criteria: { true: string; false: string } }>;
+}) => Promise<{
+	answers: Record<string, { type: "bool"; probability: number }>;
+	stopReason: "stop" | "error" | "aborted";
+	errorMessage?: string;
+}>;
+
+/** The classifier's slot resolution — the credential-aware probe. */
+export type ResolveClassifier = () => Promise<boolean>;
+
+/**
+ * The gate's runtime reach, injected as one object so the tests (and any
+ * future caller) swap the whole classifier surface in one argument.
+ */
+export interface GateSeam {
+	/** Whether the session is keyed — the slot resolves with working credentials. */
+	keyed: () => Promise<boolean>;
+	/** One classify call over the state and its questions. */
+	classify: Classify;
+}
+
+/**
+ * The live seam: `getAvailableOfType("classifier", "openrouter")` — the
+ * credential-aware probe, never a bare catalog find (a find would
+ * "resolve" on a host whose openrouter entry carries a dead key, and the
+ * gate would fire-and-fail there). The probe resolves the named
+ * OpenRouter Jev slot's own catalog entry — the model object
+ * `classify()` wants — so keyed-ness and the call share one resolution.
+ * The gate reaches the classifier only through
+ * `ctx.modelRegistry.classify()` — pi resolves auth, and theta code
+ * never sees the key.
+ */
+export function liveGateSeam(
+	registry: Pick<ModelRegistry, "getAvailableOfType" | "classify">,
+): GateSeam {
+	return {
+		keyed: async () => {
+			const available = await registry.getAvailableOfType("classifier", GATE_CLASSIFIER.provider);
+			return available.some((model) => model.id === GATE_CLASSIFIER.id);
+		},
+		classify: async (context) => {
+			// classify() reads only provider and id off the model (pi's
+			// docs pin it), but its TS shape wants the full ClassifierModel
+			// — the probe's own resolved entry is the honest object.
+			const entry = await pickClassifierEntry(registry, GATE_CLASSIFIER);
+			return registry.classify(
+				entry as never,
+				context as never,
+			) as unknown as Awaited<ReturnType<Classify>>;
+		},
+	} satisfies GateSeam;
+}
+
+/** The probe's resolved catalog entry for the slot, when it resolves. */
+async function pickClassifierEntry(
+	registry: Pick<ModelRegistry, "getAvailableOfType">,
+	slot: { provider: string; id: string },
+): Promise<Record<string, unknown> | undefined> {
+	const available = await registry.getAvailableOfType("classifier", slot.provider);
+	const entry = available.find((model) => model.id === slot.id);
+	return entry === undefined ? undefined : (entry as unknown as Record<string, unknown>);
+}
+
+/** The notebook's file name under STATE_DIR. */
+const NOTEBOOK_FILE = "notebook.jsonl";
+
+/** One notebook entry's readable shape for the classify state. */
+interface NotebookSlice {
+	type: string;
+	text: string;
+}
+
+/**
+ * The notebook's last NOTEBOOK_WINDOW entries, each entry's text capped at
+ * NOTEBOOK_TEXT_CAP characters. A missing notebook reads as none; a line
+ * that does not parse is skipped, never fatal — the gate's material check
+ * (at least one entry) is what skips the fire, and a corrupt line must
+ * not sink the sound rest.
+ */
+export function readNotebookSlice(cwd: string): NotebookSlice[] {
+	let raw: string;
+	try {
+		raw = fs.readFileSync(path.join(cwd, STATE_DIR, NOTEBOOK_FILE), "utf8");
+	} catch {
+		return [];
+	}
+	const slices: NotebookSlice[] = [];
+	for (const line of raw.split("\n")) {
+		if (line.trim() === "") continue;
+		let parsed: unknown;
+		try {
+			parsed = JSON.parse(line);
+		} catch {
+			continue;
+		}
+		if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) continue;
+		const entry = parsed as Record<string, unknown>;
+		if (typeof entry.text !== "string") continue;
+		slices.push({
+			type: typeof entry.type === "string" ? entry.type : "",
+			text: entry.text.slice(0, NOTEBOOK_TEXT_CAP),
+		});
+	}
+	return slices.slice(-NOTEBOOK_WINDOW);
+}
+
+/** The enabled pack names, sorted — the classify state's other input. */
+function enabledPackNames(state: SkillsState): string[] {
+	return Object.entries(state.packs)
+		.filter(([, pack]) => pack.enabled)
+		.map(([name]) => name)
+		.sort();
+}
+
+/**
+ * The gate's material check: everything the auto fire requires, the first
+ * miss named for the status block. `stateRead` ok, at least one pack
+ * enabled, the notebook carries at least one entry, no gate record, and
+ * classAllow exactly the default — the last condition keeps a
+ * hand-widened set safe: a human decision outranks the automatic fire,
+ * and the auto gate never clobbers it.
+ */
+export function gateSkipReason(
+	stateRead: StateRead,
+	notebook: NotebookSlice[],
+): string | undefined {
+	if (stateRead.kind !== "ok") {
+		return stateRead.kind === "invalid" ? `state is invalid (${stateRead.why})` : "no state file yet";
+	}
+	const state = stateRead.state;
+	const enabled = enabledPackNames(state);
+	if (enabled.length === 0) return "no pack is enabled";
+	if (notebook.length === 0) return `no notebook entries in ${STATE_DIR}/${NOTEBOOK_FILE}`;
+	if (state.gate !== undefined) return "the gate has already run for this project";
+	if (JSON.stringify(state.classAllow) !== JSON.stringify([...DEFAULT_CLASS_ALLOW])) {
+		return `classAllow was hand-widened (${state.classAllow.join(", ")})`;
+	}
+	return undefined;
+}
+
+/** The need-key question, at the auto ceiling. */
+const NEED_KEY_QUESTION = {
+	type: "bool" as const,
+	instructions:
+		"Does this recorded research need skills that carry their own credential (an API key or account login) beyond the local set?",
+	criteria: {
+		true: "The recorded research needs credential-bearing skills beyond the local set",
+		false: "The recorded research does not show that need",
+	},
+};
+
+/** The need-cloud question, at the full ceiling. */
+const NEED_CLOUD_QUESTION = {
+	type: "bool" as const,
+	instructions:
+		"Does this recorded research need skills whose use is metered spend (paid per use) beyond the local set?",
+	criteria: {
+		true: "The recorded research needs metered-spend skills beyond the local set",
+		false: "The recorded research does not show that need",
+	},
+};
+
+/**
+ * One gate run — the shared body of the auto fire and the explicit
+ * command runs. The ceiling names the questions: the auto ceiling asks
+ * `need-key` only; the full ceiling asks `need-key` and `need-cloud`.
+ * The decision is `local` plus each answer at or above the threshold,
+ * exactly the ceiling's vocabulary; the rationale is composed by the
+ * gate — input counts, the question asked, the answer with its
+ * probability — never model prose (the classify API returns only
+ * probabilities and confidence; there are no Jev words to quote).
+ * A failed call (a transport error, or a stopReason error result — an
+ * answer, not a throw) widens nothing and records nothing: no decision
+ * landed, so the eligibility signal stays absent, and the next keyed
+ * session start tries again.
+ */
+export async function runGate(
+	seam: GateSeam,
+	cwd: string,
+	ceiling: "auto" | "cloud",
+): Promise<{ kind: "ok"; record: GateRecord; classAllow: string[] } | { kind: "failed"; why: string }> {
+	const stateRead = readSkillsState(cwd);
+	if (stateRead.kind !== "ok") {
+		return { kind: "failed", why: stateRead.kind === "invalid" ? `state is invalid (${stateRead.why})` : "no state file yet" };
+	}
+	const notebook = readNotebookSlice(cwd);
+	const enabled = enabledPackNames(stateRead.state);
+	const questions: Record<string, { type: "bool"; instructions: string; criteria: { true: string; false: string } }> = {
+		"need-key": NEED_KEY_QUESTION,
+	};
+	if (ceiling === "cloud") questions["need-cloud"] = NEED_CLOUD_QUESTION;
+	let result: Awaited<ReturnType<Classify>>;
+	try {
+		result = await seam.classify({
+			state: {
+				notebook: notebook,
+				packs: enabled,
+			},
+			questions,
+		});
+	} catch (error) {
+		return { kind: "failed", why: `classify call failed: ${errorMessage(error)}` };
+	}
+	if (result.stopReason !== "stop") {
+		return {
+			kind: "failed",
+			why: `classify answered stopReason ${result.stopReason}${result.errorMessage !== undefined ? ` (${result.errorMessage})` : ""}`,
+		};
+	}
+	const classAllow: string[] = [...DEFAULT_CLASS_ALLOW];
+	const rationaleParts: string[] = [
+		`notebook ${notebook.length} entries`,
+		`packs ${enabled.length > 0 ? enabled.join(", ") : "none"}`,
+	];
+	for (const question of Object.keys(questions)) {
+		const answer = result.answers[question];
+		if (answer === undefined) {
+			return { kind: "failed", why: `classify answered no ${question}` };
+		}
+		const probability = answer.probability;
+		if (probability >= ANSWER_THRESHOLD) {
+			// The decision stays within the ceiling's vocabulary: need-key
+			// admits `key`, need-cloud admits `cloud`, and `local` is always
+			// there — the run sets classAllow to exactly its decision.
+			const admitted: string = question === "need-key" ? "key" : question === "need-cloud" ? "cloud" : "";
+			if (admitted !== "" && !classAllow.includes(admitted)) classAllow.push(admitted);
+		}
+		rationaleParts.push(`${question} p=${probability.toFixed(2)}`);
+	}
+	return {
+		kind: "ok",
+		record: {
+			at: new Date().toISOString(),
+			actor: GATE_ACTOR,
+			decision: classAllow,
+			rationale: rationaleParts.join("; "),
+		},
+		classAllow,
+	};
+}
+
+/** The state write the gate shares with the toggle: record + classAllow, atomically. */
+function writeGateDecision(cwd: string, state: SkillsState, record: GateRecord): SkillsState {
+	const nextState: SkillsState = { ...state, classAllow: record.decision, gate: record };
+	writeSkillsState(cwd, nextState);
+	return nextState;
+}
+
+/**
+ * The auto fire at a keyed session start (any reason): check the material,
+ * one classify call at the auto ceiling, write the record. The write
+ * lands before `resources_discover` reads — pi awaits session_start
+ * handlers first — so the widening applies to the firing session with no
+ * /reload. Concurrent first starts may both fire; the atomic write keeps
+ * one record. Keyless (the slot cannot resolve) → silent skip, the
+ * status block names the miss. The never-throw floor owns the whole
+ * hook: a gate bug degrades to a notify, never a failed startup.
+ */
+export async function autoFireGate(
+	event: Pick<SessionStartEvent, "reason">,
+	ctx: Pick<ExtensionContext, "cwd" | "ui" | "modelRegistry">,
+	seam: GateSeam = liveGateSeam(ctx.modelRegistry),
+): Promise<void> {
+	void event; // any reason fires — the record is the once-per-project signal
+	const stateRead = readSkillsState(ctx.cwd);
+	const notebook = readNotebookSlice(ctx.cwd);
+	const skip = gateSkipReason(stateRead, notebook);
+	if (skip !== undefined || stateRead.kind !== "ok") return;
+	let keyed: boolean;
+	try {
+		keyed = await seam.keyed();
+	} catch {
+		return; // the probe itself failed — keyless for all the gate knows
+	}
+	if (!keyed) return;
+	const run = await runGate(seam, ctx.cwd, "auto");
+	if (run.kind === "failed") {
+		ctx.ui.notify(`/${SKILLS_COMMAND} gate did not run: ${run.why}`, "warning");
+		return;
+	}
+	try {
+		writeGateDecision(ctx.cwd, stateRead.state, run.record);
+		ctx.ui.notify(
+			`/${SKILLS_COMMAND} gate: classAllow is now ${run.classAllow.join(", ")} — the record is in ${STATE_DIR}/${STATE_FILE}`,
+			"info",
+		);
+	} catch (error) {
+		tryUnlinkTmp(path.join(ctx.cwd, STATE_DIR, STATE_FILE));
+		ctx.ui.notify(`/${SKILLS_COMMAND} gate could not write: ${errorMessage(error)}`, "warning");
+	}
+}
+
 export async function discoverPoolSkills(
 	event: Pick<ResourcesDiscoverEvent, "cwd">,
 ): Promise<ResourcesDiscoverResult> {
@@ -388,8 +762,12 @@ export async function discoverPoolSkills(
 	}
 }
 
-/** The command context the handler needs — cwd for the state, ui for output. */
-type SkillsContext = Pick<ExtensionCommandContext, "cwd" | "ui">;
+/**
+ * The command's full context: the toggle and status need cwd + ui; the
+ * gate subcommands additionally reach the model registry (the classify
+ * seam's live home).
+ */
+type SkillsContext = Pick<ExtensionCommandContext, "cwd" | "ui" | "modelRegistry">;
 
 function renderStatus(ctx: SkillsContext): void {
 	const root = poolRoot();
@@ -419,6 +797,20 @@ function renderStatus(ctx: SkillsContext): void {
 		lines.push(
 			`no ${STATE_DIR}/${STATE_FILE} in this project — nothing loads; /${SKILLS_COMMAND} on <pack> enables one`,
 		);
+	}
+	// The gate line (spec #162): the record or its absence, plus the auto
+	// gate's skip reason when it lacks material — the status block names
+	// the miss, so a silent skip is never a mystery.
+	lines.push("");
+	if (plan.stateRead.kind === "ok" && plan.stateRead.state.gate !== undefined) {
+		const gate = plan.stateRead.state.gate;
+		lines.push(`gate: ${gate.actor} → ${gate.decision.join(", ")} at ${gate.at}`);
+	} else {
+		lines.push("gate: not yet run");
+	}
+	if (plan.stateRead.kind === "ok" && plan.stateRead.state.gate === undefined) {
+		const skip = gateSkipReason(plan.stateRead, readNotebookSlice(ctx.cwd));
+		if (skip !== undefined) lines.push(`gate: ${skip}`);
 	}
 	if (plan.diagnoses.length > 0) {
 		lines.push("");
@@ -482,8 +874,9 @@ function togglePack(decision: "on" | "off", pack: string, ctx: SkillsContext): v
 		at: new Date().toISOString(),
 		actor: COMMAND_ACTOR,
 		decision,
-		// The command line is the why for a manual toggle; S2's classify gate
-		// writes the classifier's own reason into this field.
+		// The command line is the why for a manual toggle; the gate writes
+		// its own record top-level (spec #162's disclosed deviation from
+		// #160's letter: the decision is class-level, not pack-level).
 		rationale: `/${SKILLS_COMMAND} ${decision} ${pack}`,
 	};
 	const nextState: SkillsState = {
@@ -515,12 +908,56 @@ function togglePack(decision: "on" | "off", pack: string, ctx: SkillsContext): v
 }
 
 /**
+ * The explicit gate run (spec #162): `/theta:skills gate` re-runs the
+ * judgment at the auto ceiling (`need-key` only); `gate cloud` runs the
+ * full ceiling — one call, two questions, decision = `local` + answers.
+ * The owner's invocation is the spend approval ADR 0008 requires for
+ * cloud; Jev's answer is the judgment — a `need-cloud` refusal means the
+ * recorded research does not show the need yet, and cloud stays out. The
+ * run's decision lands within its ceiling: a plain `gate` re-run after a
+ * cloud approval narrows honestly to `local`+`key` — the owner asked for
+ * the key-ceiling judgment; re-asking cloud is `gate cloud`. Any run
+ * sets `classAllow` to exactly its decision — never widen-only — and the
+ * record and `classAllow` never disagree. Non-interactive like the rest
+ * of the command: no `ui.confirm`, identical in interactive, print, and
+ * RPC. The reply tells the user to run `/reload` (the command runs
+ * mid-session, after discovery fired).
+ */
+async function runExplicitGate(ceiling: "auto" | "cloud", ctx: SkillsContext): Promise<void> {
+	const stateRead = readSkillsState(ctx.cwd);
+	if (stateRead.kind !== "ok") {
+		const why = stateRead.kind === "invalid" ? `state is broken (${stateRead.why})` : "no state file yet";
+		ctx.ui.notify(`gate: ${why} — fix or remove it first`, "error");
+		return;
+	}
+	const seam = liveGateSeam(ctx.modelRegistry);
+	const run = await runGate(seam, ctx.cwd, ceiling);
+	if (run.kind === "failed") {
+		ctx.ui.notify(`gate did not run: ${run.why} — the record is unchanged; retry later`, "error");
+		return;
+	}
+	try {
+		writeGateDecision(ctx.cwd, stateRead.state, run.record);
+	} catch (error) {
+		tryUnlinkTmp(path.join(ctx.cwd, STATE_DIR, STATE_FILE));
+		ctx.ui.notify(`gate could not write: ${errorMessage(error)}`, "error");
+		return;
+	}
+	ctx.ui.notify(
+		`gate: classAllow is now ${run.classAllow.join(", ")} (${run.record.rationale}) — run /reload to apply it`,
+		"info",
+	);
+}
+
+/**
  * The `/theta:skills` handler — non-interactive by construction: notify
  * only, no `ui.select`, so interactive, print, and RPC sessions behave
- * identically. Bare prints the status table plus the diagnosis block;
- * `on <pack>` / `off <pack>` toggles one pack (append-on-write history,
- * atomic write) and answers with the `/reload` instruction — discovery
- * re-fires with reason "reload" and re-reads the state file.
+ * identically. Bare prints the status table plus the diagnosis block and
+ * the gate line; `on <pack>` / `off <pack>` toggles one pack
+ * (append-on-write history, atomic write) and answers with the
+ * `/reload` instruction — discovery re-fires with reason "reload" and
+ * re-reads the state file; `gate` / `gate cloud` runs the explicit
+ * judgment (above).
  */
 export async function runSkillsCommand(args: string, ctx: SkillsContext): Promise<void> {
 	try {
@@ -534,8 +971,16 @@ export async function runSkillsCommand(args: string, ctx: SkillsContext): Promis
 			togglePack(command, tokens[1], ctx);
 			return;
 		}
+		if (command === "gate" && tokens.length === 1) {
+			await runExplicitGate("auto", ctx);
+			return;
+		}
+		if (command === "gate" && tokens.length === 2 && tokens[1] === "cloud") {
+			await runExplicitGate("cloud", ctx);
+			return;
+		}
 		ctx.ui.notify(
-			`usage: /${SKILLS_COMMAND} — or /${SKILLS_COMMAND} on <pack> | off <pack>`,
+			`usage: /${SKILLS_COMMAND} — or /${SKILLS_COMMAND} on <pack> | off <pack> | gate | gate cloud`,
 			"error",
 		);
 	} catch (error) {
@@ -547,6 +992,7 @@ export async function runSkillsCommand(args: string, ctx: SkillsContext): Promis
 
 export default function registerSkillPool(pi: ExtensionAPI) {
 	pi.on("resources_discover", (event) => discoverPoolSkills(event));
+	pi.on("session_start", (event, ctx) => autoFireGate(event, ctx));
 	pi.registerCommand(SKILLS_COMMAND, {
 		description: "Show and toggle the skill pool packs this project loads",
 		handler: (args, ctx) => runSkillsCommand(args, ctx),
