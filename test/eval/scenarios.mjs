@@ -40,11 +40,19 @@
 export const READ_HEADROOM =
 	"Before you rely on any instruction or reference file, read it whole in a single call, with a limit larger than its line count -- never an exact-count or fragmented read.";
 
+// The auditor's &&-chain proof cannot see past a `;` — the 2026-11-09
+// recapture round and the 2026-11-16 S2 roll both hit helper calls
+// trailing `; echo "EXIT=$?"`, which breaks the leg. The steering rides
+// the prompt (the doc's own recipe) so the session keeps each command
+// one plain &&-chain.
+export const PLAIN_COMMAND =
+	"Run each shell command as one plain command: chain steps with && only, never a semicolon or a trailing status echo.";
+
 export const SCENARIOS = Object.freeze([
 	{
 		id: "connector",
 		prompt:
-			`Survey the recent literature on off-target effects of CRISPR base editors. Find three primary research papers from 2025 or 2026, each with a DOI, using the scholarly search tooling this environment provides. ${READ_HEADROOM} Run the search through the command-line helper that tooling ships, and report for each paper the title, first author, journal, year, and DOI, quoting the structured search output you relied on.`,
+			`Survey the recent literature on off-target effects of CRISPR base editors. Find three primary research papers from 2025 or 2026, each with a DOI, using the scholarly search tooling this environment provides. ${READ_HEADROOM} ${PLAIN_COMMAND} Run the search through the command-line helper that tooling ships, and report for each paper the title, first author, journal, year, and DOI, quoting the structured search output you relied on.`,
 		// The model-visible surface classes this capture binds — one digest
 		// per class, the digest-scope decision (test/eval/surfaces.mjs):
 		// the advertisement and project context every session carries, the
@@ -93,7 +101,7 @@ export const SCENARIOS = Object.freeze([
 	{
 		id: "notebook",
 		prompt:
-			`Our team has decided to run the next antibody screen as a two-stage cascade instead of one large pass. Record that decision for the project so a later session can find it, using whatever provenance recording this environment provides, and tell me exactly what was written and where. Run each command as one plain call -- no trailing status echoes; ${READ_HEADROOM}`,
+			`Our team has decided to run the next antibody screen as a two-stage cascade instead of one large pass. Record that decision for the project so a later session can find it, using whatever provenance recording this environment provides, and tell me exactly what was written and where. ${PLAIN_COMMAND} ${READ_HEADROOM}`,
 		surfaces: ["advertisement", "skill:theta-notebook", "extensions", "project-context"],
 		// All three auditor slots, the M3 notebook dogfood shape: the skill
 		// read, the recorder executed, the notebook written (the notebook leg
