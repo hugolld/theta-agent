@@ -139,3 +139,7 @@ _Avoid_: skill catalog, skill marketplace
 **Domain pack**:
 One pack per research domain inside the skill pool — protein-engineering, bioinformatics, cheminformatics — the unit a research project loads and a pack re-sync vendors. First wave owner-decided 2026-11-15: 48 skills, zero robots, zero PHI. ADR 0008 decides it.
 _Avoid_: skill bundle, skill collection
+
+**Jev gate**:
+The skill pool's class-allowance judgment: a one-call `models.classify()` over the project notebook's recent entries and the enabled pack names, deciding which credential classes a project's `skills.json` may load beyond `local`. Fires automatically once per project at a keyed session start — a session is keyed when its pi config resolves the classifier slot — and thereafter only as an explicit owner act; a human-widened allow set outranks the automatic fire, and the metered-spend `cloud` class never enters without the owner's explicit run. The decision and its composed rationale land in the state file; the classifier's key never leaves the host. ADR 0008 decides it.
+_Avoid_: classifier gate, model gate
