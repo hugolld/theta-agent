@@ -91,8 +91,11 @@ const NOTEBOOK_TEXT_CAP = 500;
 /** A bool answer at or above this probability includes the class. */
 const ANSWER_THRESHOLD = 0.5;
 
+/** The gate's question ids — the ceiling picks from exactly these. */
+export type GateQuestion = "need-key" | "need-cloud";
+
 /** Each gate question admits exactly one class — the decision's whole vocabulary. */
-const QUESTION_CLASSES: Record<string, Exclude<SkillClass, "local">> = {
+const QUESTION_CLASSES: Record<GateQuestion, Exclude<SkillClass, "local">> = {
 	"need-key": "key",
 	"need-cloud": "cloud",
 };
@@ -186,21 +189,23 @@ function errorMessage(error: unknown): string {
 }
 
 /**
- * The one state-unusable message: the gate paths (skip check, run, and
- * the explicit command) share it, so the vocabulary cannot drift between
- * them — the explicit command prefixes its own "broken" reading of the
- * same why.
+ * The one state-unusable message, parametrized by each surface's own word:
+ * the loader and the status block read the state as "invalid"; the command
+ * surfaces — the explicit gate, like the toggle before it — read it as
+ * "broken". One home, both vocabularies, no drift.
  */
-function stateUnavailableWhy(stateRead: StateRead): string {
-	return stateRead.kind === "invalid" ? `state is invalid (${stateRead.why})` : "no state file yet";
+function stateUnavailableWhy(stateRead: StateRead, noun: "invalid" | "broken"): string {
+	return stateRead.kind === "invalid" ? `state is ${noun} (${stateRead.why})` : "no state file yet";
 }
 
 /**
  * The gate write's shared failure shape: the record write, the temp-file
  * cleanup, and the failure notify — one home, so the auto fire and the
- * explicit command report a failed write the same way. The success notify
- * stays at the call site, outside the try: a notify that throws must not
- * be reported as a failed write after the write already landed.
+ * explicit command report a failed write the same way, each at its own
+ * level. Returns whether the write landed: the success notify stays at the
+ * call site, outside the try and gated on this result — a notify that
+ * throws must not be reported as a failed write after the write landed,
+ * and a failed write must never be followed by a success notify.
  */
 function writeGateRecord(
 	cwd: string,
@@ -208,13 +213,16 @@ function writeGateRecord(
 	record: GateRecord,
 	ui: Pick<ExtensionUIContext, "notify">,
 	failurePrefix: string,
-): void {
+	level: "warning" | "error",
+): boolean {
 	try {
 		const nextState: SkillsState = { ...state, classAllow: record.decision, gate: record };
 		writeSkillsState(cwd, nextState);
+		return true;
 	} catch (error) {
 		tryUnlinkTmp(path.join(cwd, STATE_DIR, STATE_FILE));
-		ui.notify(`${failurePrefix} could not write: ${errorMessage(error)}`, "warning");
+		ui.notify(`${failurePrefix} could not write: ${errorMessage(error)}`, level);
+		return false;
 	}
 }
 
@@ -518,9 +526,6 @@ export function planPoolLoading(root: string, cwd: string): PoolPlan {
  */
 export type Classify = (context: ClassifierContext) => Promise<ClassifierResult>;
 
-/** The bool question the gate asks — the only question shape it sends. */
-export type BoolQuestion = ClassifierBoolQuestion;
-
 /**
  * The gate's runtime reach, injected as one object so the tests (and any
  * future caller) swap the whole classifier surface in one argument.
@@ -537,7 +542,7 @@ export interface GateSeam {
  * credential-aware probe, never a bare catalog find (a find would
  * "resolve" on a host whose openrouter entry carries a dead key, and the
  * gate would fire-and-fail there). Keyed-ness and the call share one
- * resolution — the probe's own catalog entry is the model object
+ * resolver — the probe's own catalog entry is the model object
  * `classify()` wants. The gate reaches the classifier only through
  * `ctx.modelRegistry.classify()` — pi resolves auth, and theta code
  * never sees the key.
@@ -631,7 +636,7 @@ export function gateSkipReason(
 	stateRead: StateRead,
 	notebook: NotebookSlice[],
 ): string | undefined {
-	if (stateRead.kind !== "ok") return stateUnavailableWhy(stateRead);
+	if (stateRead.kind !== "ok") return stateUnavailableWhy(stateRead, "invalid");
 	const state = stateRead.state;
 	const enabled = enabledPackNames(state);
 	if (enabled.length === 0) return "no pack is enabled";
@@ -667,30 +672,28 @@ const NEED_CLOUD_QUESTION = {
 
 /**
  * One gate run — the shared body of the auto fire and the explicit
- * command runs. The ceiling names the questions: the auto ceiling asks
- * `need-key` only; the full ceiling asks `need-key` and `need-cloud`.
- * The decision is `local` plus each answer at or above the threshold,
- * exactly the ceiling's vocabulary; the rationale is composed by the
- * gate — input counts, the question asked, the answer with its
- * probability — never model prose (the classify API returns only
- * probabilities and confidence; there are no Jev words to quote).
+ * command runs: pure judgment over the state and notebook the caller
+ * already read — no read of its own, so the caller's skip check, run,
+ * and write all see one snapshot. The ceiling names the questions: the
+ * auto ceiling asks `need-key` only; the full ceiling asks `need-key`
+ * and `need-cloud`. The decision is `local` plus each answer at or above
+ * the threshold, exactly the ceiling's vocabulary; the rationale is
+ * composed by the gate — input counts, the question asked, the answer
+ * with its probability — never model prose (the classify API returns
+ * only probabilities and confidence; there are no Jev words to quote).
  * A failed call (a transport error, or a stopReason error result — an
  * answer, not a throw) widens nothing and records nothing: no decision
  * landed, so the eligibility signal stays absent, and the next keyed
  * session start tries again.
  */
-export async function runGate(
+async function runGate(
 	seam: GateSeam,
-	cwd: string,
+	state: SkillsState,
+	notebook: NotebookSlice[],
 	ceiling: "auto" | "cloud",
 ): Promise<{ kind: "ok"; record: GateRecord; classAllow: string[] } | { kind: "failed"; why: string }> {
-	const stateRead = readSkillsState(cwd);
-	if (stateRead.kind !== "ok") {
-		return { kind: "failed", why: stateUnavailableWhy(stateRead) };
-	}
-	const notebook = readNotebookSlice(cwd);
-	const enabled = enabledPackNames(stateRead.state);
-	const questions: Record<string, ClassifierBoolQuestion> = {
+	const enabled = enabledPackNames(state);
+	const questions: Partial<Record<GateQuestion, ClassifierBoolQuestion>> = {
 		"need-key": NEED_KEY_QUESTION,
 	};
 	if (ceiling === "cloud") questions["need-cloud"] = NEED_CLOUD_QUESTION;
@@ -724,7 +727,7 @@ export async function runGate(
 		`notebook ${notebook.length} entries`,
 		`packs ${enabled.length > 0 ? enabled.join(", ") : "none"}`,
 	];
-	for (const question of Object.keys(questions)) {
+	for (const question of Object.keys(questions) as GateQuestion[]) {
 		const answer: ClassifierAnswer | undefined = result.answers[question];
 		// The answer is checked, never cast: pi's ClassifierAnswer is a
 		// union, and a non-bool answer to a bool question is a failed run,
@@ -739,9 +742,8 @@ export async function runGate(
 		// The decision stays within the ceiling's vocabulary: each question
 		// admits exactly its class, and `local` is always there — the run
 		// sets classAllow to exactly its decision.
-		const admitted = QUESTION_CLASSES[question];
-		if (admitted !== undefined && probability >= ANSWER_THRESHOLD && !classAllow.includes(admitted)) {
-			classAllow.push(admitted);
+		if (probability >= ANSWER_THRESHOLD && !classAllow.includes(QUESTION_CLASSES[question])) {
+			classAllow.push(QUESTION_CLASSES[question]);
 		}
 		rationaleParts.push(`${question} p=${probability.toFixed(2)}`);
 	}
@@ -776,11 +778,13 @@ export async function autoFireGate(
 ): Promise<void> {
 	void event; // any reason fires — the record is the once-per-project signal
 	try {
-		// One read feeds the skip check and the run: the write lands over
-		// the same state it judged, so a concurrent toggle's write is never
-		// silently erased by a stale read here.
+		// One read feeds the skip check, the run, and the write: the run
+		// judges the same state object the write extends, so the record
+		// lands over the state it judged and a concurrent toggle's write is
+		// never silently erased by a stale read here.
 		const stateRead = readSkillsState(ctx.cwd);
-		const skip = gateSkipReason(stateRead, readNotebookSlice(ctx.cwd));
+		const notebook = readNotebookSlice(ctx.cwd);
+		const skip = gateSkipReason(stateRead, notebook);
 		if (skip !== undefined || stateRead.kind !== "ok") return;
 		let keyed: boolean;
 		try {
@@ -789,12 +793,14 @@ export async function autoFireGate(
 			return; // the probe itself failed — keyless for all the gate knows
 		}
 		if (!keyed) return;
-		const run = await runGate(seam, ctx.cwd, "auto");
+		const run = await runGate(seam, stateRead.state, notebook, "auto");
 		if (run.kind === "failed") {
 			ctx.ui.notify(`/${SKILLS_COMMAND} gate did not run: ${run.why}`, "warning");
 			return;
 		}
-		writeGateRecord(ctx.cwd, stateRead.state, run.record, ctx.ui, `/${SKILLS_COMMAND} gate`);
+		if (!writeGateRecord(ctx.cwd, stateRead.state, run.record, ctx.ui, `/${SKILLS_COMMAND} gate`, "warning")) {
+			return;
+		}
 		ctx.ui.notify(
 			`/${SKILLS_COMMAND} gate: classAllow is now ${run.classAllow.join(", ")} — the record is in ${STATE_DIR}/${STATE_FILE}`,
 			"info",
@@ -980,17 +986,19 @@ function togglePack(decision: "on" | "off", pack: string, ctx: SkillsContext): v
 async function runExplicitGate(ceiling: "auto" | "cloud", ctx: SkillsContext): Promise<void> {
 	const stateRead = readSkillsState(ctx.cwd);
 	if (stateRead.kind !== "ok") {
-		const why = stateRead.kind === "invalid" ? `state is broken (${stateRead.why})` : "no state file yet";
-		ctx.ui.notify(`gate: ${why} — fix or remove it first`, "error");
+		ctx.ui.notify(`gate: ${stateUnavailableWhy(stateRead, "broken")} — fix or remove it first`, "error");
 		return;
 	}
+	const notebook = readNotebookSlice(ctx.cwd);
 	const seam = liveGateSeam(ctx.modelRegistry);
-	const run = await runGate(seam, ctx.cwd, ceiling);
+	const run = await runGate(seam, stateRead.state, notebook, ceiling);
 	if (run.kind === "failed") {
 		ctx.ui.notify(`gate did not run: ${run.why} — the record is unchanged; retry later`, "error");
 		return;
 	}
-	writeGateRecord(ctx.cwd, stateRead.state, run.record, ctx.ui, "gate");
+	if (!writeGateRecord(ctx.cwd, stateRead.state, run.record, ctx.ui, "gate", "error")) {
+		return;
+	}
 	ctx.ui.notify(
 		`gate: classAllow is now ${run.classAllow.join(", ")} (${run.record.rationale}) — run /reload to apply it`,
 		"info",

@@ -754,6 +754,33 @@ test("a stopReason error answer widens nothing and retries next start", async (t
 	assert.equal(readSkillsState(cwd).state.gate.decision.join(","), "local,key");
 });
 
+test("a failed auto-fire write warns, lands nothing, and never says success", async (t) => {
+	const cwd = eligibleProject(t);
+	const file = path.join(cwd, STATE_DIR, STATE_FILE);
+	const before = fs.readFileSync(file, "utf8");
+	fs.chmodSync(path.join(cwd, STATE_DIR), 0o500);
+	try {
+		const seam = makeSeam({ answer: { "need-key": 0.9 } });
+		const stub = gateStub(cwd, seam);
+		await autoFireGate({ type: "session_start", reason: "startup" }, stub, seam);
+		assert.equal(seam.calls.length, 1, "the judgment ran; only the write failed");
+		assert.equal(stub.calls.length, 1, "one notify — a failed write must not be followed by the success line");
+		assert.equal(stub.calls[0][1], "warning");
+		assert.match(stub.calls[0][0], /could not write/);
+		assert.equal(fs.readFileSync(file, "utf8"), before, "the old state survives");
+		assert.equal(fs.existsSync(`${file}.tmp`), false, "no temp survivor");
+		// No record landed, so the next keyed start retries — the once
+		// signal is the record on disk, never the attempted run.
+		fs.chmodSync(path.join(cwd, STATE_DIR), 0o700);
+		const seam2 = makeSeam({ answer: { "need-key": 0.9 } });
+		await autoFireGate({ type: "session_start", reason: "startup" }, gateStub(cwd, seam2), seam2);
+		assert.equal(seam2.calls.length, 1, "a failed write leaves the eligibility signal absent");
+		assert.equal(readSkillsState(cwd).state.gate.decision.join(","), "local,key");
+	} finally {
+		fs.chmodSync(path.join(cwd, STATE_DIR), 0o700);
+	}
+});
+
 test("session_start never throws — the never-throw floor owns the hook", async (t) => {
 	// The throwing seams must be REACHED, not just constructed: an eligible
 	// project passes the material check, so keyed() and classify() really
@@ -905,6 +932,26 @@ test("the explicit gate refuses a broken state instead of overwriting it", async
 	assert.match(ctx.calls[0][0], /broken/);
 });
 
+test("a failed explicit-gate write answers an error and never says success", async (t) => {
+	const cwd = eligibleProject(t);
+	const file = path.join(cwd, STATE_DIR, STATE_FILE);
+	const before = fs.readFileSync(file, "utf8");
+	fs.chmodSync(path.join(cwd, STATE_DIR), 0o500);
+	try {
+		const seam = makeSeam({ answer: { "need-key": 0.9 } });
+		const ctx = gateStub(cwd, seam);
+		await runSkillsCommand("gate", ctx);
+		assert.equal(seam.calls.length, 1, "the judgment ran; only the write failed");
+		assert.equal(ctx.calls.length, 1, "one notify — a failed write must not be followed by the success line");
+		assert.equal(ctx.calls[0][1], "error");
+		assert.match(ctx.calls[0][0], /could not write/);
+		assert.equal(fs.readFileSync(file, "utf8"), before, "the old state survives");
+		assert.equal(fs.existsSync(`${file}.tmp`), false, "no temp survivor");
+	} finally {
+		fs.chmodSync(path.join(cwd, STATE_DIR), 0o700);
+	}
+});
+
 test("a toggle write preserves the gate record — the typed rebuild pin", async (t) => {
 	const cwd = eligibleProject(t);
 	const gate = {
@@ -991,8 +1038,9 @@ test("suite pin: the keyless suite made exactly the classify calls the keyed tes
 	// The count is the sum the keyed tests above made: auto-fire (1),
 	// widening (1), below-threshold record (1), the 0.5 boundary (1),
 	// transport failure (1) + its retry (1), stopReason (1) + its retry
-	// (1), explicit gate (1), gate cloud (1), plain re-run (1),
-	// need-cloud refusal (1), explicit failure (1) — 13 keyed calls,
-	// zero from any keyless path.
-	assert.equal(spyCalls.length, 13);
+	// (1), the auto-fire write failure (1) + its retry (1), explicit gate
+	// (1), gate cloud (1), plain re-run (1), need-cloud refusal (1),
+	// explicit failure (1), the explicit write failure (1) — 16 keyed
+	// calls, zero from any keyless path.
+	assert.equal(spyCalls.length, 16);
 });
