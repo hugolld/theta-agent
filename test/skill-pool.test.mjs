@@ -20,6 +20,7 @@ const {
 	COMMAND_ACTOR,
 	GATE_ACTOR,
 	HISTORY_CAP,
+	NOTEBOOK_FILE,
 	SKILLS_COMMAND,
 	STATE_DIR,
 	STATE_FILE,
@@ -147,7 +148,7 @@ function makeSeam({ keyed = true, answer = { "need-key": 0.9 }, stopReason = "st
 function writeNotebook(cwd, texts) {
 	fs.mkdirSync(path.join(cwd, STATE_DIR), { recursive: true });
 	const lines = texts.map((text, i) => JSON.stringify({ id: `hyp-000${i + 1}`, type: "hypothesis", date: "2026-11-16", text }));
-	fs.writeFileSync(path.join(cwd, STATE_DIR, "notebook.jsonl"), lines.join("\n") + "\n");
+	fs.writeFileSync(path.join(cwd, STATE_DIR, NOTEBOOK_FILE), lines.join("\n") + "\n");
 }
 
 // The eligible project: state ok, one pack enabled, notebook entries,
@@ -167,6 +168,19 @@ function eligibleProject(t, { classAllow = ["local"], gate = undefined, notebook
 
 const discover = (cwd) =>
 	discoverPoolSkills({ type: "resources_discover", cwd, reason: "startup" });
+
+// The skip-pin shape the material-miss tests share: fire at a keyed seam,
+// assert zero classify calls, then read the status block and assert it
+// names the miss — one helper, so the three users cannot drift apart.
+async function assertSkippedAndNamed(cwd, missPattern) {
+	const seam = makeSeam();
+	await autoFireGate({ type: "session_start", reason: "startup" }, gateStub(cwd, seam), seam);
+	assert.equal(seam.calls.length, 0, "a material miss must not call the classifier");
+	const ctx = notifyStub(cwd);
+	await runSkillsCommand("", ctx);
+	assert.match(ctx.calls[0][0], /gate: not yet run/);
+	assert.match(ctx.calls[0][0], missPattern);
+}
 
 // ---------------------------------------------------------------------------
 // The class map and the index (spec #160: both ways, plus the pinned counts).
@@ -590,8 +604,15 @@ test("keyless session start never calls the classify seam", async (t) => {
 test("keyed start with material fires once, records, and widens", async (t) => {
 	const cwd = eligibleProject(t);
 	const seam = makeSeam({ answer: { "need-key": 0.83 } });
-	await autoFireGate({ type: "session_start", reason: "startup" }, gateStub(cwd, seam), seam);
+	const stub = gateStub(cwd, seam);
+	await autoFireGate({ type: "session_start", reason: "startup" }, stub, seam);
 	assert.equal(seam.calls.length, 1, "exactly one classify call");
+	// The success notify — the auto fire's one user-facing line, pinned:
+	// the new classAllow, the record's home, info level.
+	assert.equal(stub.calls.length, 1);
+	assert.equal(stub.calls[0][1], "info");
+	assert.match(stub.calls[0][0], /gate: classAllow is now local, key/);
+	assert.match(stub.calls[0][0], /the record is in \.theta\/skills\.json/);
 	// The call's state: the notebook's capped entries plus the enabled packs.
 	const state = seam.calls[0].state;
 	assert.ok(Array.isArray(state.notebook));
@@ -611,6 +632,32 @@ test("keyed start with material fires once, records, and widens", async (t) => {
 	assert.match(read.state.gate.rationale, /notebook 1 entries/);
 	assert.match(read.state.gate.rationale, /packs bioinformatics/);
 	assert.match(read.state.gate.rationale, /need-key p=0\.83/);
+});
+
+test("a below-threshold answer still lands a record — the decision stays local", async (t) => {
+	const cwd = eligibleProject(t);
+	const seam = makeSeam({ answer: { "need-key": 0.3 } });
+	await autoFireGate({ type: "session_start", reason: "startup" }, gateStub(cwd, seam), seam);
+	assert.equal(seam.calls.length, 1);
+	const read = readSkillsState(cwd);
+	assert.equal(read.kind, "ok");
+	// The negative branch is a judgment, not a failure: the record lands
+	// with decision ["local"] and classAllow stays the default — and the
+	// record makes it the once-per-project signal, so no second call.
+	assert.deepEqual(read.state.gate.decision, ["local"]);
+	assert.deepEqual(read.state.classAllow, ["local"]);
+	assert.match(read.state.gate.rationale, /need-key p=0\.30/);
+	const seam2 = makeSeam({ answer: { "need-key": 0.9 } });
+	await autoFireGate({ type: "session_start", reason: "startup" }, gateStub(cwd, seam2), seam2);
+	assert.equal(seam2.calls.length, 0, "the negative record is still the once signal");
+	assert.deepEqual(readSkillsState(cwd).state.classAllow, ["local"]);
+});
+
+test("an answer of exactly the 0.5 threshold admits — the boundary is inclusive", async (t) => {
+	const cwd = eligibleProject(t);
+	const seam = makeSeam({ answer: { "need-key": 0.5 } });
+	await autoFireGate({ type: "session_start", reason: "startup" }, gateStub(cwd, seam), seam);
+	assert.deepEqual(readSkillsState(cwd).state.gate.decision, ["local", "key"], "exactly 0.5 admits");
 });
 
 test("the widening applies to the firing session's discovery — no /reload", async (t) => {
@@ -654,13 +701,7 @@ test("a hand-widened classAllow outranks the automatic fire", async (t) => {
 
 test("an absent or empty notebook skips the fire, named in the status block", async (t) => {
 	const cwd = eligibleProject(t, { notebook: false });
-	const seam = makeSeam();
-	await autoFireGate({ type: "session_start", reason: "startup" }, gateStub(cwd, seam), seam);
-	assert.equal(seam.calls.length, 0);
-	const ctx = notifyStub(cwd);
-	await runSkillsCommand("", ctx);
-	assert.match(ctx.calls[0][0], /gate: not yet run/);
-	assert.match(ctx.calls[0][0], /no notebook entries/);
+	await assertSkippedAndNamed(cwd, /no notebook entries/);
 	// an empty notebook (the file exists, zero entries) skips the same way
 	writeNotebook(cwd, []);
 	const ctx2 = notifyStub(cwd);
@@ -673,12 +714,7 @@ test("zero packs enabled skips the fire — the status block names it", async (t
 	const cwd = tempDir(t, "pool-cwd-");
 	writeState(cwd, stateFor({ bioinformatics: { enabled: false, history: [] } }));
 	writeNotebook(cwd, ["Some recorded research."]);
-	const seam = makeSeam();
-	await autoFireGate({ type: "session_start", reason: "startup" }, gateStub(cwd, seam), seam);
-	assert.equal(seam.calls.length, 0);
-	const ctx = notifyStub(cwd);
-	await runSkillsCommand("", ctx);
-	assert.match(ctx.calls[0][0], /no pack is enabled/);
+	await assertSkippedAndNamed(cwd, /no pack is enabled/);
 });
 
 test("a transport error widens nothing, records nothing, and retries next start", async (t) => {
@@ -711,12 +747,20 @@ test("a stopReason error answer widens nothing and retries next start", async (t
 	const read = readSkillsState(cwd);
 	assert.equal(read.state.gate, undefined);
 	assert.deepEqual(read.state.classAllow, ["local"]);
+	// the next start tries again — the record stayed absent
+	const seam2 = makeSeam({ answer: { "need-key": 0.9 } });
+	await autoFireGate({ type: "session_start", reason: "startup" }, gateStub(cwd, seam2), seam2);
+	assert.equal(seam2.calls.length, 1, "retry across sessions, never in-session loops");
+	assert.equal(readSkillsState(cwd).state.gate.decision.join(","), "local,key");
 });
 
-test("session_start never throws — the never-throw floor owns the hook", async () => {
-	// A seam that throws at every reach, a nonexistent project dir:
-	// the await completing is the pin, in every combination.
-	const seam = {
+test("session_start never throws — the never-throw floor owns the hook", async (t) => {
+	// The throwing seams must be REACHED, not just constructed: an eligible
+	// project passes the material check, so keyed() and classify() really
+	// run. A throwing probe, a throwing classify, a nonexistent project dir:
+	// the await completing with a warning notify is the pin, in every
+	// combination.
+	const throwingSeam = () => ({
 		keyed: () => {
 			throw new Error("probe exploded");
 		},
@@ -724,8 +768,12 @@ test("session_start never throws — the never-throw floor owns the hook", async
 			throw new Error("classify exploded");
 		},
 		calls: [],
-	};
-	await autoFireGate({ type: "session_start", reason: "startup" }, gateStub("/nonexistent", seam), seam);
+	});
+	const stub1 = gateStub(eligibleProject(t), throwingSeam());
+	await autoFireGate({ type: "session_start", reason: "startup" }, stub1, undefined);
+	assert.equal(stub1.calls.length, 0, "a thrown probe reads as keyless — silent skip");
+	const stub2 = gateStub("/nonexistent", throwingSeam());
+	await autoFireGate({ type: "session_start", reason: "startup" }, stub2, undefined);
 	const seam2 = {
 		keyed: async () => {
 			throw new Error("probe rejected");
@@ -736,6 +784,21 @@ test("session_start never throws — the never-throw floor owns the hook", async
 		calls: [],
 	};
 	await autoFireGate({ type: "session_start", reason: "resume" }, gateStub("/nonexistent", seam2), seam2);
+	// The classify path throws mid-run: the whole-hook floor catches it and
+	// degrades to one warning notify — never a thrown handler.
+	const cwd = eligibleProject(t);
+	const seam3 = {
+		keyed: async () => true,
+		classify: () => {
+			throw new TypeError("fetch failed");
+		},
+		calls: [],
+	};
+	const stub3 = gateStub(cwd, seam3);
+	await autoFireGate({ type: "session_start", reason: "startup" }, stub3, seam3);
+	assert.equal(stub3.calls[0][1], "warning");
+	assert.match(stub3.calls[0][0], /did not run/);
+	assert.equal(readSkillsState(cwd).state.gate, undefined, "nothing lands through the floor");
 });
 
 test("the notebook slice caps at 10 entries and 500 characters", (t) => {
@@ -753,7 +816,7 @@ test("an unparsable notebook line is skipped, not fatal", (t) => {
 	const cwd = tempDir(t, "pool-cwd-");
 	fs.mkdirSync(path.join(cwd, STATE_DIR), { recursive: true });
 	fs.writeFileSync(
-		path.join(cwd, STATE_DIR, "notebook.jsonl"),
+		path.join(cwd, STATE_DIR, NOTEBOOK_FILE),
 		"{broken json\n" + JSON.stringify({ type: "decision", text: "A sound entry." }) + "\n",
 	);
 	const slice = readNotebookSlice(cwd);
@@ -926,9 +989,10 @@ test("suite pin: the keyless suite made exactly the classify calls the keyed tes
 	// suite-level statement: no other test — none of the S1 discovery and
 	// command tests, none of the failure-mode tests — reached the seam.
 	// The count is the sum the keyed tests above made: auto-fire (1),
-	// widening (1), transport failure (1) + its retry (1), stopReason (1),
-	// explicit gate (1), gate cloud (1), plain re-run (1), need-cloud
-	// refusal (1), explicit failure (1) — 10 keyed calls, zero from any
-	// keyless path.
-	assert.equal(spyCalls.length, 10);
+	// widening (1), below-threshold record (1), the 0.5 boundary (1),
+	// transport failure (1) + its retry (1), stopReason (1) + its retry
+	// (1), explicit gate (1), gate cloud (1), plain re-run (1),
+	// need-cloud refusal (1), explicit failure (1) — 13 keyed calls,
+	// zero from any keyless path.
+	assert.equal(spyCalls.length, 13);
 });

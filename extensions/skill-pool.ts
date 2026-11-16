@@ -5,11 +5,21 @@ import type {
 	ExtensionAPI,
 	ExtensionCommandContext,
 	ExtensionContext,
+	ExtensionUIContext,
 	ModelRegistry,
 	ResourcesDiscoverEvent,
 	ResourcesDiscoverResult,
 	SessionStartEvent,
 } from "@earendil-works/pi-coding-agent";
+import type {
+	ClassifierApi,
+	ClassifierAnswer,
+	ClassifierBoolQuestion,
+	ClassifierContext,
+	ClassifierModel,
+	ClassifierResult,
+	JsonObject,
+} from "@earendil-works/pi-ai";
 
 /**
  * The skill pool loader (spec #160, ADR 0008): the extension that loads the
@@ -28,6 +38,15 @@ import type {
  * why in the diagnosis block `/theta:skills` prints; discovery itself never
  * throws (a zero-state or broken session contributes nothing rather than
  * failing startup).
+ *
+ * The Jev gate (spec #162) rides the same extension: at a keyed
+ * `session_start` it reads the project notebook (`.theta/notebook.jsonl` —
+ * the one project-content read, the gate's own material input, never part
+ * of selection), makes one `models.classify()` call through the injected
+ * seam, and may widen `classAllow` beyond `local` before discovery reads.
+ * Selection itself stays scan-only: the gate's judgment is the only
+ * non-deterministic input, and it lands as committed state before any
+ * discovery run that honors it.
  */
 
 /** The pool root's directory name under the package root. */
@@ -71,6 +90,12 @@ const NOTEBOOK_TEXT_CAP = 500;
 
 /** A bool answer at or above this probability includes the class. */
 const ANSWER_THRESHOLD = 0.5;
+
+/** Each gate question admits exactly one class — the decision's whole vocabulary. */
+const QUESTION_CLASSES: Record<string, Exclude<SkillClass, "local">> = {
+	"need-key": "key",
+	"need-cloud": "cloud",
+};
 
 export type SkillClass = "local" | "key" | "cloud";
 
@@ -158,6 +183,39 @@ export interface PoolPlan {
 
 function errorMessage(error: unknown): string {
 	return error instanceof Error ? error.message : String(error);
+}
+
+/**
+ * The one state-unusable message: the gate paths (skip check, run, and
+ * the explicit command) share it, so the vocabulary cannot drift between
+ * them — the explicit command prefixes its own "broken" reading of the
+ * same why.
+ */
+function stateUnavailableWhy(stateRead: StateRead): string {
+	return stateRead.kind === "invalid" ? `state is invalid (${stateRead.why})` : "no state file yet";
+}
+
+/**
+ * The gate write's shared failure shape: the record write, the temp-file
+ * cleanup, and the failure notify — one home, so the auto fire and the
+ * explicit command report a failed write the same way. The success notify
+ * stays at the call site, outside the try: a notify that throws must not
+ * be reported as a failed write after the write already landed.
+ */
+function writeGateRecord(
+	cwd: string,
+	state: SkillsState,
+	record: GateRecord,
+	ui: Pick<ExtensionUIContext, "notify">,
+	failurePrefix: string,
+): void {
+	try {
+		const nextState: SkillsState = { ...state, classAllow: record.decision, gate: record };
+		writeSkillsState(cwd, nextState);
+	} catch (error) {
+		tryUnlinkTmp(path.join(cwd, STATE_DIR, STATE_FILE));
+		ui.notify(`${failurePrefix} could not write: ${errorMessage(error)}`, "warning");
+	}
 }
 
 function byItem(a: Diagnosis, b: Diagnosis): number {
@@ -275,9 +333,9 @@ export function readSkillsState(cwd: string): StateRead {
 		return { kind: "invalid", why: "packs is not a JSON object" };
 	}
 	const packs: Record<string, PackState> = {};
-	// History entries stay unvalidated beyond object-ness beyond what the
-	// toggle needs (enabled boolean, history array): the loader only
-	// re-writes them, never interprets them.
+	// History entries stay unvalidated beyond what the toggle needs
+	// (enabled boolean, history array): the loader only re-writes them,
+	// never interprets them.
 	for (const [name, pack] of Object.entries(shape.packs as Record<string, unknown>)) {
 		if (pack === null || typeof pack !== "object" || Array.isArray(pack)) {
 			return { kind: "invalid", why: `pack ${name} is not an object` };
@@ -295,14 +353,14 @@ export function readSkillsState(cwd: string): StateRead {
 	// is the classAllow's provenance, and a state whose record disagrees
 	// with its own classAllow semantics must never be honored partially.
 	const gate = validateGateRecord(shape.gate);
-	if (gate !== undefined && gate.invalid !== undefined) return { kind: "invalid", why: gate.invalid };
+	if (gate.kind === "invalid") return { kind: "invalid", why: gate.why };
 	return {
 		kind: "ok",
 		state: {
 			version: STATE_VERSION,
 			classAllow: shape.classAllow as string[],
 			packs,
-			...(gate?.record !== undefined ? { gate: gate.record } : {}),
+			...(gate.kind === "ok" ? { gate: gate.record } : {}),
 		},
 	};
 }
@@ -315,10 +373,10 @@ export function readSkillsState(cwd: string): StateRead {
  * widening it claims to license. Undefined (the absent field) reads as
  * absent; every other shape is validated or refused.
  */
-function validateGateRecord(value: unknown): { invalid: string; record?: undefined } | { invalid?: undefined; record?: GateRecord } {
-	if (value === undefined) return {};
+function validateGateRecord(value: unknown): { kind: "absent" } | { kind: "ok"; record: GateRecord } | { kind: "invalid"; why: string } {
+	if (value === undefined) return { kind: "absent" };
 	if (value === null || typeof value !== "object" || Array.isArray(value)) {
-		return { invalid: "gate is not a JSON object" };
+		return { kind: "invalid", why: "gate is not a JSON object" };
 	}
 	const record = value as Record<string, unknown>;
 	if (
@@ -328,9 +386,9 @@ function validateGateRecord(value: unknown): { invalid: string; record?: undefin
 		!record.decision.every((entry) => typeof entry === "string") ||
 		typeof record.rationale !== "string"
 	) {
-		return { invalid: "gate is not an at/actor/decision/rationale record" };
+		return { kind: "invalid", why: "gate is not an at/actor/decision/rationale record" };
 	}
-	return { record: value as GateRecord };
+	return { kind: "ok", record: value as GateRecord };
 }
 
 function mixFor(
@@ -449,24 +507,19 @@ export function planPoolLoading(root: string, cwd: string): PoolPlan {
 
 /**
  * The classify seam (spec #162): the gate's whole reach into the
- * classifier, one injected function. The default resolves the classifier
- * slot and calls `ctx.modelRegistry.classify()`; the keyless test suite
- * injects its own, so the whole suite runs without the key — and the
- * spy pin (the seam never called across the suite) holds by
+ * classifier, one injected function pair. The default resolves the
+ * classifier slot and calls `ctx.modelRegistry.classify()`; the keyless
+ * test suite injects its own, so the whole suite runs without the key —
+ * and the spy pin (no keyless path ever reached the classifier) holds by
  * construction. Named export, the S1 jiti pattern: the test imports this
  * module's exports through jiti exactly like pi loads the extension.
+ * The types are pi's own (`ClassifierContext`/`ClassifierResult`) — the
+ * seam promises no more than the API it wraps.
  */
-export type Classify = (context: {
-	state: Record<string, unknown>;
-	questions: Record<string, { type: "bool"; instructions: string; criteria: { true: string; false: string } }>;
-}) => Promise<{
-	answers: Record<string, { type: "bool"; probability: number }>;
-	stopReason: "stop" | "error" | "aborted";
-	errorMessage?: string;
-}>;
+export type Classify = (context: ClassifierContext) => Promise<ClassifierResult>;
 
-/** The classifier's slot resolution — the credential-aware probe. */
-export type ResolveClassifier = () => Promise<boolean>;
+/** The bool question the gate asks — the only question shape it sends. */
+export type BoolQuestion = ClassifierBoolQuestion;
 
 /**
  * The gate's runtime reach, injected as one object so the tests (and any
@@ -483,10 +536,9 @@ export interface GateSeam {
  * The live seam: `getAvailableOfType("classifier", "openrouter")` — the
  * credential-aware probe, never a bare catalog find (a find would
  * "resolve" on a host whose openrouter entry carries a dead key, and the
- * gate would fire-and-fail there). The probe resolves the named
- * OpenRouter Jev slot's own catalog entry — the model object
- * `classify()` wants — so keyed-ness and the call share one resolution.
- * The gate reaches the classifier only through
+ * gate would fire-and-fail there). Keyed-ness and the call share one
+ * resolution — the probe's own catalog entry is the model object
+ * `classify()` wants. The gate reaches the classifier only through
  * `ctx.modelRegistry.classify()` — pi resolves auth, and theta code
  * never sees the key.
  */
@@ -494,19 +546,15 @@ export function liveGateSeam(
 	registry: Pick<ModelRegistry, "getAvailableOfType" | "classify">,
 ): GateSeam {
 	return {
-		keyed: async () => {
-			const available = await registry.getAvailableOfType("classifier", GATE_CLASSIFIER.provider);
-			return available.some((model) => model.id === GATE_CLASSIFIER.id);
-		},
+		keyed: async () => (await pickClassifierEntry(registry, GATE_CLASSIFIER)) !== undefined,
 		classify: async (context) => {
-			// classify() reads only provider and id off the model (pi's
-			// docs pin it), but its TS shape wants the full ClassifierModel
-			// — the probe's own resolved entry is the honest object.
+			// The slot resolved at keyed() time may have gone by call time;
+			// re-resolving keeps undefined honest here too.
 			const entry = await pickClassifierEntry(registry, GATE_CLASSIFIER);
-			return registry.classify(
-				entry as never,
-				context as never,
-			) as unknown as Awaited<ReturnType<Classify>>;
+			if (entry === undefined) {
+				throw new Error(`classifier slot ${GATE_CLASSIFIER.provider}/${GATE_CLASSIFIER.id} did not resolve`);
+			}
+			return registry.classify(entry, context);
 		},
 	} satisfies GateSeam;
 }
@@ -515,17 +563,16 @@ export function liveGateSeam(
 async function pickClassifierEntry(
 	registry: Pick<ModelRegistry, "getAvailableOfType">,
 	slot: { provider: string; id: string },
-): Promise<Record<string, unknown> | undefined> {
+): Promise<ClassifierModel<ClassifierApi> | undefined> {
 	const available = await registry.getAvailableOfType("classifier", slot.provider);
-	const entry = available.find((model) => model.id === slot.id);
-	return entry === undefined ? undefined : (entry as unknown as Record<string, unknown>);
+	return available.find((model) => model.id === slot.id);
 }
 
 /** The notebook's file name under STATE_DIR. */
-const NOTEBOOK_FILE = "notebook.jsonl";
+export const NOTEBOOK_FILE = "notebook.jsonl";
 
 /** One notebook entry's readable shape for the classify state. */
-interface NotebookSlice {
+export interface NotebookSlice {
 	type: string;
 	text: string;
 }
@@ -584,9 +631,7 @@ export function gateSkipReason(
 	stateRead: StateRead,
 	notebook: NotebookSlice[],
 ): string | undefined {
-	if (stateRead.kind !== "ok") {
-		return stateRead.kind === "invalid" ? `state is invalid (${stateRead.why})` : "no state file yet";
-	}
+	if (stateRead.kind !== "ok") return stateUnavailableWhy(stateRead);
 	const state = stateRead.state;
 	const enabled = enabledPackNames(state);
 	if (enabled.length === 0) return "no pack is enabled";
@@ -641,19 +686,26 @@ export async function runGate(
 ): Promise<{ kind: "ok"; record: GateRecord; classAllow: string[] } | { kind: "failed"; why: string }> {
 	const stateRead = readSkillsState(cwd);
 	if (stateRead.kind !== "ok") {
-		return { kind: "failed", why: stateRead.kind === "invalid" ? `state is invalid (${stateRead.why})` : "no state file yet" };
+		return { kind: "failed", why: stateUnavailableWhy(stateRead) };
 	}
 	const notebook = readNotebookSlice(cwd);
 	const enabled = enabledPackNames(stateRead.state);
-	const questions: Record<string, { type: "bool"; instructions: string; criteria: { true: string; false: string } }> = {
+	const questions: Record<string, ClassifierBoolQuestion> = {
 		"need-key": NEED_KEY_QUESTION,
 	};
 	if (ceiling === "cloud") questions["need-cloud"] = NEED_CLOUD_QUESTION;
-	let result: Awaited<ReturnType<Classify>>;
+	let result: ClassifierResult;
 	try {
+		// The classify state is pi's JsonObject: the notebook slice rides as
+		// JSON objects (type + text), not as the typed interface — the wire
+		// shape is the contract, and the interface is the reader's.
+		const notebookJson: JsonObject[] = notebook.map((entry) => ({
+			type: entry.type,
+			text: entry.text,
+		}));
 		result = await seam.classify({
 			state: {
-				notebook: notebook,
+				notebook: notebookJson,
 				packs: enabled,
 			},
 			questions,
@@ -673,17 +725,23 @@ export async function runGate(
 		`packs ${enabled.length > 0 ? enabled.join(", ") : "none"}`,
 	];
 	for (const question of Object.keys(questions)) {
-		const answer = result.answers[question];
+		const answer: ClassifierAnswer | undefined = result.answers[question];
+		// The answer is checked, never cast: pi's ClassifierAnswer is a
+		// union, and a non-bool answer to a bool question is a failed run,
+		// not a probability to read off a wrong shape.
 		if (answer === undefined) {
 			return { kind: "failed", why: `classify answered no ${question}` };
 		}
+		if (answer.type !== "bool") {
+			return { kind: "failed", why: `classify answered ${question} as ${answer.type}, not bool` };
+		}
 		const probability = answer.probability;
-		if (probability >= ANSWER_THRESHOLD) {
-			// The decision stays within the ceiling's vocabulary: need-key
-			// admits `key`, need-cloud admits `cloud`, and `local` is always
-			// there — the run sets classAllow to exactly its decision.
-			const admitted: string = question === "need-key" ? "key" : question === "need-cloud" ? "cloud" : "";
-			if (admitted !== "" && !classAllow.includes(admitted)) classAllow.push(admitted);
+		// The decision stays within the ceiling's vocabulary: each question
+		// admits exactly its class, and `local` is always there — the run
+		// sets classAllow to exactly its decision.
+		const admitted = QUESTION_CLASSES[question];
+		if (admitted !== undefined && probability >= ANSWER_THRESHOLD && !classAllow.includes(admitted)) {
+			classAllow.push(admitted);
 		}
 		rationaleParts.push(`${question} p=${probability.toFixed(2)}`);
 	}
@@ -699,22 +757,17 @@ export async function runGate(
 	};
 }
 
-/** The state write the gate shares with the toggle: record + classAllow, atomically. */
-function writeGateDecision(cwd: string, state: SkillsState, record: GateRecord): SkillsState {
-	const nextState: SkillsState = { ...state, classAllow: record.decision, gate: record };
-	writeSkillsState(cwd, nextState);
-	return nextState;
-}
-
 /**
  * The auto fire at a keyed session start (any reason): check the material,
  * one classify call at the auto ceiling, write the record. The write
  * lands before `resources_discover` reads — pi awaits session_start
  * handlers first — so the widening applies to the firing session with no
  * /reload. Concurrent first starts may both fire; the atomic write keeps
- * one record. Keyless (the slot cannot resolve) → silent skip, the
- * status block names the miss. The never-throw floor owns the whole
- * hook: a gate bug degrades to a notify, never a failed startup.
+ * one record. Keyless (the slot cannot resolve) skips silently — the
+ * status block names the project-side material misses only, since a
+ * keyless host is not a project fact. The never-throw floor owns the
+ * whole hook — the try wraps everything, so a gate bug degrades to a
+ * warning notify, never a failed startup.
  */
 export async function autoFireGate(
 	event: Pick<SessionStartEvent, "reason">,
@@ -722,31 +775,32 @@ export async function autoFireGate(
 	seam: GateSeam = liveGateSeam(ctx.modelRegistry),
 ): Promise<void> {
 	void event; // any reason fires — the record is the once-per-project signal
-	const stateRead = readSkillsState(ctx.cwd);
-	const notebook = readNotebookSlice(ctx.cwd);
-	const skip = gateSkipReason(stateRead, notebook);
-	if (skip !== undefined || stateRead.kind !== "ok") return;
-	let keyed: boolean;
 	try {
-		keyed = await seam.keyed();
-	} catch {
-		return; // the probe itself failed — keyless for all the gate knows
-	}
-	if (!keyed) return;
-	const run = await runGate(seam, ctx.cwd, "auto");
-	if (run.kind === "failed") {
-		ctx.ui.notify(`/${SKILLS_COMMAND} gate did not run: ${run.why}`, "warning");
-		return;
-	}
-	try {
-		writeGateDecision(ctx.cwd, stateRead.state, run.record);
+		// One read feeds the skip check and the run: the write lands over
+		// the same state it judged, so a concurrent toggle's write is never
+		// silently erased by a stale read here.
+		const stateRead = readSkillsState(ctx.cwd);
+		const skip = gateSkipReason(stateRead, readNotebookSlice(ctx.cwd));
+		if (skip !== undefined || stateRead.kind !== "ok") return;
+		let keyed: boolean;
+		try {
+			keyed = await seam.keyed();
+		} catch {
+			return; // the probe itself failed — keyless for all the gate knows
+		}
+		if (!keyed) return;
+		const run = await runGate(seam, ctx.cwd, "auto");
+		if (run.kind === "failed") {
+			ctx.ui.notify(`/${SKILLS_COMMAND} gate did not run: ${run.why}`, "warning");
+			return;
+		}
+		writeGateRecord(ctx.cwd, stateRead.state, run.record, ctx.ui, `/${SKILLS_COMMAND} gate`);
 		ctx.ui.notify(
 			`/${SKILLS_COMMAND} gate: classAllow is now ${run.classAllow.join(", ")} — the record is in ${STATE_DIR}/${STATE_FILE}`,
 			"info",
 		);
 	} catch (error) {
-		tryUnlinkTmp(path.join(ctx.cwd, STATE_DIR, STATE_FILE));
-		ctx.ui.notify(`/${SKILLS_COMMAND} gate could not write: ${errorMessage(error)}`, "warning");
+		ctx.ui.notify(`/${SKILLS_COMMAND} gate did not run: ${errorMessage(error)}`, "warning");
 	}
 }
 
@@ -936,13 +990,7 @@ async function runExplicitGate(ceiling: "auto" | "cloud", ctx: SkillsContext): P
 		ctx.ui.notify(`gate did not run: ${run.why} — the record is unchanged; retry later`, "error");
 		return;
 	}
-	try {
-		writeGateDecision(ctx.cwd, stateRead.state, run.record);
-	} catch (error) {
-		tryUnlinkTmp(path.join(ctx.cwd, STATE_DIR, STATE_FILE));
-		ctx.ui.notify(`gate could not write: ${errorMessage(error)}`, "error");
-		return;
-	}
+	writeGateRecord(ctx.cwd, stateRead.state, run.record, ctx.ui, "gate");
 	ctx.ui.notify(
 		`gate: classAllow is now ${run.classAllow.join(", ")} (${run.record.rationale}) — run /reload to apply it`,
 		"info",
