@@ -3,7 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { execSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { gitStatus, manifestSha256 } from "./dogfood-gates.mjs";
+import { manifestSha256, requireCleanTree } from "./dogfood-gates.mjs";
 import { NODE_FLOOR, PI_FLOOR, readSessionEvidence } from "./session-evidence.mjs";
 
 // SemVer comparison: true when a >= b. Prereleases follow SemVer precedence
@@ -2306,10 +2306,7 @@ export function auditSession(dir, rootArg, legs = []) {
 			`expected ${names.length + poolExpected.size} checkout skill advertisements (${names.length} inventory + ${poolExpected.size} pool), found ${checkoutRecords.length}`,
 		);
 	}
-	const dirty = gitStatus(root);
-	if (dirty) {
-		throw new Error(`working tree dirty:\n${dirty}`);
-	}
+	requireCleanTree(root, "working tree dirty");
 	const head = execSync("git rev-parse HEAD", { cwd: root }).toString().trim();
 	const preHead = preHeadRaw.trim();
 	if (head !== preHead) {
@@ -2371,10 +2368,7 @@ export function auditSession(dir, rootArg, legs = []) {
 	}
 	// Final state recheck: the audited bytes and the cited HEAD must still
 	// describe the tree at attestation time.
-	const dirtyFinal = gitStatus(root);
-	if (dirtyFinal) {
-		throw new Error(`working tree dirty at attestation time:\n${dirtyFinal}`);
-	}
+	requireCleanTree(root, "working tree dirty at attestation time");
 	const headFinal = execSync("git rev-parse HEAD", { cwd: root }).toString().trim();
 	if (headFinal !== head) {
 		throw new Error(`HEAD moved during audit: ${head} -> ${headFinal}`);

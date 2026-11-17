@@ -2,11 +2,13 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 // Unit tests for the pure halves of scripts/check-strike.mjs (the evidence-
-// freshness gate, #27, the CI-green gate, #41 retro, and the review-
-// coverage gate, #133 retro). The gh/git orchestration around them stays
-// untested — same seam split as audit-dogfood.mjs.
+// freshness gate, #27, the CI-green gate, #41 retro, the review-coverage
+// gate, #133 retro, and the spec-close gate, #172 retro). The gh/git
+// orchestration around them stays untested — same seam split as
+// audit-dogfood.mjs.
 import {
 	ciChecks,
+	closesSpec,
 	declaredParent,
 	disclosedRanges,
 	evidenceFreshness,
@@ -171,4 +173,48 @@ test("uncoveredCommits names branch commits no range covers, in branch order", (
 	assert.deepEqual(uncoveredCommits(branch, [R1, R3]), [R2]);
 	assert.deepEqual(uncoveredCommits(branch, []), branch);
 	assert.deepEqual(uncoveredCommits(branch, [R1, R2, R3, "fffaaa111"]), []);
+});
+
+test("a closing keyword in any of GitHub's nine forms closes the named spec", () => {
+	assert.equal(closesSpec("Closes #172", 172), true);
+	assert.equal(closesSpec("fixes #172.", 172), true);
+	assert.equal(closesSpec("Resolved #172 — environment strike", "172"), true);
+	assert.equal(closesSpec("this closes #999 — another spec", 172), false);
+	assert.equal(closesSpec("closes#172", 172), false); // no separator: not a keyword
+});
+
+test("the issue-URL and owner/repo#<n> forms close — but only this repo's", () => {
+	// GitHub honors the keyword on a full issue URL or an owner/repo
+	// reference; either pointing at another repo closes that repo's issue,
+	// never this one.
+	assert.equal(
+		closesSpec("Closes https://github.com/hugolld/theta-agent/issues/172", 172),
+		true,
+	);
+	assert.equal(closesSpec("fixes hugolld/theta-agent#172", 172), true);
+	assert.equal(
+		closesSpec("fixes https://github.com/hugolld/theta-agent/issues/999", 172),
+		false,
+	);
+	assert.equal(
+		closesSpec("Closes https://github.com/other/repo/issues/172", 172),
+		false,
+	);
+	assert.equal(closesSpec("Closes other/repo#172", 172), false);
+});
+
+test("a prose mention does not close — the #167 failure mode, pinned", () => {
+	// PR #169's body named #167 in prose and carried no closing keyword;
+	// the merge left the spec open past teardown until a routing pass
+	// noticed. The bare reference must parse as no close.
+	assert.equal(closesSpec("Pool S3 (#167) — the pool joins the replay net", 167), false);
+	assert.equal(closesSpec("the spec is #172; see the issue", 172), false);
+});
+
+test("a fenced example is not a close — the same rule the review ranges carry", () => {
+	assert.equal(closesSpec(["```", "Closes #172", "```"].join("\n"), 172), false);
+	assert.equal(
+		closesSpec(["prose", "```", "closes #172", "```", "", "Closes #172"].join("\n"), 172),
+		true,
+	);
 });

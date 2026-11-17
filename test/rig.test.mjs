@@ -1,13 +1,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile, mkdtemp, mkdir, rm, stat, symlink, writeFile, chmod } from "node:fs/promises";
-import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { createJiti } from "jiti";
 import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { gitStatus } from "../scripts/dogfood-gates.mjs";
+import { gitStatus, requireCleanTree } from "../scripts/dogfood-gates.mjs";
+import { initHardenedGitRepo } from "./helpers/git-repo.mjs";
 import { SESSION_FILES } from "../scripts/session-evidence.mjs";
 import { assertPoolPack, parseFlags, poolStateJson, prepareProviderConfig, prepareGatewayConfig, gatewayPreflightScript, runTeardown, stagePoolStateCommand } from "./rig/run.mjs";
 
@@ -113,6 +114,32 @@ test("pool pack validation names the valid packs and refuses the rest", () => {
 		assert.throws(() => assertPoolPack("bioinformatics", empty), /no pool/);
 	} finally {
 		rmSync(empty, { recursive: true, force: true });
+	}
+});
+
+// #172's retro: the refusal used to drop the porcelain output it already
+// held, and the #167 capture spent its refusal rediscovering the offender
+// (an untracked node_modules symlink) by hand. The dirt rides the message,
+// byte for byte against the gitStatus the gate reads.
+test("the clean-tree gate names the dirt it refuses", () => {
+	const repo = initHardenedGitRepo(mkdtempSync(path.join(tmpdir(), "rig-clean-tree-")));
+	try {
+		assert.doesNotThrow(() => requireCleanTree(repo));
+		writeFileSync(path.join(repo, "node_modules"), "");
+		const dirt = gitStatus(repo);
+		assert.ok(dirt.includes("node_modules"));
+		assert.throws(
+			() => requireCleanTree(repo),
+			(error) => error.message === `working tree dirty — commit first:\n${dirt}`,
+		);
+	} finally {
+		rmSync(repo, { recursive: true, force: true });
+	}
+	const notGit = mkdtempSync(path.join(tmpdir(), "rig-not-git-"));
+	try {
+		assert.throws(() => requireCleanTree(notGit), /cannot read git status/);
+	} finally {
+		rmSync(notGit, { recursive: true, force: true });
 	}
 });
 

@@ -47,7 +47,7 @@ import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSyn
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { gitStatus, manifestSha256, run as spawnRun } from "../../scripts/dogfood-gates.mjs";
+import { manifestSha256, requireCleanTree, run as spawnRun } from "../../scripts/dogfood-gates.mjs";
 import { SESSION_FILES } from "../../scripts/session-evidence.mjs";
 import { BENCH_TASKS, benchTaskById } from "../eval/bench-tasks.mjs";
 import { BENCH_FILES, buildReport, buildSuiteReport, resolveJudge, runJudge, sumSessionUsage } from "../eval/bench-report.mjs";
@@ -519,13 +519,11 @@ async function preflightJudges(tasks) {
 // dir for startContainer.
 function evalStaging(flags) {
 	waitForDaemon();
-	let status;
 	try {
-		status = gitStatus(repoRoot);
+		requireCleanTree(repoRoot);
 	} catch (error) {
-		fail(`cannot read git status: ${error.message}`);
+		fail(error.message);
 	}
-	if (status) fail("working tree dirty — commit first");
 	headSha = run("git", ["-C", repoRoot, "rev-parse", "HEAD"]).stdout.trim();
 	const providerDir = prepareProviderConfig(flags.provider);
 	process.on("exit", () => runTeardown({ containerName: container, sourceDir, providerDir }));
@@ -724,13 +722,11 @@ function main() {
 	}
 	if (subcommand !== "run" && subcommand !== "shell") fail(`unknown subcommand: ${subcommand}`);
 
-	let status;
 	try {
-		status = gitStatus(repoRoot);
+		requireCleanTree(repoRoot);
 	} catch (error) {
-		fail(`cannot read git status: ${error.message}`);
+		fail(error.message);
 	}
-	if (status) fail("working tree dirty — commit first");
 	headSha = run("git", ["-C", repoRoot, "rev-parse", "HEAD"]).stdout.trim();
 
 	let providerDir;
