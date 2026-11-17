@@ -183,13 +183,15 @@ test("a closing keyword in any of GitHub's nine forms closes the named spec", ()
 	assert.equal(closesSpec("closes#172", 172), false); // no separator: not a keyword
 });
 
-test("the issue-URL form closes — but only this repo's URL", () => {
-	// GitHub honors the keyword on a full issue URL; a URL at another repo
-	// closes that repo's issue, never this one.
+test("the issue-URL and owner/repo#<n> forms close — but only this repo's", () => {
+	// GitHub honors the keyword on a full issue URL or an owner/repo
+	// reference; either pointing at another repo closes that repo's issue,
+	// never this one.
 	assert.equal(
 		closesSpec("Closes https://github.com/hugolld/theta-agent/issues/172", 172),
 		true,
 	);
+	assert.equal(closesSpec("fixes hugolld/theta-agent#172", 172), true);
 	assert.equal(
 		closesSpec("fixes https://github.com/hugolld/theta-agent/issues/999", 172),
 		false,
@@ -198,6 +200,7 @@ test("the issue-URL form closes — but only this repo's URL", () => {
 		closesSpec("Closes https://github.com/other/repo/issues/172", 172),
 		false,
 	);
+	assert.equal(closesSpec("Closes other/repo#172", 172), false);
 });
 
 test("a prose mention does not close — the #167 failure mode, pinned", () => {

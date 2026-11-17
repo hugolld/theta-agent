@@ -8,6 +8,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { gitStatus, requireCleanTree } from "../scripts/dogfood-gates.mjs";
+import { initHardenedGitRepo } from "./helpers/git-repo.mjs";
 import { SESSION_FILES } from "../scripts/session-evidence.mjs";
 import { assertPoolPack, parseFlags, poolStateJson, prepareProviderConfig, prepareGatewayConfig, gatewayPreflightScript, runTeardown, stagePoolStateCommand } from "./rig/run.mjs";
 
@@ -121,9 +122,8 @@ test("pool pack validation names the valid packs and refuses the rest", () => {
 // (an untracked node_modules symlink) by hand. The dirt rides the message,
 // byte for byte against the gitStatus the gate reads.
 test("the clean-tree gate names the dirt it refuses", () => {
-	const repo = mkdtempSync(path.join(tmpdir(), "rig-clean-tree-"));
+	const repo = initHardenedGitRepo(mkdtempSync(path.join(tmpdir(), "rig-clean-tree-")));
 	try {
-		spawnSync("git", ["-C", repo, "init", "-q"]);
 		assert.doesNotThrow(() => requireCleanTree(repo));
 		writeFileSync(path.join(repo, "node_modules"), "");
 		const dirt = gitStatus(repo);
