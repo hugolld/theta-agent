@@ -7,11 +7,18 @@
 // submit cannot cross the submit gate there. Ported from the M5 S0 live
 // leg's driver (the pattern docs/agents/dogfood.md records).
 //
-// Usage: node rpc-driver.mjs <checkout> <sessionDir> "<prompt>" [allow|deny]
+// Usage: node rpc-driver.mjs [--cwd <dir>] <checkout> <sessionDir> "<prompt>" [allow|deny]
 // Environment: RIG_PROVIDER, RIG_MODEL (the session's provider and model —
 // the rig runner passes what it launched with), RIG_TIMEOUT (the outer GNU
 // timeout bound; the inner backstop fires only past it, so the outer 124
 // contract stays the one that records a timeout).
+//
+// --cwd (spec #164) names the session's working directory — a dogfood whose
+// evidence lives in an arbitrary research project's cwd, not the checkout.
+// Absent, the checkout stays the default. With it, the spawn is `pi -e
+// <checkout>` directly: theta --dev's trust anchor covers only the checkout
+// itself (never an arbitrary cwd), and the operator naming the checkout in
+// argv is the out-of-band vouch -e already asks for.
 //
 // The wrapper that launches this driver owns the exit-status file: this
 // driver's own exit code mirrors pi's, and on SIGTERM (GNU timeout's first
@@ -28,12 +35,28 @@ import { SESSION_FILES } from "../../scripts/session-evidence.mjs";
 // must pass that discovery the way run.mjs's help path does.
 const argv = process.argv.slice(2);
 if (argv.length === 0) {
-	console.log("usage: rpc-driver.mjs <checkout> <sessionDir> <prompt> [allow|deny]");
+	console.log("usage: rpc-driver.mjs [--cwd <dir>] <checkout> <sessionDir> <prompt> [allow|deny]");
 	process.exit(0);
 }
-const [checkout, sessionDir, prompt, gateAnswer = "allow"] = argv;
+// --cwd <dir> follows the rig runner's own flag convention and may sit
+// anywhere in argv; everything else stays positional.
+let sessionCwd;
+const positional = [];
+for (let i = 0; i < argv.length; i++) {
+	if (argv[i] !== "--cwd") {
+		positional.push(argv[i]);
+		continue;
+	}
+	const value = argv[++i];
+	if (value === undefined) {
+		console.error("--cwd needs a value");
+		process.exit(2);
+	}
+	sessionCwd = value;
+}
+const [checkout, sessionDir, prompt, gateAnswer = "allow"] = positional;
 if (!checkout || !sessionDir || !prompt) {
-	console.error("usage: rpc-driver.mjs <checkout> <sessionDir> <prompt> [allow|deny]");
+	console.error("usage: rpc-driver.mjs [--cwd <dir>] <checkout> <sessionDir> <prompt> [allow|deny]");
 	process.exit(2);
 }
 // The verdict is exact words only: a typo'd answer must refuse to run, not
@@ -56,19 +79,30 @@ for (const key of Object.keys(childEnv)) {
 	if (key.startsWith("ANTHROPIC_") || key.startsWith("PI_")) delete childEnv[key];
 }
 
-const child = spawn(
-	"node",
-	[
-		"bin/theta.mjs", "--dev", "--mode", "rpc",
-		"--provider", provider, "--model", model,
-		"--session-dir", sessionDir,
-	],
-	{
-		cwd: checkout,
-		stdio: ["pipe", "pipe", "pipe"],
-		env: childEnv,
-	},
-);
+const sessionArgs = ["--mode", "rpc", "--provider", provider, "--model", model, "--session-dir", sessionDir];
+// The spawn shape follows the cwd (spec #164): from the checkout, the
+// launcher's own `--dev` anchor vouches for it; in an arbitrary project
+// cwd that anchor refuses by design, so the driver vouches the checkout
+// itself the way theta does — `pi -e <checkout>`.
+const child =
+	sessionCwd === undefined
+		? spawn("node", ["bin/theta.mjs", "--dev", ...sessionArgs], {
+				cwd: checkout,
+				stdio: ["pipe", "pipe", "pipe"],
+				env: childEnv,
+			})
+		: spawn("pi", ["-e", checkout, ...sessionArgs], {
+				cwd: sessionCwd,
+				stdio: ["pipe", "pipe", "pipe"],
+				env: childEnv,
+			});
+// A spawn that cannot start — pi missing from PATH, a --cwd that does not
+// exist — fails as a clean exit-2 message, not an unhandled-error stack:
+// the wrapper would otherwise record noise for a tooling miss.
+child.on("error", (error) => {
+	console.error(`driver could not spawn the session: ${error.message}`);
+	process.exit(2);
+});
 const events = [];
 let settled = false;
 let finished = false;
