@@ -30,7 +30,11 @@ clean-room rig's gateway legs — and the M6 eval suite: the replay net's
 sanitized-capture fixtures pinned per model-visible surface class and the
 benchmark layer's tasks graded workspace-as-oracle in the rig
 ([ADR 0007](docs/adr/0007-the-eval-suite-is-a-custom-two-layer-harness.md),
-`docs/agents/eval.md`). The milestones below continue from there.
+`docs/agents/eval.md`). Past M6, the skill pool landed in steps
+([ADR 0008](docs/adr/0008-the-skill-pool-is-a-vendored-project-scoped-library.md)):
+Tier-3 domain packs at `pool/`, vendored verbatim and loaded per research
+project through a keyed, gated loader. The milestones below continue from
+there.
 
 ## What Theta will be
 
@@ -196,17 +200,34 @@ recorded on [issue #5](https://github.com/hugolld/theta-agent/issues/5).
 
 ## Skill pool
 
-Beside the always-shipped Tier-1 library, the repo carries a **skill pool** of
-vendored domain skills at `pool/` — verbatim K-Dense trees under the same
-[ADR 0001](docs/adr/0001-vendor-k-dense-skills-verbatim.md) rules, organized
-as one **domain pack** per research domain and loaded per research project
-rather than shipped in the package
+Theta's skill surface spans the role classes it inherits from K-Dense as
+tiers, plus Theta's own skills beside them. The **Tier-1 research-loop
+core** (see [Vendored skills](#vendored-skills)) ships in the package and
+loads in every session. **Tier-2 compute infrastructure** stays excluded —
+theta-compute replaces K-Dense's compute stack
+([ADR 0001](docs/adr/0001-vendor-k-dense-skills-verbatim.md)). And the third
+inherited tier — **Tier-3 domain modules**, the domain skills a given
+research project actually calls — is the **skill pool**: vendored trees at
+`pool/`, verbatim under the same ADR 0001 rules, organized as one **domain
+pack** per research domain and loaded per research project rather than
+shipped in the package
 ([ADR 0008](docs/adr/0008-the-skill-pool-is-a-vendored-project-scoped-library.md)).
-[`pool/index.md`](pool/index.md) lists every skill with its class column —
-`local` (no credential, no spend), `key` (a credential, no metered spend),
-`cloud` (credential plus metered spend) — verified against each skill's stated
-requirements. The K-Dense attribution and citation below cover the pool trees
-too.
+Beside the tiers, the repo's own skills are self-authored: the
+[connector skills](docs/adr/0002-connectors-are-skills-not-registered-tools.md)
+wrapping scholarly APIs (`theta-lit-search`), the project notebook
+(`theta-notebook`), and the gateway skill (`theta-compute`).
+
+[`pool/index.md`](pool/index.md) is the map: every skill with its class
+column — `local` (no credential, no spend), `key` (a credential, no metered
+spend), `cloud` (credential plus metered spend) — verified against each
+skill's stated requirements. The loader's machine-readable twin of that
+column, `pool/classes.json`, gates what loads; a per-project state file
+(`.theta/skills.json`) carries each project's pack selection and class
+allowance, and only a one-call judgment over the project notebook — firing
+once at a keyed session's start, and thereafter only as an explicit owner
+act — can widen that allowance beyond `local`. A keyless session never
+widens it: it loads exactly what the committed state admits. The K-Dense
+attribution and citation below cover the pool trees too.
 
 First wave (upstream release `v2.72.0`, commit `526ebce`, vendored 2026-11-15):
 protein-engineering (5), bioinformatics (32), cheminformatics (11) — 48 skills.

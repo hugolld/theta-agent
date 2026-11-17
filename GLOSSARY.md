@@ -5,7 +5,7 @@ Language for the theta-agent repo: the pi package that grows into Theta, the sci
 ## Language
 
 **Skill tiers**:
-The role classes Theta inherits from the K-Dense skill library: Tier-1 research-loop core, Tier-2 compute infrastructure, Tier-3 domain modules. M1 imports Tier-1 only.
+The role classes Theta inherits from the K-Dense skill library: Tier-1 research-loop core (vendored in M1, ships in every session), Tier-2 compute infrastructure (excluded — theta-compute replaces it), Tier-3 domain modules (the skill pool, loaded per research project). Every tier has landed or found its replacement.
 _Avoid_: source tiers (the survey's literature-matrix meaning), levels
 
 **Vendored skill**:
@@ -143,3 +143,7 @@ _Avoid_: skill bundle, skill collection
 **Jev gate**:
 The skill pool's class-allowance judgment: a one-call `models.classify()` over the project notebook's recent entries and the enabled pack names, deciding which credential classes a project's `skills.json` may load beyond `local`. Fires automatically once per project at a keyed session start — a session is keyed when its pi config resolves the classifier slot — and thereafter only as an explicit owner act; a human-widened allow set outranks the automatic fire, and the metered-spend `cloud` class never enters without the owner's explicit run. The decision and its composed rationale land in the state file; the classifier's key never leaves the host. ADR 0008 decides it.
 _Avoid_: classifier gate, model gate
+
+**Class map**:
+The skill pool's per-skill credential class map, `pool/classes.json`: one `<pack>/<skill>` → `local` | `key` | `cloud` entry per pool skill — the machine-readable twin of `pool/index.md`'s class column, which the loader reads to gate what a project's state may load. Rides every `pool:<pack>` surface digest, so a reclass is model-visible exactly like a body edit. Spec #160 decides it.
+_Avoid_: class list, class table
