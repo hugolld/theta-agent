@@ -29,7 +29,6 @@ import json
 import os
 import re
 import sys
-from datetime import date
 from pathlib import Path
 from typing import NoReturn
 from urllib.parse import urlencode
@@ -42,6 +41,8 @@ sys.dont_write_bytecode = True
 
 from _common import (  # noqa: E402
 	ApiError,
+	attach_provenance,
+	author_line,
 	collapse_ws,
 	emit,
 	fail,
@@ -287,23 +288,6 @@ def run_summary(args: argparse.Namespace, client: Eutils) -> dict:
 		},
 		client.calls,
 	)
-
-
-def attach_provenance(payload: dict, calls: list[dict]) -> dict:
-	"""Attach the repeat-the-call record: endpoints, parameters, access date."""
-	payload["provenance"] = {
-		"calls": calls,
-		"accessed": date.today().isoformat(),
-	}
-	return payload
-
-
-def author_line(record: dict) -> str:
-	authors = record["authors"]
-	if not authors:
-		return "-"
-	shown = ", ".join(authors[:3])
-	return f"{shown} et al." if len(authors) > 3 else shown
 
 
 def print_text(payload: dict) -> None:

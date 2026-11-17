@@ -14,3 +14,6 @@ CLAUDE.local.md
 
 # gateway local uv environment (M4, ADR 0004)
 gateway/.venv/
+
+# firecrawl plugin scratch (web-research captures; local only, never ships)
+.firecrawl/

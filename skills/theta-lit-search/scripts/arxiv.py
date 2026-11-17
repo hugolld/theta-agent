@@ -36,7 +36,6 @@ import argparse
 import re
 import sys
 import xml.etree.ElementTree as ET
-from datetime import date
 from pathlib import Path
 from typing import NoReturn
 from urllib.parse import urlencode, urlsplit
@@ -49,6 +48,8 @@ sys.dont_write_bytecode = True
 
 from _common import (  # noqa: E402
 	ApiError,
+	attach_provenance,
+	author_line,
 	collapse_ws,
 	emit,
 	fail,
@@ -270,15 +271,6 @@ def read_feed(feed: ET.Element, endpoint: str) -> tuple[list[dict], str | None, 
 	return records, echoed, int(total) if total.isdigit() else None
 
 
-def attach_provenance(payload: dict, calls: list[dict]) -> dict:
-	"""Attach the repeat-the-call record: endpoints, parameters, access date."""
-	payload["provenance"] = {
-		"calls": calls,
-		"accessed": date.today().isoformat(),
-	}
-	return payload
-
-
 def run_search(args: argparse.Namespace, client: ArxivApi) -> dict:
 	params = {"search_query": args.query, "max_results": str(args.retmax)}
 	if args.sort != "relevance":
@@ -331,14 +323,6 @@ def run_summary(args: argparse.Namespace, client: ArxivApi) -> dict:
 		},
 		client.calls,
 	)
-
-
-def author_line(record: dict) -> str:
-	authors = record["authors"]
-	if not authors:
-		return "-"
-	shown = ", ".join(authors[:3])
-	return f"{shown} et al." if len(authors) > 3 else shown
 
 
 def print_text(payload: dict) -> None:

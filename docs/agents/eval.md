@@ -71,7 +71,8 @@ node scripts/drill-scratch.mjs /tmp/spec134-drill test/eval/replay-net.test.mjs
 #    (description untouched, so the advertisement stands) reds exactly the
 #    orchestrator pin — the re-sync drift class ADR 0007 names, by name;
 # 3. one byte in a frontmatter description moves the advertisement digest
-#    and reds all five — the other pin firing, not noise.
+#    and reds every fixture — five at the #134 measurement, six since the
+#    #167 pool capture — the other pin firing, not noise.
 ```
 
 The captured leg output rides the strike's PR body. (The #134 drill measured all three legs 2026-11-14; leg 1's red set is the binding set, not the sampled fixture alone.)

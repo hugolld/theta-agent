@@ -50,7 +50,7 @@ import type {
  */
 
 /** The pool root's directory name under the package root. */
-export const POOL_DIR = "pool";
+const POOL_DIR = "pool";
 
 /** The class map's file name inside the pool root. */
 export const CLASSES_FILE = "classes.json";
@@ -77,10 +77,10 @@ export const COMMAND_ACTOR = "command:theta:skills";
 export const GATE_ACTOR = "classify:jev";
 
 /** The classifier slot the gate resolves — the named OpenRouter Jev slot. */
-export const GATE_CLASSIFIER = { provider: "openrouter", id: "typesafe/jev-1.13" } as const;
+const GATE_CLASSIFIER = { provider: "openrouter", id: "typesafe/jev-1.13" } as const;
 
 /** The auto gate fires only when classAllow is exactly this — a human widening outranks it. */
-export const DEFAULT_CLASS_ALLOW = ["local"] as const;
+const DEFAULT_CLASS_ALLOW = ["local"] as const;
 
 /** The notebook's last entries feeding the classify state, capped per the spec. */
 const NOTEBOOK_WINDOW = 10;
@@ -297,7 +297,7 @@ function readJsonObject(file: string): JsonObjectRead {
  * diagnosis block carries one aggregate line naming the file, not one line
  * per skill.
  */
-export function readClassesMap(root: string): ClassesRead {
+function readClassesMap(root: string): ClassesRead {
 	const read = readJsonObject(path.join(root, CLASSES_FILE));
 	if (read.kind !== "ok") return read;
 	const classes: Record<string, SkillClass> = {};
@@ -547,7 +547,7 @@ export interface GateSeam {
  * `ctx.modelRegistry.classify()` — pi resolves auth, and theta code
  * never sees the key.
  */
-export function liveGateSeam(
+function liveGateSeam(
 	registry: Pick<ModelRegistry, "getAvailableOfType" | "classify">,
 ): GateSeam {
 	return {
