@@ -353,11 +353,10 @@ test("rpc driver refuses a gate answer that is neither allow nor deny", async (t
 	await assert.rejects(readFile(path.join(sessionDir, "raw-rpc-events.jsonl")));
 });
 
-// #164: a session whose evidence lives in an arbitrary project cwd (the S2
-// Jev-gate dogfood shape). With --cwd the driver spawns `pi -e <checkout>`
-// directly — theta --dev's anchor does not cover arbitrary cwds — and the
-// gate confirm, settle, and capture contracts all stay the print leg's.
-test("rpc driver takes --cwd: pi -e <checkout> runs in the project cwd", async (t) => {
+// The four dirs a driver-spawn test stages — the stub pi on a private PATH,
+// the vouched checkout, the project cwd, and the session dir — with their
+// cleanup in one place (the #164 and #167 driver tests share the shape).
+async function driverDirs(t) {
 	const piDir = await stubPiDir();
 	const checkout = await mkdtemp(path.join(tmpdir(), "rig-drv-"));
 	const projectCwd = await mkdtemp(path.join(tmpdir(), "rig-proj-"));
@@ -370,6 +369,15 @@ test("rpc driver takes --cwd: pi -e <checkout> runs in the project cwd", async (
 			rm(sessionDir, { recursive: true, force: true }),
 		]),
 	);
+	return { piDir, checkout, projectCwd, sessionDir };
+}
+
+// #164: a session whose evidence lives in an arbitrary project cwd (the S2
+// Jev-gate dogfood shape). With --cwd the driver spawns `pi -e <checkout>`
+// directly — theta --dev's anchor does not cover arbitrary cwds — and the
+// gate confirm, settle, and capture contracts all stay the print leg's.
+test("rpc driver takes --cwd: pi -e <checkout> runs in the project cwd", async (t) => {
+	const { piDir, checkout, projectCwd, sessionDir } = await driverDirs(t);
 
 	const run = spawnSync(
 		process.execPath,
@@ -398,18 +406,7 @@ test("rpc driver takes --cwd: pi -e <checkout> runs in the project cwd", async (
 // runs with the sandbox off. The flag rides the direct pi spawn only; a
 // bare checkout-cwd run would silently ignore it, so that pairing refuses.
 test("rpc driver takes --no-sandbox: the flag rides the pi spawn and pairs only with --cwd", async (t) => {
-	const piDir = await stubPiDir();
-	const checkout = await mkdtemp(path.join(tmpdir(), "rig-drv-"));
-	const projectCwd = await mkdtemp(path.join(tmpdir(), "rig-proj-"));
-	const sessionDir = await mkdtemp(path.join(tmpdir(), "rig-drvsess-"));
-	t.after(() =>
-		Promise.all([
-			rm(piDir, { recursive: true, force: true }),
-			rm(checkout, { recursive: true, force: true }),
-			rm(projectCwd, { recursive: true, force: true }),
-			rm(sessionDir, { recursive: true, force: true }),
-		]),
-	);
+	const { piDir, checkout, projectCwd, sessionDir } = await driverDirs(t);
 
 	const run = spawnSync(
 		process.execPath,
