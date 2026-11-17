@@ -185,7 +185,7 @@ test("--rpc without --gateway refuses without a daemon", () => {
 // test is the real one, and the stub reads its stdin through the driver's
 // own exported drainJsonl — the wire format has one reader, not two copies
 // of the same loop.
-const rpcStubScript = (jsonlHelperUrl) =>
+const rpcStubScript = () =>
 	[
 		"import { writeFileSync } from 'node:fs';",
 		`import { drainJsonl } from ${JSON.stringify(jsonlHelperUrl)};`,
@@ -219,7 +219,7 @@ async function seedRecord(dir) {
 
 async function stubCheckout() {
 	const dir = await mkdtemp(path.join(tmpdir(), "rig-drv-"));
-	await writeFile(path.join(dir, "theta.mjs"), rpcStubScript(jsonlHelperUrl));
+	await writeFile(path.join(dir, "theta.mjs"), rpcStubScript());
 	await seedRecord(dir);
 	// The driver spawns `node bin/theta.mjs` — a bin/ symlink to the stub.
 	await mkdir(path.join(dir, "bin"));
@@ -233,7 +233,7 @@ async function stubCheckout() {
 async function stubPiDir() {
 	const dir = await mkdtemp(path.join(tmpdir(), "rig-pi-"));
 	const body = path.join(dir, "pi-body.mjs");
-	await writeFile(body, rpcStubScript(jsonlHelperUrl));
+	await writeFile(body, rpcStubScript());
 	await seedRecord(dir);
 	await writeFile(path.join(dir, "pi"), `#!/usr/bin/env node\nimport(${JSON.stringify(pathToFileURL(body).href)});\n`);
 	await chmod(path.join(dir, "pi"), 0o755);
