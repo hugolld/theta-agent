@@ -22,7 +22,11 @@
 // port-forward, which the preflight verifies from inside the container
 // before the session launches. `--rpc` runs the confirm-answering driver
 // (test/rig/rpc-driver.mjs) instead of `--print`, so a gated submit can
-// cross the submit gate in a headless run.
+// cross the submit gate in a headless run. `--pool <pack>` (spec #167)
+// stages a per-project skills.json into the clone before the session, so
+// the session loads that domain pack through the skill pool loader's
+// deterministic scan — a state file, never a credential: the pool leg
+// stays keyless, and the benchmark mode refuses the flag outright.
 //
 // `eval` is the benchmark layer's mode (spec #136, on the #135 tracer's
 // shape): one task from the checked-in list (test/eval/bench-tasks.mjs)
@@ -39,7 +43,7 @@
 // run-level report (bench-suite.json) lands at the evidence root once
 // every task is graded. Compaction stays native.
 
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -90,11 +94,11 @@ function waitForDaemon() {
 }
 
 export function parseFlags(argv) {
-	const flags = { timeout: 300, provider: defaultProvider, model: defaultModel, legs: [], gateway: false, rpc: false, suite: false };
+	const flags = { timeout: 300, provider: defaultProvider, model: defaultModel, legs: [], gateway: false, rpc: false, suite: false, pool: undefined };
 	const rest = [];
 	for (let i = 0; i < argv.length; i++) {
 		const arg = argv[i];
-		if (arg === "--provider" || arg === "--model") {
+		if (arg === "--provider" || arg === "--model" || arg === "--pool") {
 			const value = argv[++i];
 			if (value === undefined) fail(`${arg} needs a value`);
 			flags[arg.slice(2)] = value;
@@ -119,6 +123,49 @@ export function parseFlags(argv) {
 		}
 	}
 	return { flags, rest };
+}
+
+// The pool leg's staged state (spec #167): a --pool <pack> run writes the
+// per-project state file into the clone before the session launches, so
+// the session loads the pack through the S1 loader's deterministic scan —
+// keyless, no gate, no command: exactly the path the replay net's pool
+// scenario captures. The shape is the loader's state v1
+// (extensions/skill-pool.ts), single-line JSON; the literals are pinned
+// against the loader's own exports by test/rig.test.mjs.
+export function poolStateJson(pack) {
+	return `${JSON.stringify({
+		version: 1,
+		classAllow: ["local"],
+		packs: { [pack]: { enabled: true, history: [] } },
+	})}\n`;
+}
+
+// The in-container staging step: the state rides an env var (never the
+// bash command line) and lands at the gitignored <clone>/.theta/skills.json
+// — the same scratch home the notebook scenario's recorder writes into the
+// clone, tolerated by the clean-tree proof by .gitignore design.
+export function stagePoolStateCommand() {
+	return 'mkdir -p "$HOME/theta/.theta" && printf \'%s\' "$RIG_POOL_STATE" > "$HOME/theta/.theta/skills.json"';
+}
+
+function stagePoolState(pack) {
+	execIn(stagePoolStateCommand(), { env: { RIG_POOL_STATE: poolStateJson(pack) } });
+}
+
+// The --pool value must name a pack directory this repo's pool actually
+// carries — refused before any Docker is spent, naming the valid packs.
+// Throws (the CLI maps the message to its refusal); pinned by rig.test.mjs.
+export function assertPoolPack(pack, root = repoRoot) {
+	let entries;
+	try {
+		entries = readdirSync(path.join(root, "pool"), { withFileTypes: true });
+	} catch {
+		throw new Error("this repo carries no pool/ — a --pool leg has nothing to load");
+	}
+	const packs = entries.filter((entry) => entry.isDirectory()).map((entry) => entry.name).sort();
+	if (!packs.includes(pack)) {
+		throw new Error(`--pool must name a pool pack, got "${pack}" — valid packs: ${packs.join(", ")}`);
+	}
 }
 
 // The one credential the rig receives: the target provider's entry from the
@@ -311,15 +358,18 @@ function audit(legs) {
 	console.log(attestation);
 }
 
-// A benchmark leg refuses both rig extensions a dogfood leg can carry:
-// no gateway token path exists on a benchmark leg (spec #135), and the
-// RPC driver exists only to answer the submit gate — which never runs
-// here. Throws (the CLI maps the message to its refusal), so the
-// offline test can pin it without exiting the runner. Pinned by
-// bench-rig.test.mjs.
+// A benchmark leg refuses every rig extension a dogfood leg can carry:
+// no gateway token path exists on a benchmark leg (spec #135), the RPC
+// driver exists only to answer the submit gate — which never runs here —
+// and a staged pool state is a dogfood-leg concern: a benchmark session
+// runs in a bare task workspace, so a --pool value on an eval command
+// line is a flag confusion, refused before it is spent. Throws (the CLI
+// maps the message to its refusal), so the offline test can pin it
+// without exiting the runner. Pinned by bench-rig.test.mjs.
 export function assertBenchmarkFlags(flags) {
 	if (flags.gateway) throw new Error("--gateway is a dogfood-leg flag — a benchmark leg carries only the provider key");
 	if (flags.rpc) throw new Error("--rpc is a dogfood-leg flag — no confirm is ever asked on a benchmark leg");
+	if (flags.pool !== undefined) throw new Error("--pool is a dogfood-leg flag — a benchmark session runs in a bare task workspace");
 }
 
 // The eval mode's task selection (spec #136): one id runs that task,
@@ -639,12 +689,19 @@ async function runSuite(tasks, flags) {
 function main() {
 	const [subcommand, ...argv] = process.argv.slice(2);
 	if (subcommand === undefined || subcommand === "help" || subcommand === "--help") {
-		console.log("usage: run.mjs build | run [--provider P] [--model M] [--timeout S] [--session-dir D] [--leg ARG]... [--gateway] [--rpc] <prompt> | eval [--provider P] [--model M] [--timeout S] [--session-dir D] (--suite | <task-id>) | shell [--gateway]");
+		console.log("usage: run.mjs build | run [--provider P] [--model M] [--timeout S] [--session-dir D] [--leg ARG]... [--gateway] [--rpc] [--pool <pack>] <prompt> | eval [--provider P] [--model M] [--timeout S] [--session-dir D] (--suite | <task-id>) | shell [--gateway] [--pool <pack>]");
 		return;
 	}
 	const { flags, rest } = parseFlags(argv);
 	// Before the daemon wait, so a flag-only refusal never needs Docker.
 	if (flags.rpc && !flags.gateway) fail("--rpc needs --gateway — the confirm driver exists for gated gateway legs");
+	if (flags.pool !== undefined) {
+		try {
+			assertPoolPack(flags.pool);
+		} catch (error) {
+			fail(error.message);
+		}
+	}
 	if (subcommand === "eval") {
 		// Also before the daemon wait: a benchmark flag refusal, a task
 		// selection refusal, or a judge preflight failure must not need
@@ -699,6 +756,10 @@ function main() {
 		}
 
 		startContainer(providerDir, flags.gateway);
+		// The staged pool state lands after the clone exists and before any
+		// session or shell sees the tree — the deterministic loader path the
+		// pool scenario captures (spec #167).
+		if (flags.pool !== undefined) stagePoolState(flags.pool);
 		if (gatewayEntry) preflightGateway(gatewayEntry, providerDir);
 
 		if (subcommand === "shell") {

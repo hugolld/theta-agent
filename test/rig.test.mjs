@@ -1,14 +1,15 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile, mkdtemp, mkdir, rm, stat, symlink, writeFile, chmod } from "node:fs/promises";
-import { existsSync, readFileSync, realpathSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
+import { createJiti } from "jiti";
 import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { gitStatus } from "../scripts/dogfood-gates.mjs";
 import { SESSION_FILES } from "../scripts/session-evidence.mjs";
-import { parseFlags, prepareProviderConfig, prepareGatewayConfig, gatewayPreflightScript, runTeardown } from "./rig/run.mjs";
+import { assertPoolPack, parseFlags, poolStateJson, prepareProviderConfig, prepareGatewayConfig, gatewayPreflightScript, runTeardown, stagePoolStateCommand } from "./rig/run.mjs";
 
 const dockerfile = await readFile(fileURLToPath(new URL("./rig/Dockerfile", import.meta.url)), "utf8");
 const runnerPath = fileURLToPath(new URL("./rig/run.mjs", import.meta.url));
@@ -68,6 +69,51 @@ test("leg flags collect into order and leave the prompt in rest", () => {
 		".theta",
 	]);
 	assert.equal(rest.join(" "), "the prompt text");
+});
+
+// The pool leg (spec #167): --pool collects like the other value flags and
+// never bleeds into the prompt, the staged state parses through the
+// loader's own reader (the jiti pattern the skill-pool suite uses — the
+// staged bytes and the loader's state v1 cannot drift apart), and the
+// staging command writes the file the loader reads, from an env var,
+// never the bash command line.
+test("pool staging: the flag collects, the state loads, the command writes the loader's path", async () => {
+	const { flags, rest } = parseFlags(["--pool", "bioinformatics", "the prompt text"]);
+	assert.equal(flags.pool, "bioinformatics");
+	assert.equal(rest.join(" "), "the prompt text");
+	const { readSkillsState } = await createJiti(import.meta.url).import(
+		"../extensions/skill-pool.ts",
+	);
+	const dir = await mkdtemp(path.join(tmpdir(), "rig-pool-"));
+	try {
+		await mkdir(path.join(dir, ".theta"), { recursive: true });
+		await writeFile(path.join(dir, ".theta", "skills.json"), poolStateJson("bioinformatics"));
+		const read = readSkillsState(dir);
+		assert.equal(read.kind, "ok", `staged state must read as ok, got ${JSON.stringify(read)}`);
+		assert.equal(read.state.classAllow.length, 1);
+		assert.equal(read.state.classAllow[0], "local");
+		assert.equal(read.state.packs.bioinformatics.enabled, true);
+	} finally {
+		await rm(dir, { recursive: true, force: true });
+	}
+	const command = stagePoolStateCommand();
+	assert.match(command, /"\$HOME\/theta\/\.theta\/skills\.json"$/);
+	assert.match(command, /printf '%s' "\$RIG_POOL_STATE"/);
+	// No argv-quoted JSON anywhere: the bytes ride the env var only.
+	assert.doesNotMatch(command, /RIG_POOL_STATE=/);
+});
+
+// --pool is validated against the repo's own pool before anything
+// disposable is spent, and carries no credential shape at all.
+test("pool pack validation names the valid packs and refuses the rest", () => {
+	assert.doesNotThrow(() => assertPoolPack("bioinformatics"));
+	assert.throws(() => assertPoolPack("not-a-pack"), /valid packs: bioinformatics, cheminformatics, protein-engineering/);
+	const empty = mkdtempSync(path.join(tmpdir(), "rig-pool-empty-"));
+	try {
+		assert.throws(() => assertPoolPack("bioinformatics", empty), /no pool/);
+	} finally {
+		rmSync(empty, { recursive: true, force: true });
+	}
 });
 
 // The credential path: the prepared config carries the target provider and

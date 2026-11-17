@@ -8,6 +8,11 @@
 //                  name, description, and repo-relative location
 //   skill:<name>   one skill's whole tree under skills/<name>,
 //                  content-addressed
+//   pool:<pack>    one domain pack's whole tree under pool/<pack> plus
+//                  the class map pool/classes.json that gates what loads,
+//                  content-addressed (spec #167 — the class the pool
+//                  scenario binds; the pack is the re-sync unit, so a pack
+//                  re-sync reds every fixture that loaded it)
 //   extensions     the extension sources under extensions/,
 //                  content-addressed
 //   project-context  the project-instruction bytes pi loads into the
@@ -42,6 +47,7 @@ export const SURFACE_CLASSES = Object.freeze({
 	advertisement:
 		"the <available_skills> bytes every session carries, derived from every skill's frontmatter name, description, and repo-relative location, in inventory order",
 	skill: "one skill's whole tree under skills/<name>, content-addressed",
+	pool: "one domain pack's whole tree under pool/<pack> plus the class map pool/classes.json that gates what loads, content-addressed",
 	extensions: "the extension sources under extensions/, content-addressed",
 	"project-context":
 		"the project-instruction bytes pi loads into the system prompt — CLAUDE.md at the repo root",
@@ -55,6 +61,7 @@ export const SURFACE_CLASSES = Object.freeze({
 const SURFACE_ROOTS = Object.freeze({
 	advertisement: "skills",
 	skill: "skills",
+	pool: "pool",
 	extensions: "extensions",
 	"project-context": "CLAUDE.md",
 });
@@ -74,19 +81,43 @@ function sha256Bytes(bytes) {
 	return createHash("sha256").update(bytes).digest("hex");
 }
 
+// The `path\0sha256\n` lines a tree digest is hashed over, each file's
+// path prefixed with its class-relative location — the one line builder
+// the whole-tree digests share (the tree rule: fileTreeDigest and the
+// pool pack digest are its two callers). The sorted walk is the shared
+// helper's (test/helpers/tree-walk.mjs).
+function treeDigestLines(rootAbs, prefix) {
+	return sortedTreeFiles(rootAbs)
+		.map((rel) => `${prefix}${rel}\0${sha256Bytes(readFileSync(path.join(rootAbs, rel)))}\n`)
+		.join("");
+}
+
 // Content-addressed tree digest: sorted repo-relative paths, one
 // `path\0sha256\n` line per file — file bytes hashed, never embedded, so
 // the digest is machine-independent and a moved or renamed file is a
 // change. An empty tree refuses: a surface class that resolves to nothing
-// is a typo in the class, not a digest. The sorted walk is the shared
-// helper's (test/helpers/tree-walk.mjs).
+// is a typo in the class, not a digest.
 export function fileTreeDigest(rootAbs) {
-	const files = sortedTreeFiles(rootAbs);
-	if (files.length === 0) throw new Error(`surface tree is empty: ${rootAbs}`);
-	const canonical = files
-		.map((rel) => `${rel}\0${sha256Bytes(readFileSync(path.join(rootAbs, rel)))}\n`)
-		.join("");
+	const canonical = treeDigestLines(rootAbs, "");
+	if (canonical === "") throw new Error(`surface tree is empty: ${rootAbs}`);
 	return sha256Bytes(Buffer.from(canonical, "utf8"));
+}
+
+// The pool pack digest (spec #167): the pack's whole tree plus the class
+// map that gates what loads — both are inputs to every pool-loaded
+// session's advertisement (a reclass changes which skills load, exactly
+// like a body edit changes what an opened skill says), so both ride one
+// digest. An empty pack tree or a missing class map refuses: either is a
+// typo in the class or a pool the loader could never serve, not a digest.
+export function poolPackDigest(repoRoot, pack) {
+	const packRoot = path.join(repoRoot, "pool", pack);
+	const lines = treeDigestLines(packRoot, `pool/${pack}/`);
+	if (lines === "") throw new Error(`surface tree is empty: ${packRoot}`);
+	const classesFile = path.join(repoRoot, "pool", "classes.json");
+	const classes = readFileSync(classesFile);
+	return sha256Bytes(
+		Buffer.from(`${lines}pool/classes.json\0${sha256Bytes(classes)}\n`, "utf8"),
+	);
 }
 
 // The advertisement bytes as a canonical, machine-independent derivation
@@ -119,6 +150,13 @@ export function surfaceDigest(surfaceClass, repoRoot) {
 		// typo must refuse, not silently bind everything.
 		if (name === "") throw new Error(`unknown model-visible surface class: ${surfaceClass}`);
 		return fileTreeDigest(path.join(repoRoot, "skills", name));
+	}
+	if (surfaceClass.startsWith("pool:")) {
+		const pack = surfaceClass.slice("pool:".length);
+		// An empty pack name would digest the pool root's stray files — a
+		// typo refuses, exactly like the skill class's empty name.
+		if (pack === "") throw new Error(`unknown model-visible surface class: ${surfaceClass}`);
+		return poolPackDigest(repoRoot, pack);
 	}
 	if (surfaceClass === "extensions") {
 		return fileTreeDigest(path.join(repoRoot, "extensions"));

@@ -110,6 +110,7 @@ export function rigArgs(scenario, evidenceDir) {
 		"--session-dir",
 		evidenceDir,
 		...(scenario.gateway ? ["--gateway"] : []),
+		...(scenario.pool !== undefined ? ["--pool", scenario.pool] : []),
 		...scenario.legs.flatMap((leg) => ["--leg", leg]),
 	];
 }

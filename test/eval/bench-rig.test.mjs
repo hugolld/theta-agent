@@ -35,6 +35,13 @@ test("a benchmark leg refuses --gateway and --rpc before Docker is needed", () =
 		() => assertBenchmarkFlags(flagsFor(["--rpc"])),
 		/--rpc is a dogfood-leg flag/,
 	);
+	// A staged pool state is a dogfood-leg concern (spec #167): a benchmark
+	// session runs in a bare task workspace, so the flag is a confusion and
+	// refuses the same early way.
+	assert.throws(
+		() => assertBenchmarkFlags(flagsFor(["--pool", "bioinformatics"])),
+		/--pool is a dogfood-leg flag/,
+	);
 	assert.doesNotThrow(() => assertBenchmarkFlags(flagsFor([])));
 });
 

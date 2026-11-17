@@ -62,6 +62,16 @@ test("an untracked file under a surface path refuses", () => {
 	rmSync(path.join(scratch, "skills/demo/stray.txt"));
 });
 
+test("an edit under the pool root refuses — the pool class's probe (spec #167)", () => {
+	// The pool root joined the probe set with the pool surface class, so a
+	// pool edit between the session's pre-head and the landing refuses the
+	// landing: the capture's pool digests must name the bytes the session
+	// saw. An untracked file rides the probe exactly like an edit would.
+	write("pool/bioinformatics/stray/SKILL.md", "stray\n");
+	assert.throws(() => assertSurfacesUnmoved(scratch, preHead), /changed since the session's HEAD/);
+	rmSync(path.join(scratch, "pool"), { recursive: true, force: true });
+});
+
 test("a case-only rename under a skill tree refuses", () => {
 	// Under macOS's default core.ignorecase=true, plain `git status` with a
 	// pathspec reports nothing after a case-only rename on disk, while
