@@ -26,6 +26,11 @@ Credentials ride in query strings or headers depending on the API, so any
 URL or parameter map that reaches output goes through `redact_url` /
 `redact_params` first: the parameter names survive so a reader can repeat
 the call with their own key, the values never do.
+
+`attach_provenance` and `author_line`
+    The payload-shaping helpers shared by every connector script (hoisted
+    from per-script copies at #174): the repeat-the-call provenance record
+    and the three-author summary line.
 """
 
 from __future__ import annotations
@@ -37,6 +42,7 @@ import sys
 import time
 import urllib.error
 import urllib.request
+from datetime import date
 from pathlib import Path
 from typing import NoReturn
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
@@ -134,6 +140,23 @@ def fail(message: str, code: int) -> NoReturn:
 	"""Write `message` to stderr and exit with a contract code."""
 	sys.stderr.write(f"{message}\n")
 	raise SystemExit(code)
+
+
+def attach_provenance(payload: dict, calls: list[dict]) -> dict:
+	"""Attach the repeat-the-call record: endpoints, parameters, access date."""
+	payload["provenance"] = {
+		"calls": calls,
+		"accessed": date.today().isoformat(),
+	}
+	return payload
+
+
+def author_line(record: dict) -> str:
+	authors = record["authors"]
+	if not authors:
+		return "-"
+	shown = ", ".join(authors[:3])
+	return f"{shown} et al." if len(authors) > 3 else shown
 
 
 class HttpTransport:
