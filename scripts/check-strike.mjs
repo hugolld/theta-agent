@@ -23,14 +23,20 @@
 // that catch to ready time. Draft PRs skip with a note — the final pass
 // precedes ready, by construction.
 //
+// Spec close (#172 retro): a ready PR's body must carry a closing keyword
+// for its own spec (`Closes #<spec>`, any of GitHub's nine keyword forms).
+// Before this gate the close was paid by hand every strike — #167 sat open
+// past its merge until a routing pass noticed. Draft PRs skip with a note.
+//
 // Usage: node scripts/check-strike.mjs <spec-issue-number>
 // A childless issue is a maintenance strike: no children to land, and the
-// evidence-freshness, review-coverage, and CI-green gates still run
-// (#46 retro).
+// evidence-freshness, review-coverage, spec-close, and CI-green gates
+// still run (#46 retro).
 // Exit 0 = complete (or only expected exceptions remain); 1 = a child is
 // open with no branch commit, attested evidence is stale, a ready PR's
-// review disclosure leaves branch commits uncovered, or a PR check is
-// non-pass; 2 = usage or tracker error.
+// review disclosure leaves branch commits uncovered, a ready PR's body
+// does not close its spec, or a PR check is non-pass; 2 = usage or
+// tracker error.
 import { execSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -97,8 +103,15 @@ export function ciChecks(output) {
 const REVIEWED_LINE =
 	/^[^\S\n]*(?:[-*+]\s+|>\s+)?reviewed:?\s+([0-9a-f]{7,40})(?:\.\.([0-9a-f]{7,40}))?\b/gim;
 
+// Fenced code blocks are prose examples, not disclosures: strip them
+// before a body parses (both body-parsing gates share the rule — the
+// shared-helper rule's second caller).
+function unfencedBody(body) {
+	return `${body ?? ""}`.replace(/```[\s\S]*?```/g, "");
+}
+
 export function disclosedRanges(prBody) {
-	const unfenced = `${prBody ?? ""}`.replace(/```[\s\S]*?```/g, "");
+	const unfenced = unfencedBody(prBody);
 	return [...unfenced.matchAll(REVIEWED_LINE)].map((m) => ({
 		base: m[2] === undefined ? null : m[1].toLowerCase(),
 		head: (m[2] === undefined ? m[1] : m[2]).toLowerCase(),
@@ -110,6 +123,23 @@ export function disclosedRanges(prBody) {
 export function uncoveredCommits(branchCommits, covered) {
 	const coveredSet = new Set(covered);
 	return branchCommits.filter((sha) => !coveredSet.has(sha));
+}
+
+// The pure half of the spec-close gate (#172 retro): GitHub auto-closes
+// the spec issue only when the merged PR's body carries a closing keyword
+// naming it — `Closes #<n>` in any of GitHub's nine keyword forms. A
+// prose mention does not close, a fenced example is not a close (an
+// example is not a disclosure), and a keyword naming another number
+// closes nothing here. Before this gate, four of six merged PRs named
+// their spec without the keyword, every spec closed by hand after the
+// merge, and #167 sat open past merge until a routing pass noticed.
+const CLOSING_KEYWORD =
+	/\b(?:close|closes|closed|fix|fixes|fixed|resolve|resolves|resolved)\s+#(\d+)\b/gi;
+
+export function closesSpec(prBody, spec) {
+	return [...unfencedBody(prBody).matchAll(CLOSING_KEYWORD)].some(
+		(match) => match[1] === `${spec}`,
+	);
 }
 
 function main(argv) {
@@ -316,6 +346,29 @@ function main(argv) {
 		);
 	} else {
 		console.log("\nreview coverage: no PR available (no PR yet) — skipped.");
+	}
+
+	// Spec close (#172 retro): a ready PR's body must carry a closing
+	// keyword for its own spec, or the merge leaves the issue open for a
+	// hand-paid close nobody owns — an open spec misleads the routing read
+	// and this gate's own child walk. A draft skips with a note: the final
+	// body carries the keyword before ready.
+	if (hasPr && isDraft === "true") {
+		console.log(
+			"\nspec close: skipped while the PR is draft — the ready body carries `Closes #<spec>`.",
+		);
+	} else if (hasPr) {
+		if (!closesSpec(prBody, spec)) {
+			console.error(
+				`\nspec close: the PR body does not close #${spec} — GitHub auto-closes the spec only on ` +
+					`a closing keyword in the merged body (\`Closes #${spec}\`, or any of the nine keyword ` +
+					"forms); a prose mention does not close. Add the line and rerun.",
+			);
+			return 1;
+		}
+		console.log(`\nspec close: the PR body closes #${spec} on merge.`);
+	} else {
+		console.log("\nspec close: no PR available — skipped.");
 	}
 
 	// CI green: every check the PR reports must pass at this HEAD. gh's exit

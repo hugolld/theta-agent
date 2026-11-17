@@ -9,7 +9,7 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { gitStatus } from "../scripts/dogfood-gates.mjs";
 import { SESSION_FILES } from "../scripts/session-evidence.mjs";
-import { assertPoolPack, parseFlags, poolStateJson, prepareProviderConfig, prepareGatewayConfig, gatewayPreflightScript, runTeardown, stagePoolStateCommand } from "./rig/run.mjs";
+import { assertPoolPack, parseFlags, poolStateJson, prepareProviderConfig, prepareGatewayConfig, gatewayPreflightScript, requireCleanTree, runTeardown, stagePoolStateCommand } from "./rig/run.mjs";
 
 const dockerfile = await readFile(fileURLToPath(new URL("./rig/Dockerfile", import.meta.url)), "utf8");
 const runnerPath = fileURLToPath(new URL("./rig/run.mjs", import.meta.url));
@@ -114,6 +114,24 @@ test("pool pack validation names the valid packs and refuses the rest", () => {
 	} finally {
 		rmSync(empty, { recursive: true, force: true });
 	}
+});
+
+// #172's retro: the refusal used to drop the porcelain output it already
+// held, and the #167 capture spent its refusal rediscovering the offender
+// (an untracked node_modules symlink) by hand. The dirt rides the message.
+test("the clean-tree gate names the dirt it refuses", () => {
+	assert.doesNotThrow(() => requireCleanTree("/anywhere", () => ""));
+	assert.throws(
+		() => requireCleanTree("/anywhere", () => "?? node_modules\n"),
+		/working tree dirty — commit first:\n\?\? node_modules/,
+	);
+	assert.throws(
+		() =>
+			requireCleanTree("/anywhere", () => {
+				throw new Error("spawn failed");
+			}),
+		/cannot read git status: spawn failed/,
+	);
 });
 
 // The credential path: the prepared config carries the target provider and
