@@ -393,6 +393,50 @@ test("rpc driver takes --cwd: pi -e <checkout> runs in the project cwd", async (
 	assert.equal(await readFile(path.join(sessionDir, "stdout.txt"), "utf8"), "done");
 });
 
+// #167: a project-cwd leg must read the vendored pack bytes it just
+// advertised — pi's OS sandbox scopes reads to the session cwd, so the leg
+// runs with the sandbox off. The flag rides the direct pi spawn only; a
+// bare checkout-cwd run would silently ignore it, so that pairing refuses.
+test("rpc driver takes --no-sandbox: the flag rides the pi spawn and pairs only with --cwd", async (t) => {
+	const piDir = await stubPiDir();
+	const checkout = await mkdtemp(path.join(tmpdir(), "rig-drv-"));
+	const projectCwd = await mkdtemp(path.join(tmpdir(), "rig-proj-"));
+	const sessionDir = await mkdtemp(path.join(tmpdir(), "rig-drvsess-"));
+	t.after(() =>
+		Promise.all([
+			rm(piDir, { recursive: true, force: true }),
+			rm(checkout, { recursive: true, force: true }),
+			rm(projectCwd, { recursive: true, force: true }),
+			rm(sessionDir, { recursive: true, force: true }),
+		]),
+	);
+
+	const run = spawnSync(
+		process.execPath,
+		[driverPath, "--cwd", projectCwd, "--no-sandbox", checkout, sessionDir, "a gated prompt"],
+		{
+			encoding: "utf8",
+			env: { ...process.env, PATH: `${piDir}:${process.env.PATH}`, RIG_PROVIDER: "prov-x", RIG_MODEL: "model-y" },
+		},
+	);
+	assert.equal(run.status, 0, run.stderr);
+
+	const record = JSON.parse(await readFile(path.join(piDir, "record.json"), "utf8"));
+	const at = record.argv.indexOf("--no-sandbox");
+	assert.notEqual(at, -1, "--no-sandbox must ride the pi spawn");
+	assert.equal(record.argv[at - 1], checkout, "the flag sits after the vouched checkout");
+	assert.equal(record.argv[at + 1], "--mode");
+
+	// and the bare checkout-cwd pairing refuses loudly instead of ignoring
+	const bare = spawnSync(
+		process.execPath,
+		[driverPath, "--no-sandbox", checkout, sessionDir, "a gated prompt"],
+		{ encoding: "utf8", env: { ...process.env, PATH: `${piDir}:${process.env.PATH}` } },
+	);
+	assert.equal(bare.status, 2);
+	assert.match(bare.stderr, /--no-sandbox pairs with --cwd/);
+});
+
 // The flag's own failure modes refuse loudly: a missing value up front, and
 // a spawn that cannot start (the --cwd target does not exist) reported as a
 // clean exit-2 message — never an unhandled-error stack in the evidence leg.
@@ -410,7 +454,7 @@ test("rpc driver refuses --cwd misuse cleanly", async (t) => {
 	const usage = spawnSync(process.execPath, [driverPath, "--cwd", checkout], { encoding: "utf8" });
 	assert.equal(usage.status, 2);
 	assert.ok(
-		usage.stderr.includes("usage: rpc-driver.mjs [--cwd <dir>] <checkout> <sessionDir> <prompt> [allow|deny]"),
+		usage.stderr.includes("usage: rpc-driver.mjs [--cwd <dir>] [--no-sandbox] <checkout> <sessionDir> <prompt> [allow|deny]"),
 		`usage line must name --cwd: ${usage.stderr}`,
 	);
 

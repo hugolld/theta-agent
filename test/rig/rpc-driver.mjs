@@ -7,7 +7,7 @@
 // submit cannot cross the submit gate there. Ported from the M5 S0 live
 // leg's driver (the pattern docs/agents/dogfood.md records).
 //
-// Usage: node rpc-driver.mjs [--cwd <dir>] <checkout> <sessionDir> "<prompt>" [allow|deny]
+// Usage: node rpc-driver.mjs [--cwd <dir>] [--no-sandbox] <checkout> <sessionDir> "<prompt>" [allow|deny]
 // Environment: RIG_PROVIDER, RIG_MODEL (the session's provider and model —
 // the rig runner passes what it launched with), RIG_TIMEOUT (the outer GNU
 // timeout bound; the inner backstop fires only past it, so the outer 124
@@ -19,6 +19,13 @@
 // <checkout>` directly: theta --dev's trust anchor covers only the checkout
 // itself (never an arbitrary cwd), and the operator naming the checkout in
 // argv is the out-of-band vouch -e already asks for.
+//
+// --no-sandbox (spec #167) pairs with --cwd: pi's OS-level sandbox scopes
+// the session's reads to the session cwd, so a project-cwd session cannot
+// open the vendored pack bytes it just advertised (the pool tree lives in
+// the operator-vouched checkout). The project-cwd dogfood leg passes it;
+// the rig's Docker legs never do — there is no OS sandbox in the container,
+// and the checkout is the session cwd there by construction.
 //
 // The wrapper that launches this driver owns the exit-status file: this
 // driver's own exit code mirrors pi's, and on SIGTERM (GNU timeout's first
@@ -35,14 +42,19 @@ import { SESSION_FILES } from "../../scripts/session-evidence.mjs";
 // must pass that discovery the way run.mjs's help path does.
 const argv = process.argv.slice(2);
 if (argv.length === 0) {
-	console.log("usage: rpc-driver.mjs [--cwd <dir>] <checkout> <sessionDir> <prompt> [allow|deny]");
+	console.log("usage: rpc-driver.mjs [--cwd <dir>] [--no-sandbox] <checkout> <sessionDir> <prompt> [allow|deny]");
 	process.exit(0);
 }
 // --cwd <dir> follows the rig runner's own flag convention and may sit
 // anywhere in argv; everything else stays positional.
 let sessionCwd;
+let noSandbox = false;
 const positional = [];
 for (let i = 0; i < argv.length; i++) {
+	if (argv[i] === "--no-sandbox") {
+		noSandbox = true;
+		continue;
+	}
 	if (argv[i] !== "--cwd") {
 		positional.push(argv[i]);
 		continue;
@@ -56,7 +68,13 @@ for (let i = 0; i < argv.length; i++) {
 }
 const [checkout, sessionDir, prompt, gateAnswer = "allow"] = positional;
 if (!checkout || !sessionDir || !prompt) {
-	console.error("usage: rpc-driver.mjs [--cwd <dir>] <checkout> <sessionDir> <prompt> [allow|deny]");
+	console.error("usage: rpc-driver.mjs [--cwd <dir>] [--no-sandbox] <checkout> <sessionDir> <prompt> [allow|deny]");
+	process.exit(2);
+}
+// The flag modifies only the direct `pi -e` spawn, so a bare checkout-cwd
+// run would silently ignore it — refuse instead.
+if (noSandbox && sessionCwd === undefined) {
+	console.error("--no-sandbox pairs with --cwd — the checkout-cwd shape runs under theta --dev");
 	process.exit(2);
 }
 // The verdict is exact words only: a typo'd answer must refuse to run, not
@@ -88,7 +106,11 @@ const spawnOpts = { stdio: ["pipe", "pipe", "pipe"], env: childEnv };
 const child =
 	sessionCwd === undefined
 		? spawn("node", ["bin/theta.mjs", "--dev", ...sessionArgs], { cwd: checkout, ...spawnOpts })
-		: spawn("pi", ["-e", checkout, ...sessionArgs], { cwd: sessionCwd, ...spawnOpts });
+		: spawn(
+				"pi",
+				["-e", checkout, ...(noSandbox ? ["--no-sandbox"] : []), ...sessionArgs],
+				{ cwd: sessionCwd, ...spawnOpts },
+			);
 // A spawn that cannot start — pi missing from PATH, a --cwd that does not
 // exist — fails as a clean exit-2 message, not an unhandled-error stack:
 // the wrapper would otherwise record noise for a tooling miss.
