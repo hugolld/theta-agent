@@ -139,9 +139,11 @@ export function resolveAdvertisedSkill(root, skill, expected) {
 // deterministic scan (extensions/skill-pool.ts), mirrored in plain fs — the
 // audit runs in-container from a clone with no node_modules, so jiti-loading
 // the extension is not an option; test/dogfood-audit.test.mjs pins the
-// mirror against the loader's own exports — both constants below against
-// the loader's exported SKILL_CLASSES and GATE_ACTOR, and the admit-set by
-// deep-equality with planPoolLoading's skill paths. The
+// mirror against the loader — the gate actor below against the loader's
+// exported GATE_ACTOR, and the class vocabulary against the loader's
+// acceptance behavior (admit-set deep-equality with planPoolLoading's
+// skill paths on local, key, and cloud trees; refusal on an
+// out-of-vocabulary class on both sides). The
 // inputs are exactly the loader's: the staged state (<root>/.theta/skills.json
 // — a rig leg stages it into the clone before the session; no file, no pool
 // expectation) and the class map (pool/classes.json). Validation mirrors the

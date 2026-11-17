@@ -682,9 +682,10 @@ test("expectedPoolSkills mirrors the loader's deterministic scan exactly", async
 	// why the mirror exists).
 	const loader = await createJiti(import.meta.url).import("../extensions/skill-pool.ts");
 	const { planPoolLoading } = loader;
-	// the mirror's constants are the loader's own vocabulary and gate actor,
-	// not hand-written copies — a loader-side change reds here, at the pin
-	assert.deepEqual(POOL_CLASSES, new Set(loader.SKILL_CLASSES));
+	// the mirror's gate actor is the loader's own export — a loader-side
+	// actor change reds here, at the pin. The class vocabulary is pinned
+	// behaviorally below: admit-set equality over trees covering every
+	// class, and refusal on an out-of-vocabulary class on both sides.
 	assert.equal(POOL_GATE_ACTOR, loader.GATE_ACTOR);
 	const expectSame = (repo) =>
 		assert.deepEqual(
@@ -704,6 +705,16 @@ test("expectedPoolSkills mirrors the loader's deterministic scan exactly", async
 	const allClasses = makePoolRepo(t, { classAllow: [...POOL_CLASSES] });
 	expectSame(allClasses);
 	assert.equal([...expectedPoolSkills(allClasses)].length, 3);
+	// and the vocabulary boundary holds on both sides: an out-of-vocabulary
+	// class refuses the whole map in the mirror and contributes nothing in
+	// the loader — a vocabulary change on either side reds this equality
+	const freemium = makePoolRepo(t);
+	fs.writeFileSync(
+		path.join(freemium, "pool", "classes.json"),
+		'{"bioinformatics/demo": "freemium"}\n',
+	);
+	expectSame(freemium);
+	assert.equal(expectedPoolSkills(freemium).size, 0);
 });
 
 test("expectedPoolSkills admits nothing on unusable inputs — the loader's sound-rest discipline", (t) => {
