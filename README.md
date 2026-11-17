@@ -201,7 +201,7 @@ recorded on [issue #5](https://github.com/hugolld/theta-agent/issues/5).
 ## Skill pool
 
 Theta's skill surface spans the role classes it inherits from K-Dense as
-tiers, plus one Theta-owned layer beside them. The **Tier-1 research-loop
+tiers, plus Theta's own skills beside them. The **Tier-1 research-loop
 core** (see [Vendored skills](#vendored-skills)) ships in the package and
 loads in every session. **Tier-2 compute infrastructure** stays excluded —
 theta-compute replaces K-Dense's compute stack
@@ -212,20 +212,22 @@ research project actually calls — is the **skill pool**: vendored trees at
 pack** per research domain and loaded per research project rather than
 shipped in the package
 ([ADR 0008](docs/adr/0008-the-skill-pool-is-a-vendored-project-scoped-library.md)).
-Beside the tiers, Theta's own **connector skills** — scholarly-API wrappers
-like `theta-lit-search`
-([ADR 0002](docs/adr/0002-connectors-are-skills-not-registered-tools.md)) —
-are Theta-authored, not inherited.
+Beside the tiers, the repo's own skills are self-authored: the
+[connector skills](docs/adr/0002-connectors-are-skills-not-registered-tools.md)
+wrapping scholarly APIs (`theta-lit-search`), the project notebook
+(`theta-notebook`), and the gateway skill (`theta-compute`).
 
 [`pool/index.md`](pool/index.md) is the map: every skill with its class
 column — `local` (no credential, no spend), `key` (a credential, no metered
 spend), `cloud` (credential plus metered spend) — verified against each
-skill's stated requirements. The loader admits a project's skills by that
-class, through a per-project state file (`.theta/skills.json`) whose
-key-class allowance a keyed owner session may widen after a one-call judgment
-over the project notebook — keyless sessions stay on the deterministic local
-default. The K-Dense attribution and citation below cover the pool trees
-too.
+skill's stated requirements. The loader's machine-readable twin of that
+column, `pool/classes.json`, gates what loads; a per-project state file
+(`.theta/skills.json`) carries each project's pack selection and class
+allowance, and only a one-call judgment over the project notebook — firing
+once at a keyed session's start, and thereafter only as an explicit owner
+act — can widen that allowance beyond `local`. A keyless session never
+widens it: it loads exactly what the committed state admits. The K-Dense
+attribution and citation below cover the pool trees too.
 
 First wave (upstream release `v2.72.0`, commit `526ebce`, vendored 2026-11-15):
 protein-engineering (5), bioinformatics (32), cheminformatics (11) — 48 skills.

@@ -145,5 +145,5 @@ The skill pool's class-allowance judgment: a one-call `models.classify()` over t
 _Avoid_: classifier gate, model gate
 
 **Class map**:
-The skill pool's per-skill credential class map, `pool/classes.json`: one `<pack>/<skill>` → `local` | `key` | `cloud` entry per pool skill — the machine-readable twin of `pool/index.md`'s class column, and what the loader admits a project's skills by. Rides every `pool:<pack>` surface digest, so a reclass is model-visible exactly like a body edit. Spec #160 decides it.
+The skill pool's per-skill credential class map, `pool/classes.json`: one `<pack>/<skill>` → `local` | `key` | `cloud` entry per pool skill — the machine-readable twin of `pool/index.md`'s class column, which the loader reads to gate what a project's state may load. Rides every `pool:<pack>` surface digest, so a reclass is model-visible exactly like a body edit. Spec #160 decides it.
 _Avoid_: class list, class table
