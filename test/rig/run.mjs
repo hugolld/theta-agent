@@ -47,7 +47,7 @@ import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSyn
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { gitStatus, manifestSha256, run as spawnRun } from "../../scripts/dogfood-gates.mjs";
+import { manifestSha256, requireCleanTree, run as spawnRun } from "../../scripts/dogfood-gates.mjs";
 import { SESSION_FILES } from "../../scripts/session-evidence.mjs";
 import { BENCH_TASKS, benchTaskById } from "../eval/bench-tasks.mjs";
 import { BENCH_FILES, buildReport, buildSuiteReport, resolveJudge, runJudge, sumSessionUsage } from "../eval/bench-report.mjs";
@@ -512,23 +512,6 @@ async function preflightJudges(tasks) {
 	}
 }
 
-// The clean-tree gate both rig paths share (one home, the shared-helper
-// rule): the rig clones committed HEAD, so a dirty tree would capture
-// uncommitted bytes. The refusal names the dirt it holds (#172's retro):
-// the porcelain output was read and dropped, and the #167 capture spent
-// its refusal rediscovering by hand the offender (an untracked
-// node_modules symlink) the message already knew — audit-dogfood's
-// attestation-time refusal set the shape.
-export function requireCleanTree(root = repoRoot, readStatus = gitStatus) {
-	let status;
-	try {
-		status = readStatus(root);
-	} catch (error) {
-		throw new Error(`cannot read git status: ${error.message}`);
-	}
-	if (status) throw new Error(`working tree dirty — commit first:\n${status.trim()}`);
-}
-
 // The Docker-and-git prelude both eval paths share (one home, the
 // shared-helper rule): daemon wait, the clean-tree gate, the pinned
 // HEAD, the provider config, and the exit-hook teardown that owns
@@ -537,7 +520,7 @@ export function requireCleanTree(root = repoRoot, readStatus = gitStatus) {
 function evalStaging(flags) {
 	waitForDaemon();
 	try {
-		requireCleanTree();
+		requireCleanTree(repoRoot);
 	} catch (error) {
 		fail(error.message);
 	}
@@ -740,7 +723,7 @@ function main() {
 	if (subcommand !== "run" && subcommand !== "shell") fail(`unknown subcommand: ${subcommand}`);
 
 	try {
-		requireCleanTree();
+		requireCleanTree(repoRoot);
 	} catch (error) {
 		fail(error.message);
 	}

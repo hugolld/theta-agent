@@ -183,6 +183,23 @@ test("a closing keyword in any of GitHub's nine forms closes the named spec", ()
 	assert.equal(closesSpec("closes#172", 172), false); // no separator: not a keyword
 });
 
+test("the issue-URL form closes — but only this repo's URL", () => {
+	// GitHub honors the keyword on a full issue URL; a URL at another repo
+	// closes that repo's issue, never this one.
+	assert.equal(
+		closesSpec("Closes https://github.com/hugolld/theta-agent/issues/172", 172),
+		true,
+	);
+	assert.equal(
+		closesSpec("fixes https://github.com/hugolld/theta-agent/issues/999", 172),
+		false,
+	);
+	assert.equal(
+		closesSpec("Closes https://github.com/other/repo/issues/172", 172),
+		false,
+	);
+});
+
 test("a prose mention does not close — the #167 failure mode, pinned", () => {
 	// PR #169's body named #167 in prose and carried no closing keyword;
 	// the merge left the spec open past teardown until a routing pass

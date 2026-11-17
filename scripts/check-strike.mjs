@@ -127,18 +127,22 @@ export function uncoveredCommits(branchCommits, covered) {
 
 // The pure half of the spec-close gate (#172 retro): GitHub auto-closes
 // the spec issue only when the merged PR's body carries a closing keyword
-// naming it — `Closes #<n>` in any of GitHub's nine keyword forms. A
-// prose mention does not close, a fenced example is not a close (an
-// example is not a disclosure), and a keyword naming another number
-// closes nothing here. Before this gate, four of six merged PRs named
-// their spec without the keyword, every spec closed by hand after the
-// merge, and #167 sat open past merge until a routing pass noticed.
-const CLOSING_KEYWORD =
-	/\b(?:close|closes|closed|fix|fixes|fixed|resolve|resolves|resolved)\s+#(\d+)\b/gi;
+// naming it — `Closes #<n>` in any of GitHub's nine keyword forms, or the
+// same keyword on this repo's issue URL (a URL pointing at another repo
+// closes that repo's issue, never this one, so only this repo's URL
+// counts). A prose mention does not close, and a fenced example is not a
+// close (an example is not a disclosure). Before this gate, four of six
+// merged PRs named their spec without the keyword, every spec closed by
+// hand after the merge, and #167 sat open past merge until a routing
+// pass noticed.
+const CLOSING_KEYWORD = new RegExp(
+	`\\b(?:close|closes|closed|fix|fixes|fixed|resolve|resolves|resolved)\\s+(?:#(\\d+)|https://github\\.com/${repo}/issues/(\\d+))\\b`,
+	"gi",
+);
 
 export function closesSpec(prBody, spec) {
 	return [...unfencedBody(prBody).matchAll(CLOSING_KEYWORD)].some(
-		(match) => match[1] === `${spec}`,
+		(match) => match[1] === `${spec}` || match[2] === `${spec}`,
 	);
 }
 
@@ -361,8 +365,9 @@ function main(argv) {
 		if (!closesSpec(prBody, spec)) {
 			console.error(
 				`\nspec close: the PR body does not close #${spec} — GitHub auto-closes the spec only on ` +
-					`a closing keyword in the merged body (\`Closes #${spec}\`, or any of the nine keyword ` +
-					"forms); a prose mention does not close. Add the line and rerun.",
+					`a closing keyword in the merged body (\`Closes #${spec}\`, any of the nine keyword ` +
+					"forms, or the same keyword on this repo's issue URL); a prose mention does not " +
+					"close. Add the line and rerun.",
 			);
 			return 1;
 		}
