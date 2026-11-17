@@ -1,14 +1,15 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile, mkdtemp, mkdir, rm, stat, symlink, writeFile, chmod } from "node:fs/promises";
-import { existsSync, readFileSync, realpathSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
+import { createJiti } from "jiti";
 import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { gitStatus } from "../scripts/dogfood-gates.mjs";
 import { SESSION_FILES } from "../scripts/session-evidence.mjs";
-import { parseFlags, prepareProviderConfig, prepareGatewayConfig, gatewayPreflightScript, runTeardown } from "./rig/run.mjs";
+import { assertPoolPack, parseFlags, poolStateJson, prepareProviderConfig, prepareGatewayConfig, gatewayPreflightScript, runTeardown, stagePoolStateCommand } from "./rig/run.mjs";
 
 const dockerfile = await readFile(fileURLToPath(new URL("./rig/Dockerfile", import.meta.url)), "utf8");
 const runnerPath = fileURLToPath(new URL("./rig/run.mjs", import.meta.url));
@@ -68,6 +69,51 @@ test("leg flags collect into order and leave the prompt in rest", () => {
 		".theta",
 	]);
 	assert.equal(rest.join(" "), "the prompt text");
+});
+
+// The pool leg (spec #167): --pool collects like the other value flags and
+// never bleeds into the prompt, the staged state parses through the
+// loader's own reader (the jiti pattern the skill-pool suite uses — the
+// staged bytes and the loader's state v1 cannot drift apart), and the
+// staging command writes the file the loader reads, from an env var,
+// never the bash command line.
+test("pool staging: the flag collects, the state loads, the command writes the loader's path", async () => {
+	const { flags, rest } = parseFlags(["--pool", "bioinformatics", "the prompt text"]);
+	assert.equal(flags.pool, "bioinformatics");
+	assert.equal(rest.join(" "), "the prompt text");
+	const { readSkillsState } = await createJiti(import.meta.url).import(
+		"../extensions/skill-pool.ts",
+	);
+	const dir = await mkdtemp(path.join(tmpdir(), "rig-pool-"));
+	try {
+		await mkdir(path.join(dir, ".theta"), { recursive: true });
+		await writeFile(path.join(dir, ".theta", "skills.json"), poolStateJson("bioinformatics"));
+		const read = readSkillsState(dir);
+		assert.equal(read.kind, "ok", `staged state must read as ok, got ${JSON.stringify(read)}`);
+		assert.equal(read.state.classAllow.length, 1);
+		assert.equal(read.state.classAllow[0], "local");
+		assert.equal(read.state.packs.bioinformatics.enabled, true);
+	} finally {
+		await rm(dir, { recursive: true, force: true });
+	}
+	const command = stagePoolStateCommand();
+	assert.match(command, /"\$HOME\/theta\/\.theta\/skills\.json"$/);
+	assert.match(command, /printf '%s' "\$RIG_POOL_STATE"/);
+	// No argv-quoted JSON anywhere: the bytes ride the env var only.
+	assert.doesNotMatch(command, /RIG_POOL_STATE=/);
+});
+
+// --pool is validated against the repo's own pool before anything
+// disposable is spent, and carries no credential shape at all.
+test("pool pack validation names the valid packs and refuses the rest", () => {
+	assert.doesNotThrow(() => assertPoolPack("bioinformatics"));
+	assert.throws(() => assertPoolPack("not-a-pack"), /valid packs: bioinformatics, cheminformatics, protein-engineering/);
+	const empty = mkdtempSync(path.join(tmpdir(), "rig-pool-empty-"));
+	try {
+		assert.throws(() => assertPoolPack("bioinformatics", empty), /no pool/);
+	} finally {
+		rmSync(empty, { recursive: true, force: true });
+	}
 });
 
 // The credential path: the prepared config carries the target provider and
@@ -307,11 +353,10 @@ test("rpc driver refuses a gate answer that is neither allow nor deny", async (t
 	await assert.rejects(readFile(path.join(sessionDir, "raw-rpc-events.jsonl")));
 });
 
-// #164: a session whose evidence lives in an arbitrary project cwd (the S2
-// Jev-gate dogfood shape). With --cwd the driver spawns `pi -e <checkout>`
-// directly — theta --dev's anchor does not cover arbitrary cwds — and the
-// gate confirm, settle, and capture contracts all stay the print leg's.
-test("rpc driver takes --cwd: pi -e <checkout> runs in the project cwd", async (t) => {
+// The four dirs a driver-spawn test stages — the stub pi on a private PATH,
+// the vouched checkout, the project cwd, and the session dir — with their
+// cleanup in one place (the #164 and #167 driver tests share the shape).
+async function driverDirs(t) {
 	const piDir = await stubPiDir();
 	const checkout = await mkdtemp(path.join(tmpdir(), "rig-drv-"));
 	const projectCwd = await mkdtemp(path.join(tmpdir(), "rig-proj-"));
@@ -324,6 +369,15 @@ test("rpc driver takes --cwd: pi -e <checkout> runs in the project cwd", async (
 			rm(sessionDir, { recursive: true, force: true }),
 		]),
 	);
+	return { piDir, checkout, projectCwd, sessionDir };
+}
+
+// #164: a session whose evidence lives in an arbitrary project cwd (the S2
+// Jev-gate dogfood shape). With --cwd the driver spawns `pi -e <checkout>`
+// directly — theta --dev's anchor does not cover arbitrary cwds — and the
+// gate confirm, settle, and capture contracts all stay the print leg's.
+test("rpc driver takes --cwd: pi -e <checkout> runs in the project cwd", async (t) => {
+	const { piDir, checkout, projectCwd, sessionDir } = await driverDirs(t);
 
 	const run = spawnSync(
 		process.execPath,
@@ -347,6 +401,39 @@ test("rpc driver takes --cwd: pi -e <checkout> runs in the project cwd", async (
 	assert.equal(await readFile(path.join(sessionDir, "stdout.txt"), "utf8"), "done");
 });
 
+// #167: a project-cwd leg must read the vendored pack bytes it just
+// advertised — pi's OS sandbox scopes reads to the session cwd, so the leg
+// runs with the sandbox off. The flag rides the direct pi spawn only; a
+// bare checkout-cwd run would silently ignore it, so that pairing refuses.
+test("rpc driver takes --no-sandbox: the flag rides the pi spawn and pairs only with --cwd", async (t) => {
+	const { piDir, checkout, projectCwd, sessionDir } = await driverDirs(t);
+
+	const run = spawnSync(
+		process.execPath,
+		[driverPath, "--cwd", projectCwd, "--no-sandbox", checkout, sessionDir, "a gated prompt"],
+		{
+			encoding: "utf8",
+			env: { ...process.env, PATH: `${piDir}:${process.env.PATH}`, RIG_PROVIDER: "prov-x", RIG_MODEL: "model-y" },
+		},
+	);
+	assert.equal(run.status, 0, run.stderr);
+
+	const record = JSON.parse(await readFile(path.join(piDir, "record.json"), "utf8"));
+	const at = record.argv.indexOf("--no-sandbox");
+	assert.notEqual(at, -1, "--no-sandbox must ride the pi spawn");
+	assert.equal(record.argv[at - 1], checkout, "the flag sits after the vouched checkout");
+	assert.equal(record.argv[at + 1], "--mode");
+
+	// and the bare checkout-cwd pairing refuses loudly instead of ignoring
+	const bare = spawnSync(
+		process.execPath,
+		[driverPath, "--no-sandbox", checkout, sessionDir, "a gated prompt"],
+		{ encoding: "utf8", env: { ...process.env, PATH: `${piDir}:${process.env.PATH}` } },
+	);
+	assert.equal(bare.status, 2);
+	assert.match(bare.stderr, /--no-sandbox pairs with --cwd/);
+});
+
 // The flag's own failure modes refuse loudly: a missing value up front, and
 // a spawn that cannot start (the --cwd target does not exist) reported as a
 // clean exit-2 message — never an unhandled-error stack in the evidence leg.
@@ -364,7 +451,7 @@ test("rpc driver refuses --cwd misuse cleanly", async (t) => {
 	const usage = spawnSync(process.execPath, [driverPath, "--cwd", checkout], { encoding: "utf8" });
 	assert.equal(usage.status, 2);
 	assert.ok(
-		usage.stderr.includes("usage: rpc-driver.mjs [--cwd <dir>] <checkout> <sessionDir> <prompt> [allow|deny]"),
+		usage.stderr.includes("usage: rpc-driver.mjs [--cwd <dir>] [--no-sandbox] <checkout> <sessionDir> <prompt> [allow|deny]"),
 		`usage line must name --cwd: ${usage.stderr}`,
 	);
 

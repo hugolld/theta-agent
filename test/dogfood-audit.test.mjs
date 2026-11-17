@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { execSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
+import { createJiti } from "jiti";
 
 // The pi runtime every synthetic session records — derived from the floor
 // the session-evidence module owns, so the audit's runtime binding passes;
@@ -34,6 +35,9 @@ import {
 	resolveNotebookDir,
 	auditNotebook,
 	collectNestedCalls,
+	expectedPoolSkills,
+	POOL_CLASSES,
+	POOL_GATE_ACTOR,
 	formatCleanLine,
 	CLEAN_LINE_PATTERN,
 	auditSession,
@@ -334,6 +338,11 @@ function buildSession(t, repo, overrides = {}) {
 				`<skill><name>${n}</name><location>${repo}/skills/${n}/SKILL.md</location></skill>`,
 		)
 		.join("\n");
+	// Pool advertisements (spec #167): pack/skill pairs carried at their
+	// pool locations, the way a staged-state session advertises them.
+	for (const pair of overrides.poolAdvertised ?? []) {
+		entries += `\n<skill><name>${pair.split("/").pop()}</name><location>${repo}/pool/${pair}/SKILL.md</location></skill>`;
+	}
 	if (!overrides.noHostSkill) {
 		const hostDir = fs.mkdtempSync(path.join(os.tmpdir(), "host-skill-"));
 		t.after(() => fs.rmSync(hostDir, { recursive: true, force: true }));
@@ -366,7 +375,7 @@ function buildSession(t, repo, overrides = {}) {
 		},
 	];
 	if (overrides.toolResultIsError !== undefined) {
-		const target = `${repo}/skills/literature-review/SKILL.md`;
+		const target = overrides.readTarget ?? `${repo}/skills/literature-review/SKILL.md`;
 		const callArguments = { path: target };
 		if (overrides.partialRead) {
 			callArguments.offset = 1;
@@ -620,6 +629,190 @@ test("auditSession ignores host skills advertised from outside the repo", (t) =>
 	const repo = makeTempRepo(t);
 	const dir = buildSession(t, repo);
 	assert.doesNotThrow(() => auditIn(repo, () => auditSession(dir, repo)));
+});
+
+// --- the pool advertisement expectation (spec #167) -----------------------
+//
+// A pool-bearing fixture repo: the bioinformatics-shaped miniature — one
+// local skill, one key skill, one cloud skill, the class map, and the
+// staged per-project state at the gitignored .theta/skills.json (the way
+// the rig's --pool leg stages it into the clone). `state: null` leaves the
+// state file out.
+
+function makePoolRepo(t, { classAllow = ["local"], state } = {}) {
+	const repo = fs.mkdtempSync(path.join(os.tmpdir(), "dogfood-pool-"));
+	t.after(() => fs.rmSync(repo, { recursive: true, force: true }));
+	fs.mkdirSync(path.join(repo, "skills", "literature-review"), { recursive: true });
+	fs.writeFileSync(path.join(repo, "skills", "literature-review", "SKILL.md"), "skill content\n");
+	for (const skill of ["demo", "keyed", "cloudy"]) {
+		fs.mkdirSync(path.join(repo, "pool", "bioinformatics", skill), { recursive: true });
+		fs.writeFileSync(
+			path.join(repo, "pool", "bioinformatics", skill, "SKILL.md"),
+			`---\nname: ${skill}\ndescription: pool skill ${skill}\n---\n\npool body\n`,
+		);
+	}
+	fs.writeFileSync(
+		path.join(repo, "pool", "classes.json"),
+		`${JSON.stringify({ "bioinformatics/demo": "local", "bioinformatics/keyed": "key", "bioinformatics/cloudy": "cloud" }, null, "\t")}\n`,
+	);
+	fs.writeFileSync(path.join(repo, ".gitignore"), ".theta/\n");
+	if (state !== null) {
+		fs.mkdirSync(path.join(repo, ".theta"), { recursive: true });
+		fs.writeFileSync(
+			path.join(repo, ".theta", "skills.json"),
+			state ??
+				`${JSON.stringify({
+					version: 1,
+					classAllow,
+					packs: { bioinformatics: { enabled: true, history: [] } },
+				})}\n`,
+		);
+	}
+	return initFixtureRepo(repo, {
+		vendored: [{ name: "literature-review", "tree-sha256": "x" }],
+		"self-authored": [],
+	});
+}
+
+test("expectedPoolSkills mirrors the loader's deterministic scan exactly", async (t) => {
+	// The pin that keeps the plain-fs mirror honest: on the same scratch
+	// tree, the mirror's admit set equals the loader's own contribution —
+	// computed through jiti, the loader pi runs extensions with (the
+	// skill-pool suite's pattern; the audit itself cannot jiti, which is
+	// why the mirror exists).
+	const loader = await createJiti(import.meta.url).import("../extensions/skill-pool.ts");
+	const { planPoolLoading } = loader;
+	// the mirror's gate actor is the loader's own export — a loader-side
+	// actor change reds here, at the pin. The class vocabulary is pinned
+	// behaviorally below: admit-set equality over trees covering every
+	// class, and refusal on an out-of-vocabulary class on both sides.
+	assert.equal(POOL_GATE_ACTOR, loader.GATE_ACTOR);
+	const expectSame = (repo) =>
+		assert.deepEqual(
+			[...expectedPoolSkills(repo)].sort(),
+			planPoolLoading(path.join(repo, "pool"), repo)
+				.skillPaths.map((dir) => `${dir}/SKILL.md`)
+				.sort(),
+		);
+	const repo = makePoolRepo(t);
+	expectSame(repo);
+	// and the widened sets admit the key and cloud classes on both sides —
+	// the widest case rides the pinned vocabulary, so a vocabulary change
+	// forces this fixture to grow with it
+	const widened = makePoolRepo(t, { classAllow: ["local", "key"] });
+	expectSame(widened);
+	assert.equal([...expectedPoolSkills(widened)].length, 2);
+	const allClasses = makePoolRepo(t, { classAllow: [...POOL_CLASSES] });
+	expectSame(allClasses);
+	assert.equal([...expectedPoolSkills(allClasses)].length, 3);
+	// and the vocabulary boundary holds on both sides: an out-of-vocabulary
+	// class refuses the whole map in the mirror and contributes nothing in
+	// the loader — a vocabulary change on either side reds this equality
+	const freemium = makePoolRepo(t);
+	fs.writeFileSync(
+		path.join(freemium, "pool", "classes.json"),
+		'{"bioinformatics/demo": "freemium"}\n',
+	);
+	expectSame(freemium);
+	assert.equal(expectedPoolSkills(freemium).size, 0);
+});
+
+test("expectedPoolSkills admits nothing on unusable inputs — the loader's sound-rest discipline", (t) => {
+	const repo = makePoolRepo(t);
+	// the sound baseline, then each broken input
+	assert.equal([...expectedPoolSkills(repo)].length, 1);
+	const bare = makePoolRepo(t, { state: null });
+	assert.equal(expectedPoolSkills(bare).size, 0);
+	for (const broken of [
+		"not json",
+		'{"version":2,"classAllow":["local"],"packs":{}}',
+		'{"version":1,"classAllow":"local","packs":{}}',
+		'{"version":1,"classAllow":["local"],"packs":{"bioinformatics":{"enabled":true}}}',
+		'{"version":1,"classAllow":["local"],"packs":{"bioinformatics":{"enabled":true,"history":[]}},"gate":{"actor":"wrong"}}',
+	]) {
+		const repo2 = makePoolRepo(t, { state: broken });
+		assert.equal(
+			expectedPoolSkills(repo2).size,
+			0,
+			`a broken state file must admit nothing: ${broken}`,
+		);
+	}
+	// a well-formed gate record (the dogfood project's post-judgment state)
+	// changes nothing: the record widens classAllow's provenance, not the scan
+	const gated = makePoolRepo(t, {
+		state:
+			'{"version":1,"classAllow":["local","key"],"packs":{"bioinformatics":{"enabled":true,"history":[]}},"gate":{"at":"2026-11-17T00:00:00.000Z","actor":"classify:jev","decision":["local","key"],"rationale":"notebook 3 entries; packs bioinformatics; need-key p=0.91"}}',
+	});
+	assert.equal(expectedPoolSkills(gated).size, 2);
+	// a class map with an unknown class value invalidates the whole map, as
+	// the loader reads it
+	const repo3 = makePoolRepo(t);
+	fs.writeFileSync(
+		path.join(repo3, "pool", "classes.json"),
+		'{"bioinformatics/demo": "freemium"}\n',
+	);
+	assert.equal(expectedPoolSkills(repo3).size, 0);
+	// a class-map entry naming a directory the pool lacks is not admitted
+	const repo4 = makePoolRepo(t);
+	fs.writeFileSync(
+		path.join(repo4, "pool", "classes.json"),
+		'{"bioinformatics/demo": "local", "bioinformatics/ghost": "local"}\n',
+	);
+	assert.equal(expectedPoolSkills(repo4).size, 1);
+	// a disabled pack admits nothing
+	const repo5 = makePoolRepo(t, {
+		state: '{"version":1,"classAllow":["local"],"packs":{"bioinformatics":{"enabled":false,"history":[]}}}',
+	});
+	assert.equal(expectedPoolSkills(repo5).size, 0);
+});
+
+test("auditSession attests a staged-pool session and its pool skill leg", (t) => {
+	const repo = makePoolRepo(t);
+	const dir = buildSession(t, repo, {
+		poolAdvertised: ["bioinformatics/demo"],
+		toolResultIsError: false,
+		readTarget: `${repo}/pool/bioinformatics/demo/SKILL.md`,
+		resultText: "---\nname: demo\ndescription: pool skill demo\n---\n\npool body\n",
+	});
+	const out = auditIn(repo, () => auditSession(dir, repo));
+	assert.match(out, /pool-skills 1/);
+	const legged = auditIn(repo, () =>
+		auditSession(dir, repo, withLegs({ skill: "pool/bioinformatics/demo/SKILL.md" })),
+	);
+	assert.match(legged, /selected-file-opened .*\/pool\/bioinformatics\/demo\/SKILL\.md/);
+	// the key-class skill's ad is refused: the state does not admit it
+	assert.throws(
+		() =>
+			auditIn(
+				repo,
+				() =>
+					auditSession(
+						buildSession(t, repo, { poolAdvertised: ["bioinformatics/demo", "bioinformatics/keyed"] }),
+						repo,
+					),
+			),
+		/keyed resolves inside the checkout/,
+	);
+});
+
+test("auditSession refuses a staged-pool session that never advertised the pack", (t) => {
+	const repo = makePoolRepo(t);
+	// the state stages one skill; the advertisement carries none of them
+	assert.throws(
+		() => auditIn(repo, () => auditSession(buildSession(t, repo), repo)),
+		/NOT advertised \(pool\)/,
+	);
+	// the same advertisement without any staged state keeps the old story:
+	// an in-checkout ad that nothing admits
+	const bare = makePoolRepo(t, { state: null });
+	assert.throws(
+		() =>
+			auditIn(
+				bare,
+				() => auditSession(buildSession(t, bare, { poolAdvertised: ["bioinformatics/demo"] }), bare),
+			),
+		/demo resolves inside the checkout/,
+	);
 });
 
 test("auditSession attests skill use when paired and errors otherwise", (t) => {

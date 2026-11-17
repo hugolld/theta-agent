@@ -30,6 +30,13 @@
 // are model-visible only in a gateway-bearing session. The forward must be
 // up for that leg; no job is created (print mode answers no confirms, so
 // the submit gate refuses before any server call).
+//
+// `pool: "<pack>"` (spec #167) marks the capture whose session loads a
+// domain pack: capture.mjs passes --pool, the rig stages the pack's
+// per-project state file into the clone before launch, and the loader's
+// deterministic scan advertises the pack's local-class skills — the
+// keyless path; the Jev gate cannot fire in the rig, so the capture is
+// the scan, never the judgment.
 
 // The read-headroom phrasing every prompt carries verbatim (the doctrine
 // above): one home, interpolated into each prompt — the strings stay
@@ -156,6 +163,30 @@ export const SCENARIOS = Object.freeze([
 			advertisesSkill: "theta-compute",
 			opensSkill: "skills/theta-compute/SKILL.md",
 			gateRefusal: "submit_job",
+		},
+	},
+	{
+		id: "pool",
+		prompt:
+			`We have a gene-level count matrix from a twelve-sample experiment: six treated mice and six vehicle controls, paired one-to-one by litter. Lay out the differential-expression analysis this environment supports end to end -- the design formula, the checks to run on the counts before fitting, how to test the treated-versus-control effect, and how to validate and report the top hits with their error controls. Follow the guidance this environment provides for exactly this kind of analysis. ${READ_HEADROOM}`,
+		// The pool scenario (spec #167): the surface is the domain pack the
+		// S1 loader contributes -- the pool class (test/eval/surfaces.mjs)
+		// binds one pack's whole tree plus the class map, the digest-scope
+		// boundary the PR body discloses. Keyless by construction: the rig
+		// stages the state file (the deterministic scan path only), so the
+		// Jev gate cannot fire there and no second key ever exists on this
+		// leg.
+		surfaces: ["advertisement", "pool:bioinformatics", "extensions", "project-context"],
+		// The rig stages .theta/skills.json (bioinformatics on, local only)
+		// into the clone before the session -- the --pool flag this
+		// scenario's entry declares.
+		pool: "bioinformatics",
+		// The session's own advertisement carries the pack's 29 local
+		// skills beside the core library; the leg attests the opened one.
+		legs: ["pool/bioinformatics/pydeseq2/SKILL.md"],
+		shape: {
+			advertisesSkill: "pydeseq2",
+			opensSkill: "pool/bioinformatics/pydeseq2/SKILL.md",
 		},
 	},
 ]);

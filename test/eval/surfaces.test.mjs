@@ -14,6 +14,7 @@ import { REPO_ROOT as repoRoot } from "../helpers/repo-root.mjs";
 import {
 	advertisementBytes,
 	fileTreeDigest,
+	poolPackDigest,
 	SURFACE_CLASSES,
 	surfaceDigest,
 	surfaceProbePaths,
@@ -24,6 +25,7 @@ test("the surface registry is exactly the decided digest scope: one digest per m
 	assert.deepEqual(Object.keys(SURFACE_CLASSES), [
 		"advertisement",
 		"skill",
+		"pool",
 		"extensions",
 		"project-context",
 	]);
@@ -34,7 +36,7 @@ test("the land guard's probe paths derive from the registry — every class reso
 	// probe set is the capture binding: it must cover every registry class's
 	// root. A class added without a root reds here (surfaceProbePaths
 	// refuses), not as a silently unprobed path at the next capture.
-	assert.deepEqual(surfaceProbePaths(), ["CLAUDE.md", "extensions", "skills"]);
+	assert.deepEqual(surfaceProbePaths(), ["CLAUDE.md", "extensions", "pool", "skills"]);
 });
 
 test("an unknown surface class refuses loudly", () => {
@@ -42,6 +44,12 @@ test("an unknown surface class refuses loudly", () => {
 	// An empty skill name would resolve to the whole skills tree — the
 	// typo refuses as an unknown class instead of binding everything.
 	assert.throws(() => surfaceDigest("skill:", repoRoot), /unknown model-visible surface class/);
+	// An empty pack name would escape the pack tree — same refusal.
+	assert.throws(() => surfaceDigest("pool:", repoRoot), /unknown model-visible surface class/);
+	// An unknown pack resolves to nothing — a typo in the class refuses
+	// (the missing root surfaces as the walker's ENOENT, an empty pack as
+	// the digest's own refusal; either way it never digests).
+	assert.throws(() => surfaceDigest("pool:no-such-pack", repoRoot), /surface tree is empty|ENOENT/);
 });
 
 test("fileTreeDigest is deterministic and machine-independent", (t) => {
@@ -69,6 +77,53 @@ test("fileTreeDigest moves on a one-byte change", (t) => {
 	assert.notEqual(fileTreeDigest(dir), before);
 	writeFileSync(path.join(dir, "new.txt"), "added\n");
 	assert.notEqual(fileTreeDigest(dir), before);
+});
+
+// A minimal pool in a scratch tree: one pack with two skills and the class
+// map — the two inputs the pool digest binds (spec #167).
+function scratchPool(t) {
+	const root = mkdtempSync(path.join(tmpdir(), "surfaces-pool-"));
+	t.after(() => rmSync(root, { recursive: true, force: true }));
+	const writePool = (rel, body) => {
+		mkdirSync(path.join(root, "pool", path.dirname(rel)), { recursive: true });
+		writeFileSync(path.join(root, "pool", rel), body);
+	};
+	writePool("bioinformatics/demo/SKILL.md", "---\nname: demo\n---\nbody\n");
+	writePool("bioinformatics/demo/scripts/run.py", "print('hi')\n");
+	writePool("bioinformatics/keyed/SKILL.md", "---\nname: keyed\n---\nbody\n");
+	writePool("classes.json", '{"bioinformatics/demo": "local", "bioinformatics/keyed": "key"}\n');
+	writePool("index.md", "# the human surface, deliberately unbound\n");
+	return root;
+}
+
+test("poolPackDigest binds the pack tree and the class map, and refuses a pool without either", (t) => {
+	const root = scratchPool(t);
+	const digest = poolPackDigest(root, "bioinformatics");
+	assert.match(digest, /^[0-9a-f]{64}$/);
+	// stable across calls
+	assert.equal(poolPackDigest(root, "bioinformatics"), digest);
+	// a pack body byte moves it — the model-visible edit class
+	writeFileSync(path.join(root, "pool/bioinformatics/demo/SKILL.md"), "---\nname: demo\n---\nbodyX\n");
+	assert.notEqual(poolPackDigest(root, "bioinformatics"), digest);
+	// a reclass moves it: the class map gates what loads, so it is as
+	// model-visible as a body edit
+	writeFileSync(
+		path.join(root, "pool/classes.json"),
+		'{"bioinformatics/demo": "key", "bioinformatics/keyed": "key"}\n',
+	);
+	assert.notEqual(poolPackDigest(root, "bioinformatics"), digest);
+	// the unbound human surface (index.md) does not move it
+	writeFileSync(path.join(root, "pool/index.md"), "# edited prose\n");
+	const held = poolPackDigest(root, "bioinformatics");
+	writeFileSync(path.join(root, "pool/index.md"), "# the human surface, deliberately unbound\n");
+	assert.equal(poolPackDigest(root, "bioinformatics"), held);
+	// an unknown pack and a missing class map refuse, never digest silence
+	assert.throws(() => poolPackDigest(root, "no-such-pack"), /surface tree is empty|ENOENT/);
+	const bare = mkdtempSync(path.join(tmpdir(), "surfaces-pool-"));
+	t.after(() => rmSync(bare, { recursive: true, force: true }));
+	mkdirSync(path.join(bare, "pool/lonely"), { recursive: true });
+	writeFileSync(path.join(bare, "pool/lonely/SKILL.md"), "---\nname: lonely\n---\n");
+	assert.throws(() => poolPackDigest(bare, "lonely"), /ENOENT/);
 });
 
 test("advertisementBytes derives the canonical block, sorted, with repo-relative locations", (t) => {

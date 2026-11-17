@@ -135,6 +135,107 @@ export function resolveAdvertisedSkill(root, skill, expected) {
 	return target;
 }
 
+// The pool advertisement expectation (spec #167): the skill pool loader's
+// deterministic scan (extensions/skill-pool.ts), mirrored in plain fs — the
+// audit runs in-container from a clone with no node_modules, so jiti-loading
+// the extension is not an option; test/dogfood-audit.test.mjs pins the
+// mirror against the loader — the gate actor below against the loader's
+// exported GATE_ACTOR, and the class vocabulary against the loader's
+// acceptance behavior (admit-set deep-equality with planPoolLoading's
+// skill paths on local, key, and cloud trees; refusal on an
+// out-of-vocabulary class on both sides). The
+// inputs are exactly the loader's: the staged state (<root>/.theta/skills.json
+// — a rig leg stages it into the clone before the session; no file, no pool
+// expectation) and the class map (pool/classes.json). Validation mirrors the
+// loader's reads too — any unusable input admits nothing, the loader's own
+// sound-rest discipline, so a broken state file reds the audit as a missing
+// pool advertisement, never as a lowered bar. Returns the set of absolute
+// SKILL.md paths the session's advertisement must carry and nothing more.
+export const POOL_CLASSES = new Set(["local", "key", "cloud"]);
+export const POOL_GATE_ACTOR = "classify:jev";
+
+function readJsonOrUndefined(file) {
+	try {
+		const parsed = JSON.parse(fs.readFileSync(file, "utf8"));
+		return parsed !== null && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : undefined;
+	} catch {
+		return undefined;
+	}
+}
+
+export function expectedPoolSkills(root) {
+	const state = readJsonOrUndefined(path.join(root, ".theta", "skills.json"));
+	const classes = readJsonOrUndefined(path.join(root, "pool", "classes.json"));
+	if (state === undefined || classes === undefined) return new Set();
+	if (
+		state.version !== 1 ||
+		!Array.isArray(state.classAllow) ||
+		!state.classAllow.every((entry) => typeof entry === "string") ||
+		state.packs === null ||
+		typeof state.packs !== "object" ||
+		Array.isArray(state.packs)
+	) {
+		return new Set();
+	}
+	for (const pack of Object.values(state.packs)) {
+		if (
+			pack === null ||
+			typeof pack !== "object" ||
+			Array.isArray(pack) ||
+			typeof pack.enabled !== "boolean" ||
+			!Array.isArray(pack.history)
+		) {
+			return new Set(); // a malformed pack invalidates the state, as the loader reads it
+		}
+	}
+	for (const cls of Object.values(classes)) {
+		if (!POOL_CLASSES.has(cls)) return new Set();
+	}
+	// The optional gate record invalidates the state when malformed — the
+	// loader refuses it rather than loading the widening it claims to
+	// license; the mirror refuses with it.
+	const gate = state.gate;
+	if (
+		gate !== undefined &&
+		(gate === null ||
+			typeof gate !== "object" ||
+			Array.isArray(gate) ||
+			typeof gate.at !== "string" ||
+			gate.actor !== POOL_GATE_ACTOR ||
+			!Array.isArray(gate.decision) ||
+			!gate.decision.every((entry) => typeof entry === "string") ||
+			typeof gate.rationale !== "string")
+	) {
+		return new Set();
+	}
+	const out = new Set();
+	for (const [pack, packState] of Object.entries(state.packs)) {
+		if (packState.enabled !== true) continue;
+		for (const [key, cls] of Object.entries(classes)) {
+			const slash = key.indexOf("/");
+			const keyPack = slash === -1 ? key : key.slice(0, slash);
+			const skill = slash === -1 ? "" : key.slice(slash + 1);
+			if (keyPack !== pack || skill === "" || skill.includes("/")) continue;
+			if (!state.classAllow.includes(cls)) continue;
+			const skillDir = path.join(root, "pool", pack, skill);
+			let onDisk = false;
+			try {
+				onDisk = fs.statSync(skillDir).isDirectory();
+			} catch {
+				// the loader diagnoses a missing directory and loads the sound rest
+			}
+			if (!onDisk) continue;
+			const skillFile = path.join(skillDir, "SKILL.md");
+			try {
+				out.add(fs.realpathSync(skillFile));
+			} catch {
+				out.add(skillFile); // unresolvable now: keep expecting it, the loud direction
+			}
+		}
+	}
+	return out;
+}
+
 // Resolves a checkout-relative argument (named by `label` in the errors) to
 // an absolute path and requires an existing `file` or `directory` inside
 // the checkout — traversal and outside paths, including symlinks that
@@ -2108,6 +2209,12 @@ export function auditSession(dir, rootArg, legs = []) {
 	// a checkout skill, and locations that do not resolve on disk are
 	// rejected.
 	const inventoryNames = new Set(names);
+	// The pool expectation (spec #167): the admitted pool skills, matched by
+	// resolved location — the same both-ways discipline the inventory gets:
+	// every admitted skill must be advertised, and a pool advertisement the
+	// staged state does not admit (a key-class skill in a local-only
+	// session, say) is an extra like any other checkout intrusion.
+	const poolExpected = expectedPoolSkills(root);
 	const manifestEntry = manifestSkillEntry(root);
 	const canonical = new Map();
 	for (const rec of advertisements) {
@@ -2133,7 +2240,8 @@ export function auditSession(dir, rootArg, legs = []) {
 		}
 		if (
 			!inventoryNames.has(rec.name) &&
-			canonical.get(rec.name).startsWith(root + path.sep)
+			canonical.get(rec.name).startsWith(root + path.sep) &&
+			!poolExpected.has(canonical.get(rec.name))
 		) {
 			throw new Error(
 				`host skill ${rec.name} resolves inside the checkout: ${rec.location}`,
@@ -2148,7 +2256,15 @@ export function auditSession(dir, rootArg, legs = []) {
 	if (missing.length > 0) {
 		throw new Error(`NOT advertised: ${missing.join(", ")}`);
 	}
-	const expected = new Set(names.map((n) => `${skillRoot}/${n}/SKILL.md`));
+	const canonicalLocations = new Set(canonical.values());
+	const poolMissing = [...poolExpected].filter((p) => !canonicalLocations.has(p));
+	if (poolMissing.length > 0) {
+		throw new Error(`NOT advertised (pool):\n${poolMissing.join("\n")}`);
+	}
+	const expected = new Set([
+		...names.map((n) => `${skillRoot}/${n}/SKILL.md`),
+		...poolExpected,
+	]);
 	// An advertised record is an extra when its lexical location or its
 	// canonical target lies at or inside the checkout without being
 	// inventory — canonicalizing alone would hide a checkout symlink
@@ -2180,13 +2296,14 @@ export function auditSession(dir, rootArg, legs = []) {
 	}
 	// A duplicate alias (one inventory skill also reachable through a second
 	// in-checkout symlink) collapses in the canonical set, so the count of
-	// checkout-affiliated records must match the inventory exactly.
+	// checkout-affiliated records must match the inventory plus the admitted
+	// pool skills exactly.
 	const checkoutRecords = advertisements.filter((rec) =>
 		canonical.get(rec.name)?.startsWith(root + path.sep),
 	);
-	if (checkoutRecords.length !== names.length) {
+	if (checkoutRecords.length !== names.length + poolExpected.size) {
 		throw new Error(
-			`expected ${names.length} checkout skill advertisements, found ${checkoutRecords.length}`,
+			`expected ${names.length + poolExpected.size} checkout skill advertisements (${names.length} inventory + ${poolExpected.size} pool), found ${checkoutRecords.length}`,
 		);
 	}
 	const dirty = gitStatus(root);
@@ -2213,6 +2330,7 @@ export function auditSession(dir, rootArg, legs = []) {
 		`provider ${wantModel[0]}\n` +
 		`model ${wantModel[1]}\n` +
 		`inventory ${shaText(inventoryText)}\n` +
+		(poolExpected.size > 0 ? `pool-skills ${poolExpected.size}\n` : "") +
 		`prompt ${shaText(promptWanted)}\n` +
 		`nested-calls ${nestedCount}`;
 	// The spot-check attestations — skill read, script execution, notebook

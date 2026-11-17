@@ -42,3 +42,20 @@ test("exactly the gateway scenarios pass --gateway, and every leg rides in order
 		assert.deepEqual(legsOf(args), scenario.legs, `${scenario.id}: leg order drifted`);
 	}
 });
+
+// The pool pass-through (spec #167): --pool <pack> rides exactly when the
+// scenario declares a pack — the staged state is what makes the capture's
+// session load the pack, so a dropped flag would silently capture an
+// empty-pool session and the auditor leg would refuse it.
+test("exactly the pool scenarios pass --pool with their declared pack", () => {
+	for (const scenario of SCENARIOS) {
+		const args = rigArgs(scenario, "/tmp/ev");
+		const at = args.indexOf("--pool");
+		if (scenario.pool === undefined) {
+			assert.equal(at, -1, `${scenario.id}: --pool must not ride unless the scenario declares it`);
+		} else {
+			assert.notEqual(at, -1, `${scenario.id}: --pool must ride when the scenario declares it`);
+			assert.equal(args[at + 1], scenario.pool);
+		}
+	}
+});
