@@ -102,7 +102,8 @@ const QUESTION_CLASSES: Record<GateQuestion, Exclude<SkillClass, "local">> = {
 
 export type SkillClass = "local" | "key" | "cloud";
 
-const SKILL_CLASSES: readonly SkillClass[] = ["local", "key", "cloud"];
+/** The full class vocabulary — the auditor's pool mirror pins its own copy against this. */
+export const SKILL_CLASSES: readonly SkillClass[] = ["local", "key", "cloud"];
 
 /** One append-on-write history entry; the command writes these. */
 export interface HistoryEntry {

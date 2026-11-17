@@ -36,6 +36,8 @@ import {
 	auditNotebook,
 	collectNestedCalls,
 	expectedPoolSkills,
+	POOL_CLASSES,
+	POOL_GATE_ACTOR,
 	formatCleanLine,
 	CLEAN_LINE_PATTERN,
 	auditSession,
@@ -632,16 +634,17 @@ test("auditSession ignores host skills advertised from outside the repo", (t) =>
 // --- the pool advertisement expectation (spec #167) -----------------------
 //
 // A pool-bearing fixture repo: the bioinformatics-shaped miniature — one
-// local skill, one key skill, the class map, and the staged per-project
-// state at the gitignored .theta/skills.json (the way the rig's --pool leg
-// stages it into the clone). `state: null` leaves the state file out.
+// local skill, one key skill, one cloud skill, the class map, and the
+// staged per-project state at the gitignored .theta/skills.json (the way
+// the rig's --pool leg stages it into the clone). `state: null` leaves the
+// state file out.
 
 function makePoolRepo(t, { classAllow = ["local"], state } = {}) {
 	const repo = fs.mkdtempSync(path.join(os.tmpdir(), "dogfood-pool-"));
 	t.after(() => fs.rmSync(repo, { recursive: true, force: true }));
 	fs.mkdirSync(path.join(repo, "skills", "literature-review"), { recursive: true });
 	fs.writeFileSync(path.join(repo, "skills", "literature-review", "SKILL.md"), "skill content\n");
-	for (const skill of ["demo", "keyed"]) {
+	for (const skill of ["demo", "keyed", "cloudy"]) {
 		fs.mkdirSync(path.join(repo, "pool", "bioinformatics", skill), { recursive: true });
 		fs.writeFileSync(
 			path.join(repo, "pool", "bioinformatics", skill, "SKILL.md"),
@@ -650,7 +653,7 @@ function makePoolRepo(t, { classAllow = ["local"], state } = {}) {
 	}
 	fs.writeFileSync(
 		path.join(repo, "pool", "classes.json"),
-		`${JSON.stringify({ "bioinformatics/demo": "local", "bioinformatics/keyed": "key" }, null, "\t")}\n`,
+		`${JSON.stringify({ "bioinformatics/demo": "local", "bioinformatics/keyed": "key", "bioinformatics/cloudy": "cloud" }, null, "\t")}\n`,
 	);
 	fs.writeFileSync(path.join(repo, ".gitignore"), ".theta/\n");
 	if (state !== null) {
@@ -677,25 +680,30 @@ test("expectedPoolSkills mirrors the loader's deterministic scan exactly", async
 	// computed through jiti, the loader pi runs extensions with (the
 	// skill-pool suite's pattern; the audit itself cannot jiti, which is
 	// why the mirror exists).
-	const { planPoolLoading } = await createJiti(import.meta.url).import(
-		"../extensions/skill-pool.ts",
-	);
+	const loader = await createJiti(import.meta.url).import("../extensions/skill-pool.ts");
+	const { planPoolLoading } = loader;
+	// the mirror's constants are the loader's own vocabulary and gate actor,
+	// not hand-written copies — a loader-side change reds here, at the pin
+	assert.deepEqual(POOL_CLASSES, new Set(loader.SKILL_CLASSES));
+	assert.equal(POOL_GATE_ACTOR, loader.GATE_ACTOR);
+	const expectSame = (repo) =>
+		assert.deepEqual(
+			[...expectedPoolSkills(repo)].sort(),
+			planPoolLoading(path.join(repo, "pool"), repo)
+				.skillPaths.map((dir) => `${dir}/SKILL.md`)
+				.sort(),
+		);
 	const repo = makePoolRepo(t);
-	assert.deepEqual(
-		[...expectedPoolSkills(repo)].sort(),
-		planPoolLoading(path.join(repo, "pool"), repo)
-			.skillPaths.map((dir) => `${dir}/SKILL.md`)
-			.sort(),
-	);
-	// and the widened set admits the key-class skill on both sides
+	expectSame(repo);
+	// and the widened sets admit the key and cloud classes on both sides —
+	// the widest case rides the pinned vocabulary, so a vocabulary change
+	// forces this fixture to grow with it
 	const widened = makePoolRepo(t, { classAllow: ["local", "key"] });
-	assert.deepEqual(
-		[...expectedPoolSkills(widened)].sort(),
-		planPoolLoading(path.join(widened, "pool"), widened)
-			.skillPaths.map((dir) => `${dir}/SKILL.md`)
-			.sort(),
-	);
+	expectSame(widened);
 	assert.equal([...expectedPoolSkills(widened)].length, 2);
+	const allClasses = makePoolRepo(t, { classAllow: [...POOL_CLASSES] });
+	expectSame(allClasses);
+	assert.equal([...expectedPoolSkills(allClasses)].length, 3);
 });
 
 test("expectedPoolSkills admits nothing on unusable inputs — the loader's sound-rest discipline", (t) => {

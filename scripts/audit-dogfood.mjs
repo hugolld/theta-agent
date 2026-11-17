@@ -139,7 +139,9 @@ export function resolveAdvertisedSkill(root, skill, expected) {
 // deterministic scan (extensions/skill-pool.ts), mirrored in plain fs — the
 // audit runs in-container from a clone with no node_modules, so jiti-loading
 // the extension is not an option; test/dogfood-audit.test.mjs pins the
-// mirror's constants and admit-set against the loader's own exports. The
+// mirror against the loader's own exports — both constants below against
+// the loader's exported SKILL_CLASSES and GATE_ACTOR, and the admit-set by
+// deep-equality with planPoolLoading's skill paths. The
 // inputs are exactly the loader's: the staged state (<root>/.theta/skills.json
 // — a rig leg stages it into the clone before the session; no file, no pool
 // expectation) and the class map (pool/classes.json). Validation mirrors the
@@ -147,8 +149,8 @@ export function resolveAdvertisedSkill(root, skill, expected) {
 // sound-rest discipline, so a broken state file reds the audit as a missing
 // pool advertisement, never as a lowered bar. Returns the set of absolute
 // SKILL.md paths the session's advertisement must carry and nothing more.
-const POOL_CLASSES = new Set(["local", "key", "cloud"]);
-const POOL_GATE_ACTOR = "classify:jev";
+export const POOL_CLASSES = new Set(["local", "key", "cloud"]);
+export const POOL_GATE_ACTOR = "classify:jev";
 
 function readJsonOrUndefined(file) {
 	try {
@@ -211,7 +213,7 @@ export function expectedPoolSkills(root) {
 			const slash = key.indexOf("/");
 			const keyPack = slash === -1 ? key : key.slice(0, slash);
 			const skill = slash === -1 ? "" : key.slice(slash + 1);
-			if (keyPack !== pack || skill === "" || key.slice(slash + 1).includes("/")) continue;
+			if (keyPack !== pack || skill === "" || skill.includes("/")) continue;
 			if (!state.classAllow.includes(cls)) continue;
 			const skillDir = path.join(root, "pool", pack, skill);
 			let onDisk = false;
