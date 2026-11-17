@@ -80,22 +80,15 @@ for (const key of Object.keys(childEnv)) {
 }
 
 const sessionArgs = ["--mode", "rpc", "--provider", provider, "--model", model, "--session-dir", sessionDir];
+const spawnOpts = { stdio: ["pipe", "pipe", "pipe"], env: childEnv };
 // The spawn shape follows the cwd (spec #164): from the checkout, the
 // launcher's own `--dev` anchor vouches for it; in an arbitrary project
 // cwd that anchor refuses by design, so the driver vouches the checkout
 // itself the way theta does — `pi -e <checkout>`.
 const child =
 	sessionCwd === undefined
-		? spawn("node", ["bin/theta.mjs", "--dev", ...sessionArgs], {
-				cwd: checkout,
-				stdio: ["pipe", "pipe", "pipe"],
-				env: childEnv,
-			})
-		: spawn("pi", ["-e", checkout, ...sessionArgs], {
-				cwd: sessionCwd,
-				stdio: ["pipe", "pipe", "pipe"],
-				env: childEnv,
-			});
+		? spawn("node", ["bin/theta.mjs", "--dev", ...sessionArgs], { cwd: checkout, ...spawnOpts })
+		: spawn("pi", ["-e", checkout, ...sessionArgs], { cwd: sessionCwd, ...spawnOpts });
 // A spawn that cannot start — pi missing from PATH, a --cwd that does not
 // exist — fails as a clean exit-2 message, not an unhandled-error stack:
 // the wrapper would otherwise record noise for a tooling miss.

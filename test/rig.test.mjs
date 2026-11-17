@@ -13,6 +13,9 @@ import { parseFlags, prepareProviderConfig, prepareGatewayConfig, gatewayPreflig
 const dockerfile = await readFile(fileURLToPath(new URL("./rig/Dockerfile", import.meta.url)), "utf8");
 const runnerPath = fileURLToPath(new URL("./rig/run.mjs", import.meta.url));
 const driverPath = fileURLToPath(new URL("./rig/rpc-driver.mjs", import.meta.url));
+// One home for the stubs' helper import — both stub shapes load the
+// driver's own drainJsonl, the wire format's single reader.
+const jsonlHelperUrl = pathToFileURL(path.join(path.dirname(driverPath), "rpc-jsonl.mjs")).href;
 
 test("Dockerfile pins every base by digest", () => {
 	const froms = dockerfile.match(/^FROM .*$/gm) ?? [];
@@ -208,13 +211,16 @@ const rpcStubScript = (jsonlHelperUrl) =>
 		"});",
 	].join("\n");
 
+// Both stub shapes seed the record file up front, so a spawn that dies
+// before its first record() still leaves an empty file, not an ENOENT.
+async function seedRecord(dir) {
+	await writeFile(path.join(dir, "record.json"), "");
+}
+
 async function stubCheckout() {
 	const dir = await mkdtemp(path.join(tmpdir(), "rig-drv-"));
-	await writeFile(
-		path.join(dir, "theta.mjs"),
-		rpcStubScript(pathToFileURL(path.join(path.dirname(driverPath), "rpc-jsonl.mjs")).href),
-	);
-	await writeFile(path.join(dir, "record.json"), "");
+	await writeFile(path.join(dir, "theta.mjs"), rpcStubScript(jsonlHelperUrl));
+	await seedRecord(dir);
 	// The driver spawns `node bin/theta.mjs` — a bin/ symlink to the stub.
 	await mkdir(path.join(dir, "bin"));
 	await symlink(path.join(dir, "theta.mjs"), path.join(dir, "bin", "theta.mjs"));
@@ -227,8 +233,8 @@ async function stubCheckout() {
 async function stubPiDir() {
 	const dir = await mkdtemp(path.join(tmpdir(), "rig-pi-"));
 	const body = path.join(dir, "pi-body.mjs");
-	await writeFile(body, rpcStubScript(pathToFileURL(path.join(path.dirname(driverPath), "rpc-jsonl.mjs")).href));
-	await writeFile(path.join(dir, "record.json"), "");
+	await writeFile(body, rpcStubScript(jsonlHelperUrl));
+	await seedRecord(dir);
 	await writeFile(path.join(dir, "pi"), `#!/usr/bin/env node\nimport(${JSON.stringify(pathToFileURL(body).href)});\n`);
 	await chmod(path.join(dir, "pi"), 0o755);
 	return dir;
@@ -352,6 +358,15 @@ test("rpc driver refuses --cwd misuse cleanly", async (t) => {
 	const noValue = spawnSync(process.execPath, [driverPath, "--cwd"], { encoding: "utf8" });
 	assert.equal(noValue.status, 2);
 	assert.match(noValue.stderr, /--cwd needs a value/);
+
+	// The usage bytes carry the flag — an operator reading the help sees the
+	// supported argument, the discovery path's contract included.
+	const usage = spawnSync(process.execPath, [driverPath, "--cwd", checkout], { encoding: "utf8" });
+	assert.equal(usage.status, 2);
+	assert.ok(
+		usage.stderr.includes("usage: rpc-driver.mjs [--cwd <dir>] <checkout> <sessionDir> <prompt> [allow|deny]"),
+		`usage line must name --cwd: ${usage.stderr}`,
+	);
 
 	const run = spawnSync(
 		process.execPath,
