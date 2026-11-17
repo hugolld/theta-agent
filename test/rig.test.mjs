@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFile, mkdtemp, mkdir, rm, stat, symlink, writeFile } from "node:fs/promises";
-import { existsSync, readFileSync } from "node:fs";
+import { readFile, mkdtemp, mkdir, rm, stat, symlink, writeFile, chmod } from "node:fs/promises";
+import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -13,6 +13,9 @@ import { parseFlags, prepareProviderConfig, prepareGatewayConfig, gatewayPreflig
 const dockerfile = await readFile(fileURLToPath(new URL("./rig/Dockerfile", import.meta.url)), "utf8");
 const runnerPath = fileURLToPath(new URL("./rig/run.mjs", import.meta.url));
 const driverPath = fileURLToPath(new URL("./rig/rpc-driver.mjs", import.meta.url));
+// One home for the stubs' helper import — both stub shapes load the
+// driver's own drainJsonl, the wire format's single reader.
+const jsonlHelperUrl = pathToFileURL(path.join(path.dirname(driverPath), "rpc-jsonl.mjs")).href;
 
 test("Dockerfile pins every base by digest", () => {
 	const froms = dockerfile.match(/^FROM .*$/gm) ?? [];
@@ -174,20 +177,22 @@ test("--rpc without --gateway refuses without a daemon", () => {
 	assert.match(probe.stderr, /--rpc needs --gateway/);
 });
 
-// A stub checkout whose bin/theta.mjs speaks just enough of the RPC
-// extension-UI protocol: it asks one confirm, echoes the answer it received
-// to a record file, then settles. The driver under test is the real one,
-// and the stub reads its stdin through the driver's own exported drainJsonl
-// — the wire format has one reader, not two copies of the same loop.
-const stubTheta = (jsonlHelperUrl) =>
+// One stub body for both spawn shapes the driver uses (theta and pi): it
+// records the argv and cwd it was spawned with beside its own file — node
+// resolves the entry through the bin/ symlink to this file's real location —
+// then speaks just enough of the RPC extension-UI protocol: ask one confirm,
+// echo the answer, settle, answer the final-text request. The driver under
+// test is the real one, and the stub reads its stdin through the driver's
+// own exported drainJsonl — the wire format has one reader, not two copies
+// of the same loop.
+const rpcStubScript = () =>
 	[
 		"import { writeFileSync } from 'node:fs';",
 		`import { drainJsonl } from ${JSON.stringify(jsonlHelperUrl)};`,
-		"// The driver spawns its child with a minimal explicit env, so the stub",
-		"// records beside its own file — node resolves the entry through the",
-		"// bin/ symlink to this file's real location.",
 		"const recordUrl = new URL('./record.json', import.meta.url);",
 		"const answers = [];",
+		"const record = () => writeFileSync(recordUrl, JSON.stringify({ argv: process.argv.slice(2), cwd: process.cwd(), answers }) + '\\n');",
+		"record();",
 		"let buffer = '';",
 		"process.stdin.setEncoding('utf8');",
 		"process.stdin.on('data', (chunk) => {",
@@ -196,7 +201,7 @@ const stubTheta = (jsonlHelperUrl) =>
 		"			process.stdout.write(JSON.stringify({ type: 'extension_ui_request', id: 'conf-1', method: 'confirm' }) + '\\n');",
 		"		} else if (rec.type === 'extension_ui_response') {",
 		"			answers.push(rec);",
-		"			writeFileSync(recordUrl, JSON.stringify(answers) + '\\n');",
+		"			record();",
 		"			process.stdout.write(JSON.stringify({ type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: 'done' } }) + '\\n');",
 		"			process.stdout.write(JSON.stringify({ type: 'agent_settled' }) + '\\n');",
 		"		} else if (rec.id === 'final') {",
@@ -206,16 +211,32 @@ const stubTheta = (jsonlHelperUrl) =>
 		"});",
 	].join("\n");
 
+// Both stub shapes seed the record file up front, so a spawn that dies
+// before its first record() still leaves an empty file, not an ENOENT.
+async function seedRecord(dir) {
+	await writeFile(path.join(dir, "record.json"), "");
+}
+
 async function stubCheckout() {
 	const dir = await mkdtemp(path.join(tmpdir(), "rig-drv-"));
-	await writeFile(
-		path.join(dir, "theta.mjs"),
-		stubTheta(pathToFileURL(path.join(path.dirname(driverPath), "rpc-jsonl.mjs")).href),
-	);
-	await writeFile(path.join(dir, "record.json"), "");
+	await writeFile(path.join(dir, "theta.mjs"), rpcStubScript());
+	await seedRecord(dir);
 	// The driver spawns `node bin/theta.mjs` — a bin/ symlink to the stub.
 	await mkdir(path.join(dir, "bin"));
 	await symlink(path.join(dir, "theta.mjs"), path.join(dir, "bin", "theta.mjs"));
+	return dir;
+}
+
+// A stub pi behind a private PATH entry: the --cwd leg spawns `pi` by name,
+// so the stub takes the launcher's place — a shebang wrapper that loads the
+// same stub body, recording beside it.
+async function stubPiDir() {
+	const dir = await mkdtemp(path.join(tmpdir(), "rig-pi-"));
+	const body = path.join(dir, "pi-body.mjs");
+	await writeFile(body, rpcStubScript());
+	await seedRecord(dir);
+	await writeFile(path.join(dir, "pi"), `#!/usr/bin/env node\nimport(${JSON.stringify(pathToFileURL(body).href)});\n`);
+	await chmod(path.join(dir, "pi"), 0o755);
 	return dir;
 }
 
@@ -227,15 +248,24 @@ test("rpc driver answers the confirm and captures the settled session", async (t
 
 	const run = spawnSync(process.execPath, [driverPath, checkout, sessionDir, "a gated prompt", "allow"], {
 		encoding: "utf8",
+		env: { ...process.env, RIG_PROVIDER: "prov-x", RIG_MODEL: "model-y" },
 	});
 	assert.equal(run.status, 0, run.stderr);
 
-	const answered = JSON.parse(await readFile(recordPath, "utf8"));
-	assert.equal(answered.length, 1);
-	assert.equal(answered[0].type, "extension_ui_response");
-	assert.equal(answered[0].id, "conf-1");
-	assert.equal(answered[0].confirmed, true);
-	assert.equal(answered[0].cancelled, undefined);
+	const record = JSON.parse(await readFile(recordPath, "utf8"));
+	// The default spawn shape: theta --dev from the checkout, cwd pinned to
+	// it (the stub records argv past its own entry, as node hands it over).
+	assert.deepEqual(record.argv, [
+		"--dev", "--mode", "rpc",
+		"--provider", "prov-x", "--model", "model-y",
+		"--session-dir", sessionDir,
+	]);
+	assert.equal(record.cwd, realpathSync(checkout));
+	assert.equal(record.answers.length, 1);
+	assert.equal(record.answers[0].type, "extension_ui_response");
+	assert.equal(record.answers[0].id, "conf-1");
+	assert.equal(record.answers[0].confirmed, true);
+	assert.equal(record.answers[0].cancelled, undefined);
 
 	const events = (await readFile(path.join(sessionDir, "raw-rpc-events.jsonl"), "utf8")).trim().split("\n").map((l) => JSON.parse(l));
 	assert.ok(events.some((e) => e.type === "extension_ui_request" && e.method === "confirm"));
@@ -257,9 +287,9 @@ test("rpc driver can refuse instead: the deny answer cancels the confirm", async
 	});
 	assert.equal(run.status, 0, run.stderr);
 
-	const answered = JSON.parse(await readFile(recordPath, "utf8"));
-	assert.equal(answered[0].cancelled, true);
-	assert.equal(answered[0].confirmed, undefined);
+	const record = JSON.parse(await readFile(recordPath, "utf8"));
+	assert.equal(record.answers[0].cancelled, true);
+	assert.equal(record.answers[0].confirmed, undefined);
 });
 
 // A typo'd verdict must refuse to run — never silently mean allow against
@@ -275,6 +305,76 @@ test("rpc driver refuses a gate answer that is neither allow nor deny", async (t
 	assert.equal(run.status, 2);
 	assert.match(run.stderr, /allow or deny/);
 	await assert.rejects(readFile(path.join(sessionDir, "raw-rpc-events.jsonl")));
+});
+
+// #164: a session whose evidence lives in an arbitrary project cwd (the S2
+// Jev-gate dogfood shape). With --cwd the driver spawns `pi -e <checkout>`
+// directly — theta --dev's anchor does not cover arbitrary cwds — and the
+// gate confirm, settle, and capture contracts all stay the print leg's.
+test("rpc driver takes --cwd: pi -e <checkout> runs in the project cwd", async (t) => {
+	const piDir = await stubPiDir();
+	const checkout = await mkdtemp(path.join(tmpdir(), "rig-drv-"));
+	const projectCwd = await mkdtemp(path.join(tmpdir(), "rig-proj-"));
+	const sessionDir = await mkdtemp(path.join(tmpdir(), "rig-drvsess-"));
+	t.after(() =>
+		Promise.all([
+			rm(piDir, { recursive: true, force: true }),
+			rm(checkout, { recursive: true, force: true }),
+			rm(projectCwd, { recursive: true, force: true }),
+			rm(sessionDir, { recursive: true, force: true }),
+		]),
+	);
+
+	const run = spawnSync(
+		process.execPath,
+		[driverPath, "--cwd", projectCwd, checkout, sessionDir, "a gated prompt"],
+		{
+			encoding: "utf8",
+			env: { ...process.env, PATH: `${piDir}:${process.env.PATH}`, RIG_PROVIDER: "prov-x", RIG_MODEL: "model-y" },
+		},
+	);
+	assert.equal(run.status, 0, run.stderr);
+
+	const record = JSON.parse(await readFile(path.join(piDir, "record.json"), "utf8"));
+	assert.deepEqual(record.argv, [
+		"-e", checkout, "--mode", "rpc",
+		"--provider", "prov-x", "--model", "model-y",
+		"--session-dir", sessionDir,
+	]);
+	assert.ok(!record.argv.includes("--dev"), "--dev must not ride the project-cwd spawn");
+	assert.equal(record.cwd, realpathSync(projectCwd));
+	assert.equal(record.answers[0]?.confirmed, true);
+	assert.equal(await readFile(path.join(sessionDir, "stdout.txt"), "utf8"), "done");
+});
+
+// The flag's own failure modes refuse loudly: a missing value up front, and
+// a spawn that cannot start (the --cwd target does not exist) reported as a
+// clean exit-2 message — never an unhandled-error stack in the evidence leg.
+test("rpc driver refuses --cwd misuse cleanly", async (t) => {
+	const checkout = await mkdtemp(path.join(tmpdir(), "rig-drv-"));
+	const sessionDir = await mkdtemp(path.join(tmpdir(), "rig-drvsess-"));
+	t.after(() => Promise.all([rm(checkout, { recursive: true, force: true }), rm(sessionDir, { recursive: true, force: true })]));
+
+	const noValue = spawnSync(process.execPath, [driverPath, "--cwd"], { encoding: "utf8" });
+	assert.equal(noValue.status, 2);
+	assert.match(noValue.stderr, /--cwd needs a value/);
+
+	// The usage bytes carry the flag — an operator reading the help sees the
+	// supported argument, the discovery path's contract included.
+	const usage = spawnSync(process.execPath, [driverPath, "--cwd", checkout], { encoding: "utf8" });
+	assert.equal(usage.status, 2);
+	assert.ok(
+		usage.stderr.includes("usage: rpc-driver.mjs [--cwd <dir>] <checkout> <sessionDir> <prompt> [allow|deny]"),
+		`usage line must name --cwd: ${usage.stderr}`,
+	);
+
+	const run = spawnSync(
+		process.execPath,
+		[driverPath, "--cwd", path.join(sessionDir, "no-such-dir"), checkout, sessionDir, "a gated prompt"],
+		{ encoding: "utf8" },
+	);
+	assert.equal(run.status, 2, run.stderr);
+	assert.match(run.stderr, /could not spawn the session/);
 });
 
 // The live leg builds the image and boots it. It needs Docker and network;
