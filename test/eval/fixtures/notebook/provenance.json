@@ -1,13 +1,13 @@
 {
 	"scenario": "notebook",
-	"sessionPreHead": "210f19b32bae2697ff1c1e34a0f547057cbdd735",
-	"landedHead": "210f19b32bae2697ff1c1e34a0f547057cbdd735",
+	"sessionPreHead": "916a15cac1fa8e217175fcbcbaed03235e31ee0e",
+	"landedHead": "916a15cac1fa8e217175fcbcbaed03235e31ee0e",
 	"piVersion": "1.4.0",
 	"nodeVersion": "v22.23.4",
 	"surfaces": {
 		"advertisement": "68bc19e716f8a6aa44b92e7f27995fc82b614e3b4e43c1bb78b24d6711493234",
 		"skill:theta-notebook": "2264f5e8c459296e510b85c0c2d56eaf46141eeec9c8361c8f61fa3795f83556",
-		"extensions": "9149b1221da76378c2eb869986b6026bc94fa5eed4e56b0ccea7583929b81f17",
-		"project-context": "50ec0169366a78ce9b33b09cc9c2191caae12693a4cf03715fd67110eb15c6e1"
+		"extensions": "3f73985a2d69f69950f969d6f3f7996edc8795f9b979c5ef85e1fcac1cc6043b",
+		"project-context": "77a3cf3dafa3b1d49eae548c1431ce9b9c0ea7cacec4f88ebee33212415dfa3d"
 	}
 }

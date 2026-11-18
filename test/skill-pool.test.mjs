@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { createJiti } from "jiti";
+import { tempDir } from "./helpers/temp-dir.mjs";
 
 // The skill pool loader (spec #160, ADR 0008): the extension that loads the
 // vendored domain packs per research project. The test drives the real
@@ -42,11 +42,9 @@ const CLASSES = JSON.parse(
 	fs.readFileSync(new URL("../pool/classes.json", import.meta.url), "utf8"),
 );
 
-function tempDir(t, prefix) {
-	const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
-	t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
-	return dir;
-}
+// The throwaway-directory shape's shared home (test/helpers/temp-dir.mjs)
+// — this suite's local copy was its first caller; #178's third caller is
+// where the shape got extracted.
 
 function withThetaPool(t, root) {
 	const saved = process.env.THETA_POOL;
