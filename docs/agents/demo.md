@@ -42,6 +42,27 @@ interactive mode; RPC forwards dialogs and notifications but not custom
 components; print and JSON modes have no UI. The demo runs interactive;
 commands degrade to notify-only elsewhere.
 
+### The operator-vouched visual capture
+
+Every B-item's acceptance carries one operator-vouched interactive render —
+the card, command, or theme surface drawn in the live TUI. The recipe, as
+B1 (#178) settled it after five attempts:
+
+1. Launch from the repo or strike-worktree cwd. Both gates key on the
+   cwd: `theta --dev` wants the checkout (or `THETA_DEV_ROOT`), and pi's
+   sandbox reads the skill tree relative to the cwd, so a `/tmp` launch
+   refuses the reads. The sandbox stays on — it provides the approval
+   gate that agent-driven keystrokes would otherwise replace.
+2. Wrap the launch in a pty recorder so the TUI renders into the
+   capture: `script -q <capture> node bin/theta.mjs --dev --provider
+   zai-coding-cn --model glm-5.3-flash`, then run the B-item's
+   one-prompt surface against a throwaway `.theta/` in that cwd.
+3. Archive beside the strike evidence: the ANSI original (the evidence
+   grades' badges live in the escape codes) plus a plain stripped copy;
+   clear the scratch `.theta/` afterwards.
+4. The vouch is the owner's per-capture sign-off in the session,
+   attested in the PR body like the fixture sign-offs.
+
 ## Runbook — the seminar script
 
 Rehearse the full script in the clean-room rig first
