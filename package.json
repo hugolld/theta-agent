@@ -26,13 +26,15 @@
 	"files": [
 		"bin/",
 		"extensions/",
+		"prompts/",
 		"skills/",
 		"README.md",
 		"LICENSE"
 	],
 	"pi": {
 		"extensions": ["./extensions"],
-		"skills": ["./skills"]
+		"skills": ["./skills"],
+		"prompts": ["./prompts"]
 	},
 	"scripts": {
 		"lint": "eslint .",

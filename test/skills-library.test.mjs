@@ -847,6 +847,7 @@ const proseFiles = await (async () => {
 	};
 	await addTree(new URL("../docs/", import.meta.url), (n) => n.endsWith(".md"));
 	await addTree(new URL("../extensions/", import.meta.url), (n) => n.endsWith(".ts"));
+	await addTree(new URL("../prompts/", import.meta.url), (n) => n.endsWith(".md"));
 	for (const skill of expectedSelfAuthored) {
 		await addTree(new URL(`../skills/${skill}/`, import.meta.url), (n) => n.endsWith(".md"));
 	}
