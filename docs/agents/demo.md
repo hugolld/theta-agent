@@ -1,0 +1,84 @@
+# Demo doctrine — the collaborator demonstration
+
+The M7a demo slice: a repeatable, rehearsed demonstration of Theta running
+live in pi's interactive TUI, deployed on the cluster login node, for an
+audience of pharmacology and wet-lab researchers who will not drive the
+agent themselves. Campaign-level decisions live in the vault's M7a design
+note (D1–D6); this doc is the repo's build and runbook surface.
+
+## Scope and standing decisions
+
+- **The terminal session is the demonstration.** No web UI, no new shell:
+  pi's interactive mode dressed through the extension API. The audience
+  reads the loop; the owner drives.
+- **English throughout** — output, notebook text, code. Slides and
+  narration may be Chinese; the product surface stays English.
+- **The cluster leg is optional.** The demo script runs complete without
+  it. Enabling the leg requires the deployed compute gateway on the login
+  node — owner-run verification, the gateway README's phase-0 recipe; the
+  demo's gateway binds loopback on that node, so no SSH forward and no
+  opened port — and the leg adds the submit-gate confirm, poll, fetch,
+  and job-record path.
+- **The demo runs in tmux on the login node**, over SSH from the seminar
+  room. The gateway is local to the demo — no laptop or VPN dependency
+  for the live run.
+- **The recording is part of the demo.** Rehearse in the clean-room rig;
+  carry an asciinema capture and an exported-HTML session as the fallback
+  for any live-run failure.
+
+## Build items
+
+| # | Item | Mechanism | Status |
+|---|---|---|---|
+| B1 | Notebook entry cards — each provenance entry renders as a grade-badged card in the transcript (asserted / cross-checked / re-executed) | recorder hook → `pi.appendEntry()` + `pi.registerEntryRenderer()`; card data is durable, excluded from model context | planned |
+| B2 | `/notebook` command — render the project notebook on demand: entries table, evidence grades, dates | `pi.registerCommand()` reading `.theta/notebook.jsonl`; notify-only, no `ui.select`, so print and RPC sessions stay functional | planned |
+| B3 | Demo prompt templates — scripted, repeatable runs (a pharmacology question, the benchmark suite's `lit-triage` shape) | prompt templates shipped with the package; `/demo-lit-triage` | planned |
+| B4 | `/roadmap` command — the future-plans card: M7b web workbench, cloud deployment study, M8 packaging | `pi.registerCommand()` + TUI boxes | planned |
+| B5 | Theta theme — brand colors, status line | pi theme files | planned |
+| B6 | This runbook + rehearsal | this doc; rig rehearsal before the date | planned |
+
+Mode constraint (binds B1, B2, B4, B5): extension UI is complete in
+interactive mode; RPC forwards dialogs and notifications but not custom
+components; print and JSON modes have no UI. The demo runs interactive;
+commands degrade to notify-only elsewhere.
+
+## Runbook — the seminar script
+
+Rehearse the full script in the clean-room rig first
+(`node test/rig/run.mjs run "<prompt>"` for the legs it covers); the
+live run is the same script on the login node.
+
+```
+ 1. SSH to login node → tmux (extended-keys config; pi's tmux doc) →
+    theta --dev (from the checkout)
+    Show: /theta (status); the / command menu — every loaded skill
+    lists there as a /skill:name entry
+ 2. /demo-lit-triage — the scripted pharmacology question; the research
+    loop runs live: literature search → triage → notebook cards appear
+    in the transcript as the recorder appends
+ 3. /notebook — the provenance trail: entries, grades, dates
+ 4. OPTIONAL cluster leg — theta-compute: stage → submit (the submit
+    gate confirms) → poll → fetch → the job record lands in the notebook
+    (graded re-executed). SKIP PATH: if the gateway is down or the queue
+    is hostile, narrate from the roadmap card and move on — the script
+    is complete without it.
+ 5. /roadmap — the web workbench (M7b), the cloud deployment study,
+    M8 packaging
+ 6. /export <path> — the self-contained HTML transcript, sent to the
+    audience afterwards
+```
+
+## Rehearsal and fallback
+
+- Rehearse end-to-end at least twice before the date: once in the rig,
+  once on the login node itself (the live environment — tmux, the
+  cluster's shell, the real terminal size).
+- Record the login-node rehearsal (asciinema). The recording plus the
+  exported HTML travel with the demo as the fallback pair.
+- A live-run failure (model error, network, queue) falls back to the
+  recording with narration; the demo does not retry live.
+- The demo prompt is pure ASCII (the dogfood rule); the scripted
+  templates own this by construction.
+- Before the live cluster leg runs, the owner signs off its two open
+  questions: the demo's submit runs under the owner's cluster account,
+  and the audit trail's location is acceptable to show on screen.
