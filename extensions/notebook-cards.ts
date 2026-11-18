@@ -207,7 +207,13 @@ export interface CardModel {
 	raw: string;
 }
 
-function evidenceDetail(item: EvidenceItem): string {
+/**
+ * One evidence item's provenance detail — the endpoints called, or the
+ * job's identity. One home for the shape: the card draws it and the
+ * `/notebook` table (#182) reprints it, so the detail bytes never fork
+ * between the two surfaces.
+ */
+export function evidenceDetail(item: EvidenceItem): string {
 	const retrieved = `retrieved ${item.retrieved}`;
 	if (item.job_id !== undefined) {
 		const template =
@@ -335,6 +341,23 @@ function completeLines(raw: string): string[] {
 	const lines = raw.split("\n");
 	lines.pop();
 	return lines;
+}
+
+/**
+ * The whole notebook as typed entries — the on-demand read the
+ * `/notebook` command (#182) rides. Every complete line that parses, in
+ * file order: the journal is append-only, so file order is provenance
+ * order. Malformed lines skip — the same refusal the diff hook holds at
+ * append time — and a torn write's tail stays invisible until its
+ * newline lands. No notebook (or an unreadable one) returns undefined;
+ * the caller owns the absence wording.
+ */
+export function readNotebookEntries(cwd: string): NotebookEntry[] | undefined {
+	const raw = fileNotebookReader(cwd);
+	if (raw === undefined) return undefined;
+	return completeLines(raw)
+		.map((line) => parseProvenanceEntry(line))
+		.filter((entry): entry is NotebookEntry => entry !== undefined);
 }
 
 /** The handlers' context needs — the whole ExtensionContext narrowed to what the hook reads. */

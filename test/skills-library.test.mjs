@@ -613,6 +613,10 @@ const scanSurfaces = [
 	// vocabulary (provenance entry, evidence grade) — the card's field
 	// mapping and its rendered lines (spec #178).
 	"extensions/notebook-cards.ts",
+	// extensions/notebook-command.ts carries the same notebook headwords'
+	// working vocabulary — the table's header, rows, and evidence lines
+	// (spec #182).
+	"extensions/notebook-command.ts",
 	"test/manifest.test.mjs",
 	"test/skills-library.test.mjs",
 ];
