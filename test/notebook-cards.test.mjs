@@ -4,6 +4,14 @@ import path from "node:path";
 import { test } from "node:test";
 import { createJiti } from "jiti";
 import { tempDir } from "./helpers/temp-dir.mjs";
+import {
+	cnfLine,
+	decLine,
+	hypLine,
+	mthJobLine,
+	obsLine,
+	writeNotebook,
+} from "./helpers/notebook-lines.mjs";
 
 // The notebook entry cards (spec #178): the diff hook and the renderer
 // mapping, loaded through jiti — the loader pi runs extensions with — and
@@ -11,7 +19,9 @@ import { tempDir } from "./helpers/temp-dir.mjs";
 // loader. Every failure mode the spec names has a pin here: dedupe on
 // re-runs, malformed-line refusal, no-project inertness, the torn-write
 // tail, the startup backlog fence, and the reload rebuild from the
-// session's own custom entries.
+// session's own custom entries. The hand-built notebook lines and the
+// write helper live in their shared home (helpers/notebook-lines.mjs)
+// since the notebook-command suite (#182) became their second caller.
 const jiti = createJiti(import.meta.url);
 const {
 	ENTRY_CUSTOM_TYPE,
@@ -24,84 +34,10 @@ const {
 	notebookEntryRenderer,
 } = await jiti.import("../extensions/notebook-cards.ts");
 
-// --- hand-built notebook lines, the recorder's own shapes -------------------
-
-const hypLine = JSON.stringify({
-	id: "hyp-0001",
-	type: "hypothesis",
-	date: "2026-11-18",
-	text: "CRISPR base editing restores immune function in aged organisms",
-	evidence: [
-		{
-			source: "pubmed",
-			endpoints: ["esearch.fcgi", "esummary.fcgi"],
-			query: "CRISPR gene therapy",
-			retrieved: "2026-11-17",
-			grade: "asserted",
-			snapshot: "evidence/aa11.json",
-		},
-	],
-});
-const obsLine = JSON.stringify({
-	id: "obs-0001",
-	type: "observation",
-	date: "2026-11-18",
-	text: "Two independent retrievals agree that HDR-mediated repair is rare in HSCs",
-	grade: "cross-checked",
-	evidence: [
-		{
-			source: "pubmed",
-			endpoints: ["esearch.fcgi"],
-			query: null,
-			retrieved: "2026-11-17",
-			grade: "cross-checked",
-			snapshot: "evidence/bb22.json",
-			supports: "hyp-0001",
-		},
-	],
-});
-const mthJobLine = JSON.stringify({
-	id: "mth-0001",
-	type: "method",
-	date: "2026-11-18",
-	text: "AF3 structure prediction run for lysozyme",
-	evidence: [
-		{
-			source: "theta-compute",
-			job_id: "12347",
-			template: "alphafold3",
-			arguments_digest: "a".repeat(64),
-			state: "COMPLETED",
-			observed: "2026-11-18",
-			retrieved: "2026-11-18",
-			grade: "re-executed",
-			snapshot: "evidence/cc33.json",
-		},
-	],
-});
-const decLine = JSON.stringify({
-	id: "dec-0001",
-	type: "decision",
-	date: "2026-11-18",
-	text: "Run the antibody screen as a two-stage cascade",
-});
-const cnfLine = JSON.stringify({
-	id: "cnf-0001",
-	type: "confidence",
-	date: "2026-11-18",
-	text: "Raised: both strands now agree",
-	hypothesis: "hyp-0001",
-});
-
 // --- the harness ------------------------------------------------------------
 
 function tempProject(t) {
 	return tempDir(t, "notebook-cards-");
-}
-
-function writeNotebook(project, lines) {
-	fs.mkdirSync(path.join(project, ".theta"), { recursive: true });
-	fs.appendFileSync(path.join(project, ".theta", "notebook.jsonl"), lines.join("\n") + "\n");
 }
 
 /** The events the handlers see — plausible tool_result / session_start stubs. */
