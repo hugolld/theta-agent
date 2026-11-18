@@ -589,6 +589,10 @@ const scanSurfaces = [
 	// dogfood.md carries the Attestation leg headword — the auditor's legs
 	// and their registry are its working vocabulary.
 	"docs/agents/dogfood.md",
+	// demo.md carries the demo slice's working vocabulary — the notebook,
+	// gateway, and rig headwords the seminar script narrates (M7a demo
+	// slice, 2026-11-17).
+	"docs/agents/demo.md",
 	// eval.md carries the replay-net working vocabulary (eval suite, replay
 	// net, eval capture, benchmark suite) since the M6 tracer.
 	"docs/agents/eval.md",
