@@ -7,8 +7,21 @@
 // the shared-helper rule.
 import { parse as parseYaml } from "yaml";
 
+// The fence both exports read — one home for the `---` block's shape, so
+// the strip and the parse can never drift apart (the demo prompt
+// templates' pins became the fence's second consumer, #184's review
+// round).
+const FRONTMATTER_FENCE = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/;
+
 export function parseFrontmatter(markdown) {
-	const match = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/.exec(markdown);
+	const match = FRONTMATTER_FENCE.exec(markdown);
 	if (!match) throw new Error("SKILL.md has no frontmatter block");
 	return parseYaml(match[1]);
+}
+
+// The markdown past the fence — the body a template's pins assert against.
+export function frontmatterBody(markdown) {
+	const match = FRONTMATTER_FENCE.exec(markdown);
+	if (!match) throw new Error("no frontmatter block to strip past");
+	return markdown.slice(match[0].length);
 }

@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import { YAMLParseError } from "yaml";
 import { GATEWAY_ANNOTATIONS } from "./fixtures/gateway/annotations.mjs";
 import { childDirs } from "./helpers/child-dirs.mjs";
+import { assertDescriptionBar } from "./helpers/description-bar.mjs";
 import { escapeRegExp } from "./helpers/escape-regexp.mjs";
 import { parseFrontmatter } from "./helpers/frontmatter.mjs";
 import { sortedTreeFiles } from "./helpers/tree-walk.mjs";
@@ -84,23 +85,16 @@ test("shipped skills equal the checked-in expected list", () => {
 	assert.deepEqual(shipped, expectedShipped);
 });
 
-// The name/description rules, one home since the pool became the shape's
-// second caller: shipped skills and pool skills face the same bar.
+// The name rule stays here (skills only — templates take their name from
+// the filename); the description bar moved to its shared home at its
+// third caller, the demo prompt templates (#184's review round).
 function assertNameAndDescription(label, frontmatter) {
 	assert.match(
 		frontmatter.name,
 		/^[a-z0-9][a-z0-9-]{0,63}$/,
 		`${label}: invalid skill name`,
 	);
-	assert.equal(
-		typeof frontmatter.description,
-		"string",
-		`${label}: description missing`,
-	);
-	assert.ok(
-		frontmatter.description.length > 0 && frontmatter.description.length <= 1024,
-		`${label}: description must be 1..1024 chars, got ${frontmatter.description.length}`,
-	);
+	assertDescriptionBar(label, frontmatter);
 }
 
 test("every skill carries a parseable SKILL.md with a valid name and description", async () => {

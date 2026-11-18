@@ -10,14 +10,16 @@
 // prompt keep one steering vocabulary), zero variance (no argument
 // substitution syntax — a scripted run means the bytes are fixed),
 // frontmatter that pi's own YAML engine parses with a plain-scalar-safe
-// description, and no institutional facts (the public-repo rule: cluster
-// accounts and host names never enter shipped prose).
+// description within the shared description bar, and no institutional
+// facts (the public-repo rule: cluster accounts and host names never
+// enter shipped prose).
 
 import assert from "node:assert/strict";
 import { readdir, readFile } from "node:fs/promises";
 import { test } from "node:test";
 import { PLAIN_COMMAND, READ_HEADROOM } from "./eval/scenarios.mjs";
-import { parseFrontmatter } from "./helpers/frontmatter.mjs";
+import { assertDescriptionBar } from "./helpers/description-bar.mjs";
+import { frontmatterBody, parseFrontmatter } from "./helpers/frontmatter.mjs";
 
 // Direct children only — exactly what pi's conventional prompt directory
 // loads. A stray non-markdown child would ship in the tarball (files
@@ -28,10 +30,7 @@ const templateNames = (await readdir(new URL("../prompts/", import.meta.url), { 
 
 async function readTemplate(name) {
 	const text = await readFile(new URL(`../prompts/${name}`, import.meta.url), "utf8");
-	// The body is everything past the frontmatter block, stripped the same
-	// way the shared helper matches it.
-	const body = text.replace(/^---\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)/, "");
-	return { text, body };
+	return { text, body: frontmatterBody(text) };
 }
 
 test("every shipped template is a direct .md child of prompts/", () => {
@@ -47,11 +46,7 @@ test("template frontmatter parses with a plain-scalar-safe description", async (
 		// Throws on unparseable frontmatter — pi's own failure mode is the
 		// silent one (it drops the template), so the suite is the loud path.
 		const frontmatter = parseFrontmatter(text);
-		assert.equal(typeof frontmatter.description, "string", `${name}: description missing`);
-		assert.ok(
-			frontmatter.description.length > 0 && frontmatter.description.length <= 1024,
-			`${name}: description must be 1..1024 chars, got ${frontmatter.description.length}`,
-		);
+		assertDescriptionBar(name, frontmatter);
 		assert.ok(
 			!frontmatter.description.includes(": "),
 			`${name}: description must stay plain-scalar-safe (no ": " in the value)`,
@@ -62,8 +57,12 @@ test("template frontmatter parses with a plain-scalar-safe description", async (
 test("the demo prompts are pure ASCII", async () => {
 	for (const name of templateNames) {
 		const { text } = await readTemplate(name);
+		// The class is explicit, not \s: JavaScript's \s is Unicode-aware, so
+		// U+00A0 and U+2028 would slip a `[\s\x20-\x7E]` pin (the review
+		// round's probe) — whitespace-paste accidents are exactly the leak
+		// this test exists to stop.
 		assert.ok(
-			/^[\s\x20-\x7E]*$/.test(text),
+			/^[\x09-\x0D\x20-\x7E]*$/.test(text),
 			`${name}: non-ASCII bytes present — the dogfood rule binds the demo prompt`,
 		);
 	}
