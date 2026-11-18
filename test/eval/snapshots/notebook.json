@@ -188,12 +188,12 @@
 			"content": [
 				{
 					"type": "thinking",
-					"thinking": "The user wants me to record a decision in the project notebook using the theta-notebook skill. The decision: \"the next antibody screen will be run as a two-stage cascade instead of one large pass.\"\n\nPer the rules, I should read the skill file first. Also, the AGENTS.md says the repo's steering doc is CLAUDE.md, and I should read it in full before working. The user also said: before relying on any instruction or reference file, read it whole in a single call, with a limit larger than its line count.\n\nLet me start by reading CLAUDE.md (required by AGENTS.md) and the theta-notebook SKILL.md. These are independent reads, so I can do them in parallel.\n\nThe user also said: run each shell command as one plain command, chaining steps with && only, never semicolons or trailing status echo. So when the recorder script needs multiple steps, I chain with &&.\n\nLet me first find the files:\n- __REPO__/CLAUDE.md\n- __REPO__/skills/theta-notebook/SKILL.md\n\nRead both in full in a single call each with a large limit.",
+					"thinking": "The user wants me to record a decision — that the next antibody screen will be run as a two-stage cascade instead of one large pass — using \"whatever provenance recording this environment provides\", so a later session can find it. Then tell exactly what was written and where.\n\nLooking at the available skills, the relevant one is `theta-notebook`: \"Theta's project notebook recorder - appends dated provenance entries to the research project's .theta/notebook.jsonl... Use when a session... takes a decision...\" That's exactly what's needed.\n\nPer instructions, before relying on any instruction or reference file, I must read it whole in a single call, with a limit larger than its line count. So I should read the theta-notebook SKILL.md first, with a generous limit (e.g., offset 1, limit 500 or so). Also the project instructions say the repo's steering doc is CLAUDE.md — I should read it in full before working. Let me read both CLAUDE.md and the skill file in a single block (independent calls).\n\nAlso constraints: run each shell command as one plain command; chain steps with && only; never a semicolon or trailing status echo.\n\nLet me start by reading the skill file and CLAUDE.md.",
 					"thinkingSignature": "reasoning_content"
 				},
 				{
 					"type": "text",
-					"text": "I'll start by reading the repo's steering doc and the provenance-recording skill in full, as required."
+					"text": "I'll record this decision using the project notebook skill. First, let me read the required instruction files in full — the repo steering doc and the theta-notebook skill."
 				},
 				{
 					"type": "toolCall",
@@ -202,7 +202,7 @@
 					"arguments": {
 						"path": "__REPO__/CLAUDE.md",
 						"offset": 1,
-						"limit": 500
+						"limit": 400
 					}
 				},
 				{
@@ -221,22 +221,22 @@
 			"model": "<model>",
 			"usage": {
 				"input": 5283,
-				"output": 335,
+				"output": 362,
 				"cacheRead": 0,
 				"cacheWrite": 0,
-				"reasoning": 245,
-				"totalTokens": 5618,
+				"reasoning": 261,
+				"totalTokens": 5645,
 				"cost": {
 					"input": 0.00079245,
-					"output": 0.0001675,
+					"output": 0.00018099999999999998,
 					"cacheRead": 0,
 					"cacheWrite": 0,
-					"total": 0.00095995
+					"total": 0.0009734499999999999
 				}
 			},
 			"stopReason": "toolUse",
 			"timestamp": "<timestamp>",
-			"responseId": "20261117233408e71752291b4c4a9f",
+			"responseId": "20261118134457368afbdc92e84ed1",
 			"rawStopReason": "tool_calls",
 			"durationMs": "<duration>",
 			"thinkingLevel": "high"
@@ -254,7 +254,7 @@
 			"content": [
 				{
 					"type": "text",
-					"text": "# CLAUDE.md\n\nThis file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.\n\n## What this repository is\n\n`theta-agent` — a **pi package** (extensions + skills for the [pi](https://pi.dev) coding agent) that grows into **Theta**, a science co-researcher agent for biology/biomedicine. It is the code repo of the Theta campaign; design decisions (T1–T10), milestone definitions, and task handoffs live in the campaign vault (path in `CLAUDE.local.md`). Treat the vault as read-only reference.\n\nCurrent state: 0.6.0 — M6 shipped. The M1 base ships the `theta` launcher (a thin `bin/theta.mjs` that runs `pi -e <package-root>`; macOS/Linux — Windows waits for M8, tracked in issue #2) and the Tier-1 library: K-Dense skills vendored verbatim per ADR 0001 plus the self-authored `theta-research-loop` orchestrator, with re-syncs at milestone boundaries (`docs/agents/resync.md`). M2 adds the first connector skill, `theta-lit-search` (PubMed, arXiv, Semantic Scholar), landed tracer-first: search and get-by-identifier with pacing, in-200 error detection, and credential redaction enforced in its scripts (ADR 0002; script invariants in `docs/agents/connector-scripts.md`). M3 adds `theta-notebook`, the project notebook skill (ADR 0003): five dated provenance-entry types with content-addressed, graded evidence snapshots under the research project's `.theta/`, a recorder script under the connector-script invariants, a notebook-written attestation in the dogfood auditor, and orchestrator doctrine weaving recording into all six loop stages. M4 ships the compute gateway `theta-compute` (ADR 0004) from `gateway/` — a FastMCP server wrapping the Slurm CLI with argv arrays only, bearer auth from deploy-time env, one audit JSONL line per tool call, and the seven generic tools (the read-only environments/status pair plus the stage–submit–logs–cancel–fetch lifecycle) behind the path sandbox and the command guard, plus the typed `run_alphafold3` rendering the deploy-time template registry's registered template with its free variables only — all out of the npm tarball. On the theta side, M4 landed the gateway skill's lifecycle doctrine and the submit gate (#54), and the notebook's job-record path (#55): a compute run records a method entry whose evidence item is the assembled gateway job record, graded `re-executed` when its artifacts were fetched, and the orchestrator's execute stage routes cluster jobs to `theta-compute`.\n\nM5 stacks the safety gates: the deploy-time submit capability (ADR 0006) and the per-principal submit ceiling on the gateway, and on the theta side the submit gate grown into the stacked gate framework (#95) — the literal three-tool confirm set pinned against the gateway's destructive annotations (disagreement is drift and refuses loudly), concurrency-safe stacked confirms (pi 1.4.0's concurrent-dialog fix is the floor), `parentToolCallId` riding prompts, refusals, and the session-dir gate log (`gate.jsonl`, one JSONL line per gated decision), and the dogfood auditor reading codemode's `nestedCalls` records instead of assuming a flat call sequence. M5 S3 (#96) makes the rig itself gateway-bearing: the clean-room rig admits the gateway token as its second credential (`--gateway`, URL host rewritten to the Docker host alias, preflighted in-container before launch — the token rides a 0600 env file, never argv), a checked-in RPC confirm driver (`test/rig/rpc-driver.mjs`) answers the submit gate for headless `--rpc` evidence legs, the gateway skill carries the capability/throttle/codemode doctrine, the auditor finds the transcript by its own name grammar beside the gate log, and the M5 dogfood (gated submit with confirm, held refusal, throttle) ran in the rig against the live gateway.\n\nM6 opens the eval suite (ADR 0007) with the replay net's tracer (#133): a checked-in scenario list (`test/eval/scenarios.mjs`), the typed normalization layer with its five rewrite classes, and one connector fixture — a sanitized rig capture — pinned three ways in the keyless standard suite (provenance: one digest per model-visible surface class, so a model-visible edit reds until a fresh capture; snapshot: the normalized entry tree equals its committed snapshot; determinism: pi's reconstruction yields one context hash), with the capture pipeline (`test/eval/capture.mjs`) and doctrine in `docs/agents/eval.md` — all outside the npm tarball. M6 S1 (#134) extends the net to one fixture per model-visible surface class — orchestrator doctrine, the notebook recorder, the gateway skill, and the extension's user-facing strings (the submit gate's refusal, captured on a `--gateway` rig leg where print mode refuses the submit before any server call) — each with its scenario, sanitized fixture, and the three pins; the per-scenario shape assertion lives in `test/eval/shape.mjs`, and the orchestrator fixture binds the vendored skill its doctrine routes to, so a body-only re-sync reds by name. M6 S2 (#135) lands the benchmark layer's tracer beside the net: the rig runner's eval mode runs one checked-in benchmark task end-to-end from one command carrying only the provider key (it refuses `--gateway`/`--rpc` — no gateway token path exists on a benchmark leg), grades workspace-as-oracle through declarative checks run in-container plus one `models.classify()` judge whose named slot runs host-side so its key never enters the rig, and writes the report — task grade, judge tier, UsageEntry totals — beside the recorded exit status. M6 S3 (#136) grows the benchmark suite beside the tracer: four checked-in tasks, one per benchmark class, graded workspace-as-oracle through declarative checks run in-container plus two-tier judging through named OpenRouter config slots — a disclosed bend from ADR 0007's campaign-provider letter (pi's classifier catalog is closed to its families, so both tiers ride OpenRouter; the tiers never share a model family, and the slot ids are pinned against the installed catalog) — one judge call per fresh child process, a suite mode running the whole list from one command, and a per-run report; a benchmark leg still carries only the provider key. M6 S4 (#137) lands the steering: the eval-capture procedure rides the dogfood doc, a re-sync's model-visible diff owes a fresh capture, and the capture-trigger rule — reproduce a red before paying it — joins the eval section below.\n\nPast M6, the skill pool lands in steps (ADR 0008): `pool/` — the versioned in-repo library of vendored domain packs (first wave 2026-11-15: protein-engineering, bioinformatics, cheminformatics — 48 skills) under the ADR 0001 verbatim rules, outside the npm tarball — loads per research project through `.theta/skills.json` instead of shipping in every session; S1 (#160) ships the loader extension `extensions/skill-pool.ts`, with the class map `pool/classes.json` gating what may load and the pack as the re-sync unit (`docs/agents/resync.md`), and S2 (#162) the Jev gate: a one-call `models.classify()` judgment over the project notebook's recent entries and the enabled pack names decides which credential classes a project's `skills.json` may load beyond `local` — firing once per project at a keyed session start, then only as an explicit owner act; a human-widened allow set outranks it, the metered `cloud` class never enters without the owner's explicit run, the decision and rationale land in the state file, and the classifier key stays host-side. S3 (#167) joins the pool to the replay net: the `pool:<pack>` surface class (one digest over a pack's whole tree plus the class map), the rig's `--pool` leg staging the state file into the clone — keyless, so the Jev gate cannot fire in the rig — a pool-aware auditor, the sixth eval capture (the bioinformatics pack, `pydeseq2` opened), and one loaded-pack dogfood; #164 beside it teaches the RPC driver its session cwd. #172 pays the #167 retro in the environment — the digested-tree doctrine's reach, the rig's dirt-naming refusal, and check-strike's spec-close leg, whose closing forms admit `owner/repo#<n>` URLs. S4 (#168) sweeps the pool's doctrine to the landed surface — the README's tier story, this manual's pool sections, the loaded-pack dogfood procedure home — and pays the capture debt the manual's rewrite owes.\n\n## pi-package rules\n\n- Host-provided packages (`@earendil-works/pi-coding-agent`, `@earendil-works/pi-ai`, `@earendil-works/pi-agent-core`, `@earendil-works/pi-tui`, `typebox`) go in `peerDependencies` with `\"*\"` ranges — never `dependencies`, never bundled.\n- Keep the `pi-package` keyword (gallery eligibility) and the explicit `pi` manifest (`extensions`, `skills`) in `package.json`. Manifest fields are arrays of strings — pi silently drops bare-string fields (guarded by `test/manifest.test.mjs`). The skill pool stays out of the manifest and the tarball by design — its packs load per research project through the loader extension (`extensions/skill-pool.ts`), so the shipped surface stays the Tier-1 library and the self-authored skills beside it.\n- Never install `pi-mcp-adapter` — an installed adapter replaces pi's built-in MCP support (native since pi 0.99).\n- Target pi ≥ 1.4.0 and Node ≥ 22.19.0. The floor moves only at milestone boundaries, under the standing adoption rule recorded on #87 — a held review is recorded on the parent spec, never silent. Package loading uses `pi -e <source>`; local-path sources load without copying, so a repo checkout works exactly like the installed package.\n- The pi extension API is read from the installed package, not the web — the paths below sit under the pi install root (`$(npm root -g)/@earendil-works/pi-coding-agent/`): `docs/extensions.md` (events, the tool-call pipeline, UI modes), `docs/mcp.md` (tool naming and exposure — MCP tool names are sanitized to `[A-Za-z0-9_]`, so a server hyphen registers as an underscore), and `dist/core/extensions/types.d.ts` for the exact event and context shapes.\n\n## Conventions\n\n- Conventional commits (`feat:`, `chore:`, `docs:`). Tabs and existing field order in `package.json`.\n- Extract a shared helper as soon as the same logic shape appears twice — tree-wide, not per-module: a module boundary created mid-strike is where duplication is born, so the shared shape gets one home before the second caller (tests included). Copying code verbatim is for separately shipped trees only — skill-to-skill, never within a file.\n- Failure paths in runner and helper scripts: child-process spawns inherit the environment (overlay onto `process.env`, never replace it — the eslint `spawn-env-inherit` rule enforces direct call sites); `finally` cleanup never masks the primary failure; a machine-readable result lands as a file when its channel is shared with payload output (the exit-status rule — and a pipeline whose exit gates the next step runs unpiped or under `set -o pipefail`: a `tee` or `tail` in the tail position reports its own status, and #117's failed cluster re-deploy sailed through an `&&` chain that way). The rule binds agent tool calls too: a command whose exit gates the next step runs unpiped or records its status to a file — `npm test | tail` laundered a red suite's exit as 0 (the M6 S2 retro).\n- An accepted behavior delta — ordering, precedence, message bytes — is pinned by a test in the same strike; the PR body discloses what the suite already owns (#113's read-precedence delta reached the merge round disclosed but unpinned, and the merge round paid the pin). The bar reaches fix commits: each claimed behavior change moves or adds a pin — a comment-only change claims nothing (the S2 fix pass's \"no lost-update window\" claim rode a comment alone until re-investigation caught it). And a helper whose write can fail returns whether it landed; the caller announces success only on that result (the S2 `writeGateRecord` returned void, swallowed write failures, and both callers printed the success notify after one).\n- The review round names every accepted deviation from the spec's letter — additions beyond the enumeration included — with the reason; the disclosure lands in the same strike's PR body, not in a later pass (#127's survey-inputs bullet rode through PR #128's draft review undisclosed, and the triage round paid the disclosure).\n- An extraction test — one that pulls structured tokens out of prose — consumes from its anchor: the match opens the claim it pins, leading whitespace only, never searching forward past other text. An unanchored match can borrow a later passage and pass silently (#122's review round caught the prose check's enumeration doing exactly that).\n- A spec's acceptance numbers and failure-mode claims are measured before the spec lands — a claim one command can falsify is a delta the strike inherits for free (#120's lint:dups \"count drops\" claim was false at min-tokens 50: the four mirrors were never token-level clones, and the strike paid the probes to falsify it).\n- Secrets ride files — a read-only mount or a `--env-file` — into child processes and containers. An argv element is process-table-visible, so no credential, token, or header value rides one (the M5 S3 review round caught the gateway token on a `docker exec -e`; the preflight env file is the shape).\n- When a change supersedes text in a steering doc (`CLAUDE.md`, `GLOSSARY.md`, `docs/adr/`), the same strike edits that text — and superseded means stale by omission as well as false: a section that describes the changed surface covers the new behavior in the same strike (S1's ceiling paragraph was omission-stale through three review passes; only a post-merge strike fixed it).\n- A strike that changes a self-authored skill's `SKILL.md` bumps that skill's frontmatter `version:` in the same strike — the field is the skill's own minor, not the package's.\n- `.npmrc` pins the official registry (the machine default is npmmirror).\n- PR bodies, repo prose, and committed fixtures are public surfaces: cluster account names, SSH aliases, and node names never enter them — they live in `CLAUDE.local.md`, and GitHub keeps body edit history, so a scrub-after is not undo. A committed fixture is the sharpest case — a captured transcript above all: sanitization redacts the payload its tool outputs carry (node lists, job names), not only machine paths; the S2 codemode fixture shipped node lists until a round-2 review caught them. The recipe lives with the golden fixtures in `test/dogfood-audit.test.mjs`. (The cluster's own name is public — ADR 0004 names it.) The Spec review checks.\n- No build step; tests use Node's built-in node:test runner (pi loads extension TS via jiti). Verify changes with `npm test`, `npm run lint`, `npm run lint:py` (ruff over the self-authored skill scripts and the gateway tree — vendored trees stay verbatim and out of scope), `npm run lint:sh` (pipefail over the repo's shell surfaces; exceptions argue in the lint), `npm run lint:dups` (jscpd duplication ratchet), and `npm run typecheck`; check shipped files with `npm pack --dry-run`.\n- Commits run the suite via the versioned `.githooks/pre-commit` hook; enable it per clone with `git config core.hooksPath .githooks`.\n- Dogfood acceptance criteria are met on captured evidence — session transcripts for the skill criteria, recorded exit status and stderr for clean boot — never the model's self-report. Procedure: `docs/agents/dogfood.md`. Dogfood and adversarial sessions run in the clean-room rig (`test/rig/`, ADR 0005): `node test/rig/run.mjs run \"<prompt>\"`; the provider key and — on a `--gateway` leg — the gateway token are the only credentials that enter it (the cluster SSH key never does; the container reaches the gateway through the host-side port-forward, preflighted in-container before launch; a `--pool <pack>` leg adds none — it stages the pack's `.theta/skills.json` state file, which is not a credential), and a gated headless leg runs `--gateway --rpc` — the checked-in confirm driver answers the submit gate.\n\n## Git workflow — one \"coding strike\" per task\n\n1. Start the strike in a new git worktree on a feature branch. A worktree inside the repo (`.claude/worktrees/`) resolves the checkout's `node_modules`; one placed elsewhere needs `npm ci` first. Files read before entering the worktree carry the old base — re-read anything you are about to anchor-edit, and fetch `origin main` before diffing against or removing the worktree.\n2. On the first commit, open a **draft** PR against `main` and run `node scripts/check-strike.mjs <spec#>` from the strike worktree: the evidence leg passes by design at draft time, the review-coverage leg skips while the PR is draft, and the CI leg still exits 1 while a check runs pending — the printed offender line, not the exit code, tells pending from a real failure. The child walk is the draft-time signal: a gate defect or a missing child surfaces with the strike ahead of it, not at ready time (S1's gate read a blocked-by mention as an unlanded child; #61 fixed the detection, and the early run keeps the next defect cheap). Run the strike's review round at draft time too, **before any dogfood capture**: the reviewer sees the diff with the least context pressure, its fixes land while the tree is cheap to change, and the evidence pair then captures once at the final HEAD. The reverse order pays a full recapture every time a review fix moves HEAD — M5 S3 and S4 each paid one on 2026-10-31 (three live legs with cluster toggles; the closeout pair), review-first would have paid neither. Review first, capture once.\n3. Commit and push every further change to that PR branch, and refresh the PR body as each strike lands — the body is read mid-flight by reviewers and the owner, not only before ready.\n4. Before marking the PR ready, run `node scripts/check-strike.mjs <spec#>` from the strike worktree — every child of the spec issue must be landed on the branch or already closed (a closeout ticket for the post-merge steps is the expected open exception; a childless issue is a maintenance strike). The same gate fails a PR whose body attests dogfood evidence at an SHA that is not HEAD — recapture the pair, never rebind the words — and refuses while any PR check is non-pass, pending included (M3's red `verify` sat four hours past ready; only merge-day habit caught it). Refresh the PR's title and body to cover every landed child, then run the review pass over everything changed since the draft round and disclose each round in the body as a `reviewed: <base>..<head>` line (hex shas, base exclusive; a lone sha names one commit) — the gate's coverage leg refuses a ready PR whose branch commits no disclosed range covers (#133 retro: a fix range merged unreviewed and paid a post-merge triage round) — then mark the PR ready and merge to `main`. For milestone-sized PRs, consider one external-model review round before merge — M2's Codex round caught a defect class two same-model rounds missed.\n5. The adversarial loop's stop condition is judgment: once findings require crafted attack strings that honest usage would never produce, stop, record them as a residual trust boundary, and move on. \"Findings stay wording-level for two consecutive rounds\" applies only to findings a realistic session could trigger; if it has not fired within ~10 rounds, it will not — an adversarial reviewer regenerates findings indefinitely, and \"clean\" is not a stopping condition it can reach.\n6. While a review round is in flight, hold further commits on that branch; when its report arrives, triage against the SHA it reviewed.\n7. At teardown, run `node scripts/strike-teardown.mjs <branch>` from anywhere inside the repo — it anchors the main checkout by the shared git dir, refuses unless the branch is merged into `origin/main` (the guard that licenses the `-D`, since plain `-d` compares against the lagging remote topic branch), pulls `main` fast-forward, removes the worktree, and deletes the branch last: the worktree holds it checked out, so the delete refuses until the worktree is gone. A harness-created worktree carries the session's own lock — exit it through the harness's worktree-exit tool before the teardown, or the remove refuses on the lock (the M5 S0 retro). A manual teardown repeats that order with every git command anchored to the main checkout (`git -C <main-checkout>`) — a command run inside the worktree acts on the feature branch (the S4 retro's stray pull fast-forwarded it; the S5 retro repeated the accident), and a session standing in the removed worktree loses its git context (the S3 retro session).\n\n## Publishing\n\n`npm publish` is owner-only (browser 2FA; non-interactive publishes fail with `EOTP`). Prepare the release, commit, push — then stop and let the owner publish. It runs from the repo checkout — the committed `.npmrc` pins `registry.npmjs.org` (the machine default is npmmirror) — and that checkout must be the merged tree first: `git pull --ff-only origin main`, then confirm `package.json`'s version and the `npm pack --dry-run` file count match the release, because the M3 publish ran from a stale checkout (0.2.0, 289 files) and only npm's version-conflict refusal caught it. A publish that fails `E404` before any OTP prompt is a lapsed npmjs token, not a missing package: run `npm login` from inside the repo, then retry.\n\n## Agent skills\n\n### Issue tracker\n\nIssues live in GitHub Issues on `hugolld/theta-agent`, managed with the `gh` CLI. See `docs/agents/issue-tracker.md`.\n\n### Triage labels\n\nDefault five-role vocabulary (each label string equals its role name). See `docs/agents/triage-labels.md`.\n\n### Domain docs\n\nSingle-context: root `GLOSSARY.md` + `docs/adr/`. See `docs/agents/domain.md`. Glossary edits are suite-enforced: `_Avoid_` terms are banned from self-authored prose, every headword word must appear in it, a headword outside the provenance grandfather list names its deciding artifact, and an ADR's `(GLOSSARY)` markers match its declared coinages — the scan list lives in `test/skills-library.test.mjs` and verifies itself: self-authored prose (docs, skill text, and the extension sources' user-facing strings, not script comments) that carries glossary vocabulary joins that list in the same strike that lands it, and a file carrying a headword while off the list fails the converse test by name (S1's gateway README caught a banned term the moment it joined; S2's schema doc rode through two reviews until the check existed).\n\n### Connector scripts\n\nConnector helper scripts (`theta-lit-search`, plus the `theta-notebook` recorder) share enforced invariants — exit-code contract, classification shape, repeat-the-call records. See `docs/agents/connector-scripts.md`.\n\n### Compute gateway\n\n`gateway/` holds `theta-compute` (M4, ADR 0004): a FastMCP server wrapping the Slurm CLI, out of the npm tarball and out of Python lint's blind spot. Institutional facts ride deploy-time env; the audit-line shape, ALLOW/DENY/HOLD/THROTTLE semantics, and the phase-0 deploy recipe live in `gateway/README.md`. The deploy-time submit capability (M5, ADR 0006) is the outer bound on job creation: while off — the cluster-side `theta-compute.env`, sourced by every start line — the job-creating tools answer a hard HOLD refusal and the observed state rides every mutating audit line. Inside it, the per-principal submit ceiling (M5 S1) bounds runaway submits: past the deploy-env ceiling (default 20 per rolling hour, the count derived from the audit log itself) the same tools answer a THROTTLE refusal naming the principal, the count, and the window. Inside those server bounds, the theta-side submit gate stays the inner per-call gate — since M5 S2 the stacked gate framework (`extensions/submit-gate.ts`), whose three-tool confirm set is pinned against the gateway's annotations (a disagreement refuses as drift) and whose gate log (`gate.jsonl`) rides the session dir with `parentToolCallId` on nested calls. The offline tests drive the tools at the MCP boundary against the stub Slurm binaries in `test/fixtures/gateway/bin/`. A live step blocked on the cluster path parks — one scheduled re-probe, never a retry loop (waiting over one live connection is not retrying) — and resumes from the parked step when the path returns.\n\n### Eval suite\n\n`test/eval/` holds the eval suite (M6, ADR 0007), two layers, all outside the npm tarball; doctrine in `docs/agents/eval.md`. The replay net is the keyless, deterministic base layer in the standard suite: six sanitized rig captures — one per scenario (the connector's skill tree, the orchestrator doctrine, the notebook recorder, the gateway skill, the extension's user-facing strings on a `--gateway` leg where print mode refuses the submit before any server call, and the skill pool's bioinformatics pack tree on a keyless `--pool` leg), spanning the registry's five surface classes — each pinned three ways (provenance: one digest per surface class, so a model-visible edit reds until a fresh capture; snapshot: the normalized entry tree equals its committed snapshot; determinism: pi's reconstruction yields one context hash), with the per-scenario shape assertion in `test/eval/shape.mjs` and the scenario list (`test/eval/scenarios.mjs`) as the only source of capture prompts. The benchmark layer (M6 S2/S3) grades four checked-in tasks — one per benchmark class (`literature-triage`, `method-selection` from a committed figure, `provenance-recording`, `compute-staging` across two sessions) — workspace-as-oracle: declarative checks run in-container, two-tier judging through named OpenRouter config slots (a disclosed bend from ADR 0007's letter — the tiers never share a model family, and the slot ids are pinned against the installed catalog), one judge call per fresh child process (`bench-judge.mjs` — pooled fetch failures live in long-lived runner processes), and UsageEntry totals in the report (`bench-suite.json`). One command each, and only the provider key enters: `node test/rig/run.mjs eval <task-id>`, or `eval --suite` for the whole list — the eval mode refuses `--gateway`/`--rpc`; a benchmark leg has no gateway token path.\n\n`test/eval/capture.mjs` drives the rig and lands sanitized fixtures with a provenance manifest and a normalized snapshot; never edit a fixture or snapshot by hand. A model-visible change lands only with a fresh eval capture — a red provenance pin names the stale fixture — but reproduce the red before paying it: a failure only a long-lived checkout or harness process shows (ignored scratch riding a tree digest, pooled connection state in a runner) is local state, not a model-visible change. Doctrine, the digest-scope decision, the drill leg, and the benchmark recipe: `docs/agents/eval.md`; the eval-capture procedure rides `docs/agents/dogfood.md`; a re-sync's model-visible diff owes a fresh capture (`docs/agents/resync.md`).\n\n### Skill pool\n\n`pool/` holds the skill pool (ADR 0008): the versioned in-repo library of vendored domain packs — first wave 2026-11-15: protein-engineering, bioinformatics, cheminformatics, 48 skills — under the ADR 0001 verbatim rules, outside the npm tarball. A research project loads its packs through `.theta/skills.json` (S1's loader extension, `extensions/skill-pool.ts`), not the Tier-1 library's ships-always shape: the state file is committed project state, so a fresh clone of a project reproduces its pack selection, and the loader contributes per-skill paths — one `pool/<pack>/<skill>/` directory per skill whose class sits in the state's `classAllow` — because every pack is class-mixed (the disclosed deviation from ADR 0008's `pool/<pack>` letter: pack granularity can never be class-pure). The class map `pool/classes.json` gates what may load, a pack is the re-sync unit (`docs/agents/resync.md`), and the loader and gate pins live in `test/skill-pool.test.mjs` with the pack digests in `test/expected-pool.json`. The Jev gate (S2) bounds the class allowance: one `models.classify()` call over the project notebook's recent entries and the enabled pack names decides which credential classes beyond `local` a project's `skills.json` may load, firing once per project at a keyed session start and thereafter only as an explicit owner act — a human-widened allow set outranks it, and the metered `cloud` class never enters without the owner's explicit run. The decision and rationale land as one top-level `gate` record in the state file — the decision is class-level, not pack-level (the disclosed deviation from S1's per-pack history shape) — and a re-run sets the allow set to exactly its decision, narrowing honestly, never widen-only. The classifier key stays host-side. The pool joined the replay net at S3 (#167) as the `pool:<pack>` surface class — one digest over a pack's whole tree plus the class map — captured keyless on the rig's `--pool` leg: the staged state file is not a credential, so the gate cannot fire there. The loaded-pack dogfood procedure — a keyed, project-cwd host session where the gate does fire and the pack's skills carry real work — lives in `docs/agents/dogfood.md`.\n\n### SKILL.md frontmatter\n\nDescriptions are capped at 1..1024 chars and must stay plain-scalar-safe (no `: ` sequences in the value). `test/skills-library.test.mjs` enforces both: it parses frontmatter with the `yaml` package — the same engine pi runs — so invalid YAML fails the suite instead of pi silently dropping the skill.\n"
+					"text": "# CLAUDE.md\n\nThis file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.\n\n## What this repository is\n\n`theta-agent` — a **pi package** (extensions + skills for the [pi](https://pi.dev) coding agent) that grows into **Theta**, a science co-researcher agent for biology/biomedicine. It is the code repo of the Theta campaign; design decisions (T1–T10), milestone definitions, and task handoffs live in the campaign vault (path in `CLAUDE.local.md`). Treat the vault as read-only reference.\n\nCurrent state: 0.6.0 — M6 shipped. The M1 base ships the `theta` launcher (a thin `bin/theta.mjs` that runs `pi -e <package-root>`; macOS/Linux — Windows waits for M8, tracked in issue #2) and the Tier-1 library: K-Dense skills vendored verbatim per ADR 0001 plus the self-authored `theta-research-loop` orchestrator, with re-syncs at milestone boundaries (`docs/agents/resync.md`). M2 adds the first connector skill, `theta-lit-search` (PubMed, arXiv, Semantic Scholar), landed tracer-first: search and get-by-identifier with pacing, in-200 error detection, and credential redaction enforced in its scripts (ADR 0002; script invariants in `docs/agents/connector-scripts.md`). M3 adds `theta-notebook`, the project notebook skill (ADR 0003): five dated provenance-entry types with content-addressed, graded evidence snapshots under the research project's `.theta/`, a recorder script under the connector-script invariants, a notebook-written attestation in the dogfood auditor, and orchestrator doctrine weaving recording into all six loop stages. M4 ships the compute gateway `theta-compute` (ADR 0004) from `gateway/` — a FastMCP server wrapping the Slurm CLI with argv arrays only, bearer auth from deploy-time env, one audit JSONL line per tool call, and the seven generic tools (the read-only environments/status pair plus the stage–submit–logs–cancel–fetch lifecycle) behind the path sandbox and the command guard, plus the typed `run_alphafold3` rendering the deploy-time template registry's registered template with its free variables only — all out of the npm tarball. On the theta side, M4 landed the gateway skill's lifecycle doctrine and the submit gate (#54), and the notebook's job-record path (#55): a compute run records a method entry whose evidence item is the assembled gateway job record, graded `re-executed` when its artifacts were fetched, and the orchestrator's execute stage routes cluster jobs to `theta-compute`.\n\nM5 stacks the safety gates: the deploy-time submit capability (ADR 0006) and the per-principal submit ceiling on the gateway, and on the theta side the submit gate grown into the stacked gate framework (#95) — the literal three-tool confirm set pinned against the gateway's destructive annotations (disagreement is drift and refuses loudly), concurrency-safe stacked confirms (pi 1.4.0's concurrent-dialog fix is the floor), `parentToolCallId` riding prompts, refusals, and the session-dir gate log (`gate.jsonl`, one JSONL line per gated decision), and the dogfood auditor reading codemode's `nestedCalls` records instead of assuming a flat call sequence. M5 S3 (#96) makes the rig itself gateway-bearing: the clean-room rig admits the gateway token as its second credential (`--gateway`, URL host rewritten to the Docker host alias, preflighted in-container before launch — the token rides a 0600 env file, never argv), a checked-in RPC confirm driver (`test/rig/rpc-driver.mjs`) answers the submit gate for headless `--rpc` evidence legs, the gateway skill carries the capability/throttle/codemode doctrine, the auditor finds the transcript by its own name grammar beside the gate log, and the M5 dogfood (gated submit with confirm, held refusal, throttle) ran in the rig against the live gateway.\n\nM6 opens the eval suite (ADR 0007) with the replay net's tracer (#133): a checked-in scenario list (`test/eval/scenarios.mjs`), the typed normalization layer with its five rewrite classes, and one connector fixture — a sanitized rig capture — pinned three ways in the keyless standard suite (provenance: one digest per model-visible surface class, so a model-visible edit reds until a fresh capture; snapshot: the normalized entry tree equals its committed snapshot; determinism: pi's reconstruction yields one context hash), with the capture pipeline (`test/eval/capture.mjs`) and doctrine in `docs/agents/eval.md` — all outside the npm tarball. M6 S1 (#134) extends the net to one fixture per model-visible surface class — orchestrator doctrine, the notebook recorder, the gateway skill, and the extension's user-facing strings (the submit gate's refusal, captured on a `--gateway` rig leg where print mode refuses the submit before any server call) — each with its scenario, sanitized fixture, and the three pins; the per-scenario shape assertion lives in `test/eval/shape.mjs`, and the orchestrator fixture binds the vendored skill its doctrine routes to, so a body-only re-sync reds by name. M6 S2 (#135) lands the benchmark layer's tracer beside the net: the rig runner's eval mode runs one checked-in benchmark task end-to-end from one command carrying only the provider key (it refuses `--gateway`/`--rpc` — no gateway token path exists on a benchmark leg), grades workspace-as-oracle through declarative checks run in-container plus one `models.classify()` judge whose named slot runs host-side so its key never enters the rig, and writes the report — task grade, judge tier, UsageEntry totals — beside the recorded exit status. M6 S3 (#136) grows the benchmark suite beside the tracer: four checked-in tasks, one per benchmark class, graded workspace-as-oracle through declarative checks run in-container plus two-tier judging through named OpenRouter config slots — a disclosed bend from ADR 0007's campaign-provider letter (pi's classifier catalog is closed to its families, so both tiers ride OpenRouter; the tiers never share a model family, and the slot ids are pinned against the installed catalog) — one judge call per fresh child process, a suite mode running the whole list from one command, and a per-run report; a benchmark leg still carries only the provider key. M6 S4 (#137) lands the steering: the eval-capture procedure rides the dogfood doc, a re-sync's model-visible diff owes a fresh capture, and the capture-trigger rule — reproduce a red before paying it — joins the eval section below.\n\nPast M6, the skill pool lands in steps (ADR 0008): `pool/` — the versioned in-repo library of vendored domain packs (first wave 2026-11-15: protein-engineering, bioinformatics, cheminformatics — 48 skills) under the ADR 0001 verbatim rules, outside the npm tarball — loads per research project through `.theta/skills.json` instead of shipping in every session; S1 (#160) ships the loader extension `extensions/skill-pool.ts`, with the class map `pool/classes.json` gating what may load and the pack as the re-sync unit (`docs/agents/resync.md`), and S2 (#162) the Jev gate: a one-call `models.classify()` judgment over the project notebook's recent entries and the enabled pack names decides which credential classes a project's `skills.json` may load beyond `local` — firing once per project at a keyed session start, then only as an explicit owner act; a human-widened allow set outranks it, the metered `cloud` class never enters without the owner's explicit run, the decision and rationale land in the state file, and the classifier key stays host-side. S3 (#167) joins the pool to the replay net: the `pool:<pack>` surface class (one digest over a pack's whole tree plus the class map), the rig's `--pool` leg staging the state file into the clone — keyless, so the Jev gate cannot fire in the rig — a pool-aware auditor, the sixth eval capture (the bioinformatics pack, `pydeseq2` opened), and one loaded-pack dogfood; #164 beside it teaches the RPC driver its session cwd. #172 pays the #167 retro in the environment — the digested-tree doctrine's reach, the rig's dirt-naming refusal, and check-strike's spec-close leg, whose closing forms admit `owner/repo#<n>` URLs. S4 (#168) sweeps the pool's doctrine to the landed surface — the README's tier story, this manual's pool sections, the loaded-pack dogfood procedure home — and pays the capture debt the manual's rewrite owes.\n\nM7a opens the demo slice (#177, doctrine in `docs/agents/demo.md`): B1 (#178) ships the notebook entry cards — `extensions/notebook-cards.ts` diffs `.theta/notebook.jsonl` in the session cwd on every `tool_result` (a codemode-wrapped recorder run still surfaces one outer result) and appends one durable `theta-notebook-entry` custom entry per new line that parses as a typed, dated provenance entry — line bytes the identity (re-runs and retries dedupe), malformed lines never card, the seen-set rebuilds at `session_start` from the session's own custom entries beside the startup backlog fence (lines present when the session opened never card — B2 owns the trail display on demand), and no notebook file leaves the hook inert. The paired `registerEntryRenderer` draws the card in interactive mode only (evidence sources with their grades badged, the observation's own grade, `supports` links as hypothesis references, the expanded raw entry; custom entries land in every mode, so print-mode transcripts carry them); the recorder script and skill trees stay frozen (the hook reads the file), and the notebook scenario's shape pin carries the card assertion on the recaptured fixtures.\n\n## pi-package rules\n\n- Host-provided packages (`@earendil-works/pi-coding-agent`, `@earendil-works/pi-ai`, `@earendil-works/pi-agent-core`, `@earendil-works/pi-tui`, `typebox`) go in `peerDependencies` with `\"*\"` ranges — never `dependencies`, never bundled.\n- Keep the `pi-package` keyword (gallery eligibility) and the explicit `pi` manifest (`extensions`, `skills`) in `package.json`. Manifest fields are arrays of strings — pi silently drops bare-string fields (guarded by `test/manifest.test.mjs`). The skill pool stays out of the manifest and the tarball by design — its packs load per research project through the loader extension (`extensions/skill-pool.ts`), so the shipped surface stays the Tier-1 library and the self-authored skills beside it.\n- Never install `pi-mcp-adapter` — an installed adapter replaces pi's built-in MCP support (native since pi 0.99).\n- Target pi ≥ 1.4.0 and Node ≥ 22.19.0. The floor moves only at milestone boundaries, under the standing adoption rule recorded on #87 — a held review is recorded on the parent spec, never silent. Package loading uses `pi -e <source>`; local-path sources load without copying, so a repo checkout works exactly like the installed package.\n- The pi extension API is read from the installed package, not the web — the paths below sit under the pi install root (`$(npm root -g)/@earendil-works/pi-coding-agent/`): `docs/extensions.md` (events, the tool-call pipeline, UI modes), `docs/mcp.md` (tool naming and exposure — MCP tool names are sanitized to `[A-Za-z0-9_]`, so a server hyphen registers as an underscore), and `dist/core/extensions/types.d.ts` for the exact event and context shapes.\n\n## Conventions\n\n- Conventional commits (`feat:`, `chore:`, `docs:`). Tabs and existing field order in `package.json`.\n- Extract a shared helper as soon as the same logic shape appears twice — tree-wide, not per-module: a module boundary created mid-strike is where duplication is born, so the shared shape gets one home before the second caller (tests included). Copying code verbatim is for separately shipped trees only — skill-to-skill, never within a file.\n- Failure paths in runner and helper scripts: child-process spawns inherit the environment (overlay onto `process.env`, never replace it — the eslint `spawn-env-inherit` rule enforces direct call sites); `finally` cleanup never masks the primary failure; a machine-readable result lands as a file when its channel is shared with payload output (the exit-status rule — and a pipeline whose exit gates the next step runs unpiped or under `set -o pipefail`: a `tee` or `tail` in the tail position reports its own status, and #117's failed cluster re-deploy sailed through an `&&` chain that way). The rule binds agent tool calls too: a command whose exit gates the next step runs unpiped or records its status to a file — `npm test | tail` laundered a red suite's exit as 0 (the M6 S2 retro).\n- An accepted behavior delta — ordering, precedence, message bytes — is pinned by a test in the same strike; the PR body discloses what the suite already owns (#113's read-precedence delta reached the merge round disclosed but unpinned, and the merge round paid the pin). The bar reaches fix commits: each claimed behavior change moves or adds a pin — a comment-only change claims nothing (the S2 fix pass's \"no lost-update window\" claim rode a comment alone until re-investigation caught it). And a helper whose write can fail returns whether it landed; the caller announces success only on that result (the S2 `writeGateRecord` returned void, swallowed write failures, and both callers printed the success notify after one).\n- The review round names every accepted deviation from the spec's letter — additions beyond the enumeration included — with the reason; the disclosure lands in the same strike's PR body, not in a later pass (#127's survey-inputs bullet rode through PR #128's draft review undisclosed, and the triage round paid the disclosure).\n- An extraction test — one that pulls structured tokens out of prose — consumes from its anchor: the match opens the claim it pins, leading whitespace only, never searching forward past other text. An unanchored match can borrow a later passage and pass silently (#122's review round caught the prose check's enumeration doing exactly that).\n- A spec's acceptance numbers and failure-mode claims are measured before the spec lands — a claim one command can falsify is a delta the strike inherits for free (#120's lint:dups \"count drops\" claim was false at min-tokens 50: the four mirrors were never token-level clones, and the strike paid the probes to falsify it).\n- Secrets ride files — a read-only mount or a `--env-file` — into child processes and containers. An argv element is process-table-visible, so no credential, token, or header value rides one (the M5 S3 review round caught the gateway token on a `docker exec -e`; the preflight env file is the shape).\n- When a change supersedes text in a steering doc (`CLAUDE.md`, `GLOSSARY.md`, `docs/adr/`), the same strike edits that text — and superseded means stale by omission as well as false: a section that describes the changed surface covers the new behavior in the same strike (S1's ceiling paragraph was omission-stale through three review passes; only a post-merge strike fixed it).\n- A strike that changes a self-authored skill's `SKILL.md` bumps that skill's frontmatter `version:` in the same strike — the field is the skill's own minor, not the package's.\n- `.npmrc` pins the official registry (the machine default is npmmirror).\n- PR bodies, repo prose, and committed fixtures are public surfaces: cluster account names, SSH aliases, and node names never enter them — they live in `CLAUDE.local.md`, and GitHub keeps body edit history, so a scrub-after is not undo. A committed fixture is the sharpest case — a captured transcript above all: sanitization redacts the payload its tool outputs carry (node lists, job names), not only machine paths; the S2 codemode fixture shipped node lists until a round-2 review caught them. The recipe lives with the golden fixtures in `test/dogfood-audit.test.mjs`. (The cluster's own name is public — ADR 0004 names it.) The Spec review checks.\n- No build step; tests use Node's built-in node:test runner (pi loads extension TS via jiti). Verify changes with `npm test`, `npm run lint`, `npm run lint:py` (ruff over the self-authored skill scripts and the gateway tree — vendored trees stay verbatim and out of scope), `npm run lint:sh` (pipefail over the repo's shell surfaces; exceptions argue in the lint), `npm run lint:dups` (jscpd duplication ratchet), and `npm run typecheck`; check shipped files with `npm pack --dry-run`.\n- Commits run the suite via the versioned `.githooks/pre-commit` hook; enable it per clone with `git config core.hooksPath .githooks`.\n- Dogfood acceptance criteria are met on captured evidence — session transcripts for the skill criteria, recorded exit status and stderr for clean boot — never the model's self-report. Procedure: `docs/agents/dogfood.md`. Dogfood and adversarial sessions run in the clean-room rig (`test/rig/`, ADR 0005): `node test/rig/run.mjs run \"<prompt>\"`; the provider key and — on a `--gateway` leg — the gateway token are the only credentials that enter it (the cluster SSH key never does; the container reaches the gateway through the host-side port-forward, preflighted in-container before launch; a `--pool <pack>` leg adds none — it stages the pack's `.theta/skills.json` state file, which is not a credential), and a gated headless leg runs `--gateway --rpc` — the checked-in confirm driver answers the submit gate.\n\n## Git workflow — one \"coding strike\" per task\n\n1. Start the strike in a new git worktree on a feature branch. A worktree inside the repo (`.claude/worktrees/`) resolves the checkout's `node_modules`; one placed elsewhere needs `npm ci` first. Files read before entering the worktree carry the old base — re-read anything you are about to anchor-edit, and fetch `origin main` before diffing against or removing the worktree.\n2. On the first commit, open a **draft** PR against `main` and run `node scripts/check-strike.mjs <spec#>` from the strike worktree: the evidence leg passes by design at draft time, the review-coverage leg skips while the PR is draft, and the CI leg still exits 1 while a check runs pending — the printed offender line, not the exit code, tells pending from a real failure. The child walk is the draft-time signal: a gate defect or a missing child surfaces with the strike ahead of it, not at ready time (S1's gate read a blocked-by mention as an unlanded child; #61 fixed the detection, and the early run keeps the next defect cheap). Run the strike's review round at draft time too, **before any dogfood capture**: the reviewer sees the diff with the least context pressure, its fixes land while the tree is cheap to change, and the evidence pair then captures once at the final HEAD. The reverse order pays a full recapture every time a review fix moves HEAD — M5 S3 and S4 each paid one on 2026-10-31 (three live legs with cluster toggles; the closeout pair), review-first would have paid neither. Review first, capture once.\n3. Commit and push every further change to that PR branch, and refresh the PR body as each strike lands — the body is read mid-flight by reviewers and the owner, not only before ready.\n4. Before marking the PR ready, run `node scripts/check-strike.mjs <spec#>` from the strike worktree — every child of the spec issue must be landed on the branch or already closed (a closeout ticket for the post-merge steps is the expected open exception; a childless issue is a maintenance strike). The same gate fails a PR whose body attests dogfood evidence at an SHA that is not HEAD — recapture the pair, never rebind the words — and refuses while any PR check is non-pass, pending included (M3's red `verify` sat four hours past ready; only merge-day habit caught it). Refresh the PR's title and body to cover every landed child, then run the review pass over everything changed since the draft round and disclose each round in the body as a `reviewed: <base>..<head>` line (hex shas, base exclusive; a lone sha names one commit) — the gate's coverage leg refuses a ready PR whose branch commits no disclosed range covers (#133 retro: a fix range merged unreviewed and paid a post-merge triage round) — then mark the PR ready and merge to `main`. For milestone-sized PRs, consider one external-model review round before merge — M2's Codex round caught a defect class two same-model rounds missed.\n5. The adversarial loop's stop condition is judgment: once findings require crafted attack strings that honest usage would never produce, stop, record them as a residual trust boundary, and move on. \"Findings stay wording-level for two consecutive rounds\" applies only to findings a realistic session could trigger; if it has not fired within ~10 rounds, it will not — an adversarial reviewer regenerates findings indefinitely, and \"clean\" is not a stopping condition it can reach.\n6. While a review round is in flight, hold further commits on that branch; when its report arrives, triage against the SHA it reviewed.\n7. At teardown, run `node scripts/strike-teardown.mjs <branch>` from anywhere inside the repo — it anchors the main checkout by the shared git dir, refuses unless the branch is merged into `origin/main` (the guard that licenses the `-D`, since plain `-d` compares against the lagging remote topic branch), pulls `main` fast-forward, removes the worktree, and deletes the branch last: the worktree holds it checked out, so the delete refuses until the worktree is gone. A harness-created worktree carries the session's own lock — exit it through the harness's worktree-exit tool before the teardown, or the remove refuses on the lock (the M5 S0 retro). A manual teardown repeats that order with every git command anchored to the main checkout (`git -C <main-checkout>`) — a command run inside the worktree acts on the feature branch (the S4 retro's stray pull fast-forwarded it; the S5 retro repeated the accident), and a session standing in the removed worktree loses its git context (the S3 retro session).\n\n## Publishing\n\n`npm publish` is owner-only (browser 2FA; non-interactive publishes fail with `EOTP`). Prepare the release, commit, push — then stop and let the owner publish. It runs from the repo checkout — the committed `.npmrc` pins `registry.npmjs.org` (the machine default is npmmirror) — and that checkout must be the merged tree first: `git pull --ff-only origin main`, then confirm `package.json`'s version and the `npm pack --dry-run` file count match the release, because the M3 publish ran from a stale checkout (0.2.0, 289 files) and only npm's version-conflict refusal caught it. A publish that fails `E404` before any OTP prompt is a lapsed npmjs token, not a missing package: run `npm login` from inside the repo, then retry.\n\n## Agent skills\n\n### Issue tracker\n\nIssues live in GitHub Issues on `hugolld/theta-agent`, managed with the `gh` CLI. See `docs/agents/issue-tracker.md`.\n\n### Triage labels\n\nDefault five-role vocabulary (each label string equals its role name). See `docs/agents/triage-labels.md`.\n\n### Domain docs\n\nSingle-context: root `GLOSSARY.md` + `docs/adr/`. See `docs/agents/domain.md`. Glossary edits are suite-enforced: `_Avoid_` terms are banned from self-authored prose, every headword word must appear in it, a headword outside the provenance grandfather list names its deciding artifact, and an ADR's `(GLOSSARY)` markers match its declared coinages — the scan list lives in `test/skills-library.test.mjs` and verifies itself: self-authored prose (docs, skill text, and the extension sources' user-facing strings, not script comments) that carries glossary vocabulary joins that list in the same strike that lands it, and a file carrying a headword while off the list fails the converse test by name (S1's gateway README caught a banned term the moment it joined; S2's schema doc rode through two reviews until the check existed).\n\n### Connector scripts\n\nConnector helper scripts (`theta-lit-search`, plus the `theta-notebook` recorder) share enforced invariants — exit-code contract, classification shape, repeat-the-call records. See `docs/agents/connector-scripts.md`.\n\n### Compute gateway\n\n`gateway/` holds `theta-compute` (M4, ADR 0004): a FastMCP server wrapping the Slurm CLI, out of the npm tarball and out of Python lint's blind spot. Institutional facts ride deploy-time env; the audit-line shape, ALLOW/DENY/HOLD/THROTTLE semantics, and the phase-0 deploy recipe live in `gateway/README.md`. The deploy-time submit capability (M5, ADR 0006) is the outer bound on job creation: while off — the cluster-side `theta-compute.env`, sourced by every start line — the job-creating tools answer a hard HOLD refusal and the observed state rides every mutating audit line. Inside it, the per-principal submit ceiling (M5 S1) bounds runaway submits: past the deploy-env ceiling (default 20 per rolling hour, the count derived from the audit log itself) the same tools answer a THROTTLE refusal naming the principal, the count, and the window. Inside those server bounds, the theta-side submit gate stays the inner per-call gate — since M5 S2 the stacked gate framework (`extensions/submit-gate.ts`), whose three-tool confirm set is pinned against the gateway's annotations (a disagreement refuses as drift) and whose gate log (`gate.jsonl`) rides the session dir with `parentToolCallId` on nested calls. The offline tests drive the tools at the MCP boundary against the stub Slurm binaries in `test/fixtures/gateway/bin/`. A live step blocked on the cluster path parks — one scheduled re-probe, never a retry loop (waiting over one live connection is not retrying) — and resumes from the parked step when the path returns.\n\n### Eval suite\n\n`test/eval/` holds the eval suite (M6, ADR 0007), two layers, all outside the npm tarball; doctrine in `docs/agents/eval.md`. The replay net is the keyless, deterministic base layer in the standard suite: six sanitized rig captures — one per scenario (the connector's skill tree, the orchestrator doctrine, the notebook recorder, the gateway skill, the extension's user-facing strings on a `--gateway` leg where print mode refuses the submit before any server call, and the skill pool's bioinformatics pack tree on a keyless `--pool` leg), spanning the registry's five surface classes — each pinned three ways (provenance: one digest per surface class, so a model-visible edit reds until a fresh capture; snapshot: the normalized entry tree equals its committed snapshot; determinism: pi's reconstruction yields one context hash), with the per-scenario shape assertion in `test/eval/shape.mjs` and the scenario list (`test/eval/scenarios.mjs`) as the only source of capture prompts. The benchmark layer (M6 S2/S3) grades four checked-in tasks — one per benchmark class (`literature-triage`, `method-selection` from a committed figure, `provenance-recording`, `compute-staging` across two sessions) — workspace-as-oracle: declarative checks run in-container, two-tier judging through named OpenRouter config slots (a disclosed bend from ADR 0007's letter — the tiers never share a model family, and the slot ids are pinned against the installed catalog), one judge call per fresh child process (`bench-judge.mjs` — pooled fetch failures live in long-lived runner processes), and UsageEntry totals in the report (`bench-suite.json`). One command each, and only the provider key enters: `node test/rig/run.mjs eval <task-id>`, or `eval --suite` for the whole list — the eval mode refuses `--gateway`/`--rpc`; a benchmark leg has no gateway token path.\n\n`test/eval/capture.mjs` drives the rig and lands sanitized fixtures with a provenance manifest and a normalized snapshot; never edit a fixture or snapshot by hand. A model-visible change lands only with a fresh eval capture — a red provenance pin names the stale fixture — but reproduce the red before paying it: a failure only a long-lived checkout or harness process shows (ignored scratch riding a tree digest, pooled connection state in a runner) is local state, not a model-visible change. Doctrine, the digest-scope decision, the drill leg, and the benchmark recipe: `docs/agents/eval.md`; the eval-capture procedure rides `docs/agents/dogfood.md`; a re-sync's model-visible diff owes a fresh capture (`docs/agents/resync.md`).\n\n### Skill pool\n\n`pool/` holds the skill pool (ADR 0008): the versioned in-repo library of vendored domain packs — first wave 2026-11-15: protein-engineering, bioinformatics, cheminformatics, 48 skills — under the ADR 0001 verbatim rules, outside the npm tarball. A research project loads its packs through `.theta/skills.json` (S1's loader extension, `extensions/skill-pool.ts`), not the Tier-1 library's ships-always shape: the state file is committed project state, so a fresh clone of a project reproduces its pack selection, and the loader contributes per-skill paths — one `pool/<pack>/<skill>/` directory per skill whose class sits in the state's `classAllow` — because every pack is class-mixed (the disclosed deviation from ADR 0008's `pool/<pack>` letter: pack granularity can never be class-pure). The class map `pool/classes.json` gates what may load, a pack is the re-sync unit (`docs/agents/resync.md`), and the loader and gate pins live in `test/skill-pool.test.mjs` with the pack digests in `test/expected-pool.json`. The Jev gate (S2) bounds the class allowance: one `models.classify()` call over the project notebook's recent entries and the enabled pack names decides which credential classes beyond `local` a project's `skills.json` may load, firing once per project at a keyed session start and thereafter only as an explicit owner act — a human-widened allow set outranks it, and the metered `cloud` class never enters without the owner's explicit run. The decision and rationale land as one top-level `gate` record in the state file — the decision is class-level, not pack-level (the disclosed deviation from S1's per-pack history shape) — and a re-run sets the allow set to exactly its decision, narrowing honestly, never widen-only. The classifier key stays host-side. The pool joined the replay net at S3 (#167) as the `pool:<pack>` surface class — one digest over a pack's whole tree plus the class map — captured keyless on the rig's `--pool` leg: the staged state file is not a credential, so the gate cannot fire there. The loaded-pack dogfood procedure — a keyed, project-cwd host session where the gate does fire and the pack's skills carry real work — lives in `docs/agents/dogfood.md`.\n\n### SKILL.md frontmatter\n\nDescriptions are capped at 1..1024 chars and must stay plain-scalar-safe (no `: ` sequences in the value). `test/skills-library.test.mjs` enforces both: it parses frontmatter with the `yaml` package — the same engine pi runs — so invalid YAML fails the suite instead of pi silently dropping the skill.\n"
 				}
 			],
 			"isError": false,
@@ -292,20 +292,20 @@
 			"content": [
 				{
 					"type": "thinking",
-					"thinking": "I've read both files. Now I understand:\n\n1. The theta-notebook skill records decisions via `notebook.py` with `--decision \"TEXT\"`. A decision doesn't require evidence, and `--grade` is only given with evidence.\n2. The recorder writes `.theta/` under the current directory — run it with the research project's workspace as the cwd.\n3. The skill directory is `__REPO__/skills/theta-notebook/`, so the script is at `__REPO__/skills/theta-notebook/scripts/notebook.py`.\n\nThe decision text: \"The next antibody screen will be run as a two-stage cascade instead of one large pass\" — the team's decision.\n\nAlso, the connector-scripts doc mentions invariants — should I read `docs/agents/connector-scripts.md`? The skill says recording runs only through the bundled recorder script which validates evidence input. Since this is a decision with no evidence, it's simple. But CLAUDE.md says connector helper scripts share enforced invariants documented in docs/agents/connector-scripts.md. The user said \"Before you rely on any instruction or reference file, read it whole in a single call\". I've read CLAUDE.md and the SKILL.md. Do I need to read connector-scripts.md before relying on the recorder? The SKILL.md itself gives me everything I need for a decision entry (usage, exit codes). I don't strictly need to rely on connector-scripts.md. But it might be prudent to check where the research project's workspace is.\n\nWait — where is the notebook supposed to live? \"The recorder writes `.theta/` under the current directory, so run it with the research project's workspace as the cwd — never from inside the skill tree, which would land the notebook in the package checkout.\"\n\nThe cwd is __REPO__, which is the theta-agent package repo. Hmm. Is this repo the \"research project's workspace\"? The AGENTS.md/CLAUDE.md says .theta/ belongs to the research project; in the theta-agent repo's own dogfood runs it is gitignored. The current working directory is __REPO__. The user says \"Record that decision for the project so a later session can find it\". The session's cwd is __REPO__.\n\nHmm, but wait — there's also a `.theta/` directory possibly already in __REPO__? Let me check. Also, is there possibly a notebook already? Let me check the current directory structure first.\n\nActually, let me think about the right cwd. The research project here — the user's session is at __REPO__, which is the theta-agent repo. But the user talks about \"the next antibody screen\" — that sounds like a research project, possibly with its own workspace. Let me look around to see if there's a research project workspace with an existing .theta/notebook.jsonl. Let me check:\n\n- ls __RIG_HOME__\n- check for .theta directories\n\nThe user said run each shell command as one plain command, chaining steps with && only, never a semicolon or a trailing status echo. So I can use `&&` chains but no semicolons.\n\nLet me check the environment. First, verify python3 version and the script's existence, and look for an existing notebook.\n\nCommands (each one plain command, && chains allowed):\n1. `ls __RIG_HOME__` — plain\n2. `find __RIG_HOME__ -maxdepth 4 -name notebook.jsonl` — hmm, that might be slow but fine. Or `ls -a __REPO__/.theta`.\n\nActually let me be careful and quick: run `ls -a __REPO__` and `ls __RIG_HOME__` in parallel to see what's there.\n\nAlso the user's constraint: \"Run each shell command as one plain command: chain steps with && only, never a semicolon or a trailing status echo.\" So when I run the recorder, I should do e.g.:\n\n`cd __REPO__ && python3 __REPO__/skills/theta-notebook/scripts/notebook.py --decision \"...\"`\n\nThat's a && chain — allowed.\n\nThe decision text should be recorded. Since no evidence, no --grade. Decision entries: `python3 <script> --decision \"TEXT\"`.\n\nShould the decision text mention \"antibody screen two-stage cascade\"? Yes: \"Run the next antibody screen as a two-stage cascade instead of one large pass (team decision).\" Let me phrase it: \"The next antibody screen will run as a two-stage cascade instead of one large pass — team decision for the upcoming screen campaign.\"\n\nBefore running, check for existing notebook to see what id the decision will get. The recorder will assign dec-000N.\n\nLet me first look at the workspace. I'll run:\n- `ls -a __REPO__` \n- `ls __RIG_HOME__`\n\nin parallel.\n\nAlso check python3 version: `python3 --version`.\n\nThen check whether .theta exists and notebook.jsonl exists.",
+					"thinking": "I've read CLAUDE.md and the theta-notebook SKILL.md. Now I need to record a decision: \"Our team has decided to run the next antibody screen as a two-stage cascade instead of one large pass.\"\n\nPer the skill:\n- Decision type entry: `--decision \"TEXT\"` — no evidence needed.\n- The recorder writes `.theta/` under the current directory, so run it with the research project's workspace as cwd — never from inside the skill tree.\n- Resolve the script path against the skill directory and pass absolute: `__REPO__/skills/theta-notebook/scripts/notebook.py`\n- Requires Python 3.11+.\n\nCurrent cwd is `__REPO__` — which is the theta-agent repo, not really a research project workspace. Hmm. The skill says: run it with the research project's workspace as the cwd. The current directory is `__REPO__`. The user says \"Record that decision for the project so a later session can find it, using whatever provenance recording this environment provides\". The cwd is `__REPO__`, so `.theta/` under cwd would be `__REPO__/.theta/`. That seems to be where a later session (working in the same cwd) would find it. The AGENTS.md/CLAUDE.md note that in the theta-agent repo's dogfood runs `.theta/` is gitignored — let me check if `.theta/` exists in the repo and if there's a notebook already.\n\nAlso note: decision entries take optional evidence; a decision may stand on the researcher's reasoning; \"record the motivating search as its evidence when one exists\". Here no motivating search output exists in hand (the decision came from the team), so no evidence — just `--decision \"TEXT\"`.\n\nCommand constraints: \"Run each shell command as one plain command: chain steps with && only, never a semicolon or a trailing status echo.\" So I can use `&&` to chain, but no semicolons, no `; echo $?`.\n\nFirst, let me check the environment: does `.theta/` exist in the cwd? Check python version availability. Let me run checks:\n\n1. `ls -la __REPO__/.theta` — check if it exists (or just look at cwd).\n2. Check python3 version.\n\nPer rules, independent calls in the same block. Let me do:\n- `ls -a && python3 --version` — that's chaining with &&, fine. Or separate calls in one block. Actually I can make multiple bash calls in one block.\n\nLet me check:\n- `ls -a __REPO__/.theta`\n- `python3 --version`\n\nAlso verify the script exists: `ls __REPO__/skills/theta-notebook/scripts/`\n\nThen run the recorder:\n\n```bash\ncd __REPO__ && python3 __REPO__/skills/theta-notebook/scripts/notebook.py --decision \"Run the next antibody screen as a two-stage cascade instead of one large pass.\"\n```\n\nWait — the cwd is already __REPO__. The recorder writes `.theta/` under the current directory. Since bash tool runs in cwd __REPO__, I can just run the python3 command directly.\n\nNote that the decision text: the user's phrasing: \"Our team has decided to run the next antibody screen as a two-stage cascade instead of one large pass.\" I'll record the decision concisely, e.g., \"Run the next antibody screen as a two-stage cascade instead of one large pass (team decision).\" Keep it faithful.\n\nAlso, per the skill's \"Record only through this skill's script. Never edit notebook.jsonl by hand.\" Good.\n\nAlso, the connector-scripts doc — CLAUDE.md mentions `docs/agents/connector-scripts.md` for invariants. Do I need to read it? The user instruction says \"Before you rely on any instruction or reference file, read it whole in a single call\". I'm relying on the SKILL.md (read fully). The connector-scripts doc is about developing connector scripts, not needed for using them. I don't need it. But let me consider: the task is straightforward — record a decision. The SKILL.md gives everything: script path, flags, exit codes.\n\nLet me first check the environment state, then run the recorder.\n\nAlso should I check `.theta/notebook.jsonl` afterwards to report what was written? The recorder's default output prints the recorded line plus entry specifics. I can relay that. To tell \"exactly what was written and where\", I can also show the appended line from the file — reading the notebook.jsonl file. But note the read tool reads files; notebook.jsonl will be one line. I can read it with read tool (limit larger than line count — it'll be like 1-3 lines; use limit like 100). Or use the `--json` flag when recording to get the exact entry printed. Actually the default output \"is the recorded line, then the entry's specifics\". So the recorder output gives me the line. That's enough. But to be safe and show exact bytes, I could read the file after.\n\nPlan:\n1. Check state: `ls -a __REPO__/.theta` and `python3 --version` and `ls __REPO__/skills/theta-notebook/scripts` — independent bash calls in one block.\n2. Run the recorder with --decision.\n3. Verify by reading the notebook file.\n4. Report.\n\nOne consideration: does `.theta/` exist? If it doesn't exist, the recorder presumably creates it (exit code 2 only if `.theta` is not a directory — meaning if it exists as a file). Let's check first.\n\nLet me run the checks.",
 					"thinkingSignature": "reasoning_content"
 				},
 				{
 					"type": "text",
-					"text": "I've read the steering doc and the notebook skill in full. Key facts: decisions are recorded via the skill's bundled recorder script (`scripts/notebook.py --decision \"TEXT\"`), which writes `.theta/notebook.jsonl` under the **current working directory** — so it must run from the research project's workspace, never from inside the skill tree. Decisions need no evidence and take no grade. Let me inspect the workspace first to confirm where the project's `.theta/` lives and that the script exists."
+					"text": "CLAUDE.md and the theta-notebook skill are read in full. The skill's doctrine: record a decision through the bundled recorder script, run with the research project's workspace as cwd (here, `__REPO__`), so it lands in `.theta/notebook.jsonl` where a later session can find it. A decision needs no evidence. Let me first check the environment state."
 				},
 				{
 					"type": "toolCall",
 					"id": "<id#12>",
 					"name": "bash",
 					"arguments": {
-						"command": "ls -a __REPO__",
-						"timeout": 30
+						"command": "ls -a __REPO__/.theta",
+						"timeout": 15
 					}
 				},
 				{
@@ -313,8 +313,8 @@
 					"id": "<id#13>",
 					"name": "bash",
 					"arguments": {
-						"command": "ls __RIG_HOME__",
-						"timeout": 30
+						"command": "python3 --version",
+						"timeout": 15
 					}
 				},
 				{
@@ -323,7 +323,7 @@
 					"name": "bash",
 					"arguments": {
 						"command": "ls __REPO__/skills/theta-notebook/scripts",
-						"timeout": 30
+						"timeout": 15
 					}
 				}
 			],
@@ -331,23 +331,23 @@
 			"provider": "<provider>",
 			"model": "<model>",
 			"usage": {
-				"input": 10444,
-				"output": 1244,
+				"input": 10728,
+				"output": 1376,
 				"cacheRead": 5120,
 				"cacheWrite": 0,
-				"reasoning": 1065,
-				"totalTokens": 16808,
+				"reasoning": 1220,
+				"totalTokens": 17224,
 				"cost": {
-					"input": 0.0015666,
-					"output": 0.0006219999999999999,
+					"input": 0.0016091999999999999,
+					"output": 0.0006879999999999999,
 					"cacheRead": 0.0001536,
 					"cacheWrite": 0,
-					"total": 0.0023421999999999996
+					"total": 0.0024507999999999995
 				}
 			},
 			"stopReason": "toolUse",
 			"timestamp": "<timestamp>",
-			"responseId": "20261117233414911276b48f464bc9",
+			"responseId": "20261118134504a4ec53fb7c0549a5",
 			"rawStopReason": "tool_calls",
 			"durationMs": "<duration>",
 			"thinkingLevel": "high"
@@ -365,10 +365,10 @@
 			"content": [
 				{
 					"type": "text",
-					"text": ".\n..\n.git\n.githooks\n.github\n.gitignore\n.npmrc\nAGENTS.md\nCLAUDE.md\nGLOSSARY.md\nLICENSE\nREADME.md\nbin\ndocs\neslint.config.js\nextensions\ngateway\npackage-lock.json\npackage.json\npool\nscripts\nskills\ntest\ntsconfig.json\n"
+					"text": "ls: cannot access '__REPO__/.theta': No such file or directory\n\n\nCommand exited with code 2"
 				}
 			],
-			"isError": false,
+			"isError": true,
 			"durationMs": "<duration>",
 			"timestamp": "<timestamp>"
 		}
@@ -385,7 +385,7 @@
 			"content": [
 				{
 					"type": "text",
-					"text": "theta\n"
+					"text": "Python 3.12.15\n"
 				}
 			],
 			"isError": false,
@@ -423,29 +423,19 @@
 			"content": [
 				{
 					"type": "thinking",
-					"thinking": "Interesting: there is no `.theta/` in __REPO__ yet. The cwd is __REPO__ (the theta-agent package repo). The skill says: \"The recorder writes `.theta/` under the current directory, so run it with the research project's workspace as the cwd — never from inside the skill tree, which would land the notebook in the package checkout.\"\n\nHmm — __REPO__ IS the package checkout (theta-agent repo). But it's also the only workspace we have; there's no separate research project directory under __RIG_HOME__. The user said \"Record that decision for the project so a later session can find it\". The session runs in __REPO__. A later session would presumably run in the same cwd and find `.theta/notebook.jsonl` there.\n\nIs there a concern about landing the notebook in the package checkout? The CLAUDE.md notes: \"In the theta-agent repo's own dogfood runs it is gitignored so clean-tree proofs hold; in a research project, versioning the notebook is the researcher's choice.\" Let me check the .gitignore to see if .theta is already ignored here — that would confirm the repo anticipates a .theta in the checkout.\n\nLet me read .gitignore. Also check python3 version since the script requires Python 3.11+.\n\nEach command plain, && only.",
+					"thinking": "- `.theta/` doesn't exist yet — the recorder will create it.\n- Python 3.12.15 — fine (needs 3.11+).\n- Script exists at `__REPO__/skills/theta-notebook/scripts/notebook.py`.\n\nNow record the decision. Command (single plain command, no semicolons):\n\n```bash\npython3 __REPO__/skills/theta-notebook/scripts/notebook.py --decision \"Run the next antibody screen as a two-stage cascade instead of one large pass.\"\n```\n\nThe cwd is __REPO__ (the tool runs there), so `.theta/` lands under the project workspace. Let me run it.",
 					"thinkingSignature": "reasoning_content"
 				},
 				{
 					"type": "text",
-					"text": "No `.theta/` exists yet in the workspace. The session's cwd `__REPO__` is the workspace a later session will share, so that's where the notebook must land. Let me confirm `.theta` is handled by this repo's `.gitignore` (per CLAUDE.md it should be) and that Python meets the 3.11+ gate."
+					"text": "Environment is ready: Python 3.12.15 (meets the 3.11+ gate), the recorder script exists, and `.theta/` doesn't exist yet — the recorder will create it under the current workspace (`__REPO__`), which is where a later session in this project will look. Recording the decision now:"
 				},
 				{
 					"type": "toolCall",
 					"id": "<id#19>",
-					"name": "read",
-					"arguments": {
-						"limit": 200,
-						"offset": 1,
-						"path": "__REPO__/.gitignore"
-					}
-				},
-				{
-					"type": "toolCall",
-					"id": "<id#20>",
 					"name": "bash",
 					"arguments": {
-						"command": "python3 --version",
+						"command": "python3 __REPO__/skills/theta-notebook/scripts/notebook.py --decision \"Run the next antibody screen as a two-stage cascade instead of one large pass.\"",
 						"timeout": 30
 					}
 				}
@@ -454,23 +444,23 @@
 			"provider": "<provider>",
 			"model": "<model>",
 			"usage": {
-				"input": 1336,
-				"output": 415,
-				"cacheRead": 15552,
+				"input": 1461,
+				"output": 272,
+				"cacheRead": 15808,
 				"cacheWrite": 0,
-				"reasoning": 289,
-				"totalTokens": 17303,
+				"reasoning": 146,
+				"totalTokens": 17541,
 				"cost": {
-					"input": 0.0002004,
-					"output": 0.0002075,
-					"cacheRead": 0.00046656,
+					"input": 0.00021915,
+					"output": 0.000136,
+					"cacheRead": 0.00047423999999999996,
 					"cacheWrite": 0,
-					"total": 0.00087446
+					"total": 0.0008293899999999999
 				}
 			},
 			"stopReason": "toolUse",
 			"timestamp": "<timestamp>",
-			"responseId": "202611172334398e9810794e7e49da",
+			"responseId": "20261118134535764b8bc95f154db2",
 			"rawStopReason": "tool_calls",
 			"durationMs": "<duration>",
 			"thinkingLevel": "high"
@@ -478,105 +468,12 @@
 	},
 	{
 		"type": "message",
-		"id": "<id#21>",
+		"id": "<id#20>",
 		"parentId": "<id#18>",
 		"timestamp": "<timestamp>",
 		"message": {
 			"role": "toolResult",
 			"toolCallId": "<id#19>",
-			"toolName": "read",
-			"content": [
-				{
-					"type": "text",
-					"text": "node_modules/\n*.tgz\n.DS_Store\n__pycache__/\n\n# machine-local Claude Code / agent skills (symlinks into .agents/)\n.claude/\n.agents/\nskills-lock.json\nCLAUDE.local.md\n\n# M3 project notebook written by dogfood runs in this checkout (ADR 0003)\n.theta/\n\n# gateway local uv environment (M4, ADR 0004)\ngateway/.venv/\n\n# firecrawl plugin scratch (web-research captures; local only, never ships)\n.firecrawl/\n"
-				}
-			],
-			"isError": false,
-			"durationMs": "<duration>",
-			"timestamp": "<timestamp>"
-		}
-	},
-	{
-		"type": "message",
-		"id": "<id#22>",
-		"parentId": "<id#21>",
-		"timestamp": "<timestamp>",
-		"message": {
-			"role": "toolResult",
-			"toolCallId": "<id#20>",
-			"toolName": "bash",
-			"content": [
-				{
-					"type": "text",
-					"text": "Python 3.12.15\n"
-				}
-			],
-			"isError": false,
-			"durationMs": "<duration>",
-			"timestamp": "<timestamp>"
-		}
-	},
-	{
-		"type": "message",
-		"id": "<id#23>",
-		"parentId": "<id#22>",
-		"timestamp": "<timestamp>",
-		"message": {
-			"role": "assistant",
-			"content": [
-				{
-					"type": "thinking",
-					"thinking": "`.theta/` is already gitignored in this checkout (with a comment acknowledging the project notebook written by dogfood runs), and Python 3.12.15 satisfies the 3.11+ gate.\n\nNow run the recorder from the workspace cwd. The decision: \"Our team has decided to run the next antibody screen as a two-stage cascade instead of one large pass.\"\n\nRecord as a decision entry: \n\n`cd __REPO__ && python3 __REPO__/skills/theta-notebook/scripts/notebook.py --decision \"Run the next antibody screen as a two-stage cascade instead of one large pass\"`\n\nText phrasing — should reflect the team decision. \"The team decided to run the next antibody screen as a two-stage cascade instead of one large pass.\" The recorder will assign dec-0001 (no existing notebook). No evidence, no grade, per the skill: a decision may stand on the researcher's reasoning.\n\nCommand form: one plain command chained with && — allowed. Then I'll verify by reading back notebook.jsonl. Verification command: read the file with the read tool (it's a text file). It'll be one line. Or use `ls .theta` first. Let me run the recorder, then read the notebook file to report exactly what was written.",
-					"thinkingSignature": "reasoning_content"
-				},
-				{
-					"type": "text",
-					"text": "`.theta/` is pre-gitignored in this checkout and Python 3.12.15 passes the script's gate. Now recording the decision through the recorder, run from the project workspace:"
-				},
-				{
-					"type": "toolCall",
-					"id": "<id#24>",
-					"name": "bash",
-					"arguments": {
-						"command": "cd __REPO__ && python3 __REPO__/skills/theta-notebook/scripts/notebook.py --decision \"The team has decided to run the next antibody screen as a two-stage cascade instead of one large pass\"",
-						"timeout": 60
-					}
-				}
-			],
-			"api": "openai-completions",
-			"provider": "<provider>",
-			"model": "<model>",
-			"usage": {
-				"input": 595,
-				"output": 373,
-				"cacheRead": 16832,
-				"cacheWrite": 0,
-				"reasoning": 267,
-				"totalTokens": 17800,
-				"cost": {
-					"input": 0.00008925,
-					"output": 0.00018649999999999998,
-					"cacheRead": 0.0005049599999999999,
-					"cacheWrite": 0,
-					"total": 0.0007807099999999999
-				}
-			},
-			"stopReason": "toolUse",
-			"timestamp": "<timestamp>",
-			"responseId": "20261117233447e3d9a9f4ef674842",
-			"rawStopReason": "tool_calls",
-			"durationMs": "<duration>",
-			"thinkingLevel": "high"
-		}
-	},
-	{
-		"type": "message",
-		"id": "<id#25>",
-		"parentId": "<id#23>",
-		"timestamp": "<timestamp>",
-		"message": {
-			"role": "toolResult",
-			"toolCallId": "<id#24>",
 			"toolName": "bash",
 			"content": [
 				{
@@ -591,28 +488,28 @@
 	},
 	{
 		"type": "message",
-		"id": "<id#26>",
-		"parentId": "<id#25>",
+		"id": "<id#21>",
+		"parentId": "<id#20>",
 		"timestamp": "<timestamp>",
 		"message": {
 			"role": "assistant",
 			"content": [
 				{
 					"type": "thinking",
-					"thinking": "The recorder refused with exit code 2 (notebook failure domain) because `.theta/` doesn't exist — the recorder appends but does not create the directory. Per the exit-code contract: 2 = notebook failure (cannot be read or written). So I need to create `.theta/` first. The skill says the notebook belongs to the project and the recorder appends to `notebook.jsonl`. Creating the directory is a legitimate setup step (mkdir -p .theta) — the append-only file itself will be created by the recorder.\n\nThe user's shell rule: chain steps with && only, never a semicolon or a trailing status echo. So:\n\n`cd __REPO__ && mkdir -p .theta && python3 ... --decision \"...\"`\n\nThat's a single && chain — allowed.",
+					"thinking": "The recorder refuses to create the directory? Exit code 2 — \"Notebook failure — the notebook cannot be read (corrupt, or `.theta` is not a directory) or written.\" The error says it can't write because `.theta/notebook.jsonl` doesn't exist — meaning the recorder expects `.theta/` to already exist (it doesn't create the directory itself).\n\nSo I need to create `.theta/` first. Per the user's constraint: \"Run each shell command as one plain command: chain steps with && only, never a semicolon or a trailing status echo.\"\n\nSo: `mkdir -p .theta && python3 ...` — chaining with && is allowed.\n\nIs there any doctrine about creating `.theta/`? The skill says \"The recorder writes `.theta/` under the current directory\". It doesn't say who creates it. The recorder apparently doesn't mkdir. Creating the directory is a plain workspace setup step — not editing the notebook by hand (that prohibition is about notebook.jsonl itself). mkdir -p .theta is fine.\n\nLet me run: `mkdir -p __REPO__/.theta && python3 __REPO__/skills/theta-notebook/scripts/notebook.py --decision \"...\"`\n\nThis chains two steps with && only — allowed by the user's constraint.",
 					"thinkingSignature": "reasoning_content"
 				},
 				{
 					"type": "text",
-					"text": "Exit code 2 — the recorder appends to the notebook but doesn't create the `.theta/` directory itself. Creating the directory first, then re-running the same recorder call in one `&&` chain:"
+					"text": "The recorder requires `.theta/` to exist beforehand — it appends but doesn't create the directory. Creating it and retrying, chained with `&&` per your command rule:"
 				},
 				{
 					"type": "toolCall",
-					"id": "<id#27>",
+					"id": "<id#22>",
 					"name": "bash",
 					"arguments": {
-						"command": "cd __REPO__ && mkdir -p .theta && python3 __REPO__/skills/theta-notebook/scripts/notebook.py --decision \"The team has decided to run the next antibody screen as a two-stage cascade instead of one large pass\"",
-						"timeout": 60
+						"command": "mkdir -p __REPO__/.theta && python3 __REPO__/skills/theta-notebook/scripts/notebook.py --decision \"Run the next antibody screen as a two-stage cascade instead of one large pass.\"",
+						"timeout": 30
 					}
 				}
 			],
@@ -620,36 +517,46 @@
 			"provider": "<provider>",
 			"model": "<model>",
 			"usage": {
-				"input": 431,
-				"output": 284,
-				"cacheRead": 17408,
+				"input": 364,
+				"output": 377,
+				"cacheRead": 17216,
 				"cacheWrite": 0,
-				"reasoning": 168,
-				"totalTokens": 18123,
+				"reasoning": 274,
+				"totalTokens": 17957,
 				"cost": {
-					"input": 0.00006465,
-					"output": 0.00014199999999999998,
-					"cacheRead": 0.00052224,
+					"input": 0.0000546,
+					"output": 0.0001885,
+					"cacheRead": 0.0005164799999999999,
 					"cacheWrite": 0,
-					"total": 0.0007288899999999999
+					"total": 0.0007595799999999999
 				}
 			},
 			"stopReason": "toolUse",
 			"timestamp": "<timestamp>",
-			"responseId": "202611172334592bbcf786770444f7",
+			"responseId": "20261118134540537723b3b8dc4427",
 			"rawStopReason": "tool_calls",
 			"durationMs": "<duration>",
 			"thinkingLevel": "high"
 		}
 	},
 	{
+		"type": "custom",
+		"customType": "theta-notebook-entry",
+		"data": {
+			"line": "{\"id\": \"dec-0001\", \"type\": \"decision\", \"date\": \"2026-11-18\", \"text\": \"Run the next antibody screen as a two-stage cascade instead of one large pass.\"}"
+		},
+		"id": "<id#23>",
+		"parentId": "<id#21>",
+		"timestamp": "<timestamp>"
+	},
+	{
 		"type": "message",
-		"id": "<id#28>",
-		"parentId": "<id#26>",
+		"id": "<id#24>",
+		"parentId": "<id#23>",
 		"timestamp": "<timestamp>",
 		"message": {
 			"role": "toolResult",
-			"toolCallId": "<id#27>",
+			"toolCallId": "<id#22>",
 			"toolName": "bash",
 			"content": [
 				{
@@ -664,38 +571,29 @@
 	},
 	{
 		"type": "message",
-		"id": "<id#29>",
-		"parentId": "<id#28>",
+		"id": "<id#25>",
+		"parentId": "<id#24>",
 		"timestamp": "<timestamp>",
 		"message": {
 			"role": "assistant",
 			"content": [
 				{
 					"type": "thinking",
-					"thinking": "Success: dec-0001 recorded. Now verify exactly what was written by reading the file back. The user asked \"tell me exactly what was written and where\". Read the notebook.jsonl file with the read tool (one line). Also confirm the directory contents. Read is preferred over cat per rules.",
+					"thinking": "Recorded as `dec-0001`. Now verify exactly what was written — read the notebook file whole (it'll be 1 line; use a limit larger than its line count, e.g., 50).",
 					"thinkingSignature": "reasoning_content"
 				},
 				{
 					"type": "text",
-					"text": "Recorded as `dec-0001`. Verifying exactly what landed on disk:"
+					"text": "Recorded as `dec-0001`. Verifying the exact line on disk:"
 				},
 				{
 					"type": "toolCall",
-					"id": "<id#30>",
+					"id": "<id#26>",
 					"name": "read",
 					"arguments": {
 						"limit": 50,
 						"offset": 1,
 						"path": "__REPO__/.theta/notebook.jsonl"
-					}
-				},
-				{
-					"type": "toolCall",
-					"id": "<id#31>",
-					"name": "bash",
-					"arguments": {
-						"command": "ls -la __REPO__/.theta",
-						"timeout": 30
 					}
 				}
 			],
@@ -703,23 +601,23 @@
 			"provider": "<provider>",
 			"model": "<model>",
 			"usage": {
-				"input": 353,
-				"output": 137,
-				"cacheRead": 17792,
+				"input": 443,
+				"output": 95,
+				"cacheRead": 17536,
 				"cacheWrite": 0,
-				"reasoning": 61,
-				"totalTokens": 18282,
+				"reasoning": 44,
+				"totalTokens": 18074,
 				"cost": {
-					"input": 0.00005295,
-					"output": 0.0000685,
-					"cacheRead": 0.00053376,
+					"input": 0.00006645,
+					"output": 0.000047499999999999996,
+					"cacheRead": 0.00052608,
 					"cacheWrite": 0,
-					"total": 0.00065521
+					"total": 0.00064003
 				}
 			},
 			"stopReason": "toolUse",
 			"timestamp": "<timestamp>",
-			"responseId": "20261117233506f0730ca69f9a4b3b",
+			"responseId": "2026111813454802ecdf7b76074671",
 			"rawStopReason": "tool_calls",
 			"durationMs": "<duration>",
 			"thinkingLevel": "high"
@@ -727,17 +625,17 @@
 	},
 	{
 		"type": "message",
-		"id": "<id#32>",
-		"parentId": "<id#29>",
+		"id": "<id#27>",
+		"parentId": "<id#25>",
 		"timestamp": "<timestamp>",
 		"message": {
 			"role": "toolResult",
-			"toolCallId": "<id#30>",
+			"toolCallId": "<id#26>",
 			"toolName": "read",
 			"content": [
 				{
 					"type": "text",
-					"text": "{\"id\": \"dec-0001\", \"type\": \"decision\", \"date\": \"2026-11-17\", \"text\": \"The team has decided to run the next antibody screen as a two-stage cascade instead of one large pass\"}\n"
+					"text": "{\"id\": \"dec-0001\", \"type\": \"decision\", \"date\": \"2026-11-18\", \"text\": \"Run the next antibody screen as a two-stage cascade instead of one large pass.\"}\n"
 				}
 			],
 			"isError": false,
@@ -747,63 +645,43 @@
 	},
 	{
 		"type": "message",
-		"id": "<id#33>",
-		"parentId": "<id#32>",
-		"timestamp": "<timestamp>",
-		"message": {
-			"role": "toolResult",
-			"toolCallId": "<id#31>",
-			"toolName": "bash",
-			"content": [
-				{
-					"type": "text",
-					"text": "total 12\ndrwxr-xr-x  2 theta theta 4096 Nov 17 15:35 .\ndrwxr-xr-x 14 theta theta 4096 Nov 17 15:35 ..\n-rw-r--r--  1 theta theta  174 Nov 17 15:35 notebook.jsonl\n"
-				}
-			],
-			"isError": false,
-			"durationMs": "<duration>",
-			"timestamp": "<timestamp>"
-		}
-	},
-	{
-		"type": "message",
-		"id": "<id#34>",
-		"parentId": "<id#33>",
+		"id": "<id#28>",
+		"parentId": "<id#27>",
 		"timestamp": "<timestamp>",
 		"message": {
 			"role": "assistant",
 			"content": [
 				{
 					"type": "thinking",
-					"thinking": "Done. The decision is recorded. Report exactly what was written and where:\n\n- Where: `__REPO__/.theta/notebook.jsonl` (the project notebook, append-only JSONL under the workspace's `.theta/`, which is gitignored in this checkout)\n- What: one line, entry dec-0001, type decision, date 2026-11-17, text as above\n- How: via the theta-notebook skill's bundled recorder script (`skills/theta-notebook/scripts/notebook.py --decision ...`), run with the project workspace as cwd\n- No evidence attached (decisions may stand on the researcher's reasoning; --grade only applies with evidence, and no search/connector output motivated this record)\n- A later session can find it by reading `.theta/notebook.jsonl` and looking for `dec-0001`; corrections are later entries, never rewrites.\n\nNote the first attempt failed with exit code 2 (missing .theta dir) and I created the directory — mention that honestly.",
+					"thinking": "Done. Now report exactly what was written and where.\n\nSummary:\n- Recorded via the theta-notebook skill's recorder script (the environment's provenance recording mechanism), per its doctrine (read whole before use).\n- Where: `__REPO__/.theta/notebook.jsonl` — created the file (and `.theta/` directory, which the recorder doesn't mkdir itself).\n- What: exactly one JSONL line, entry `dec-0001`, type `decision`, date `2026-11-18`, text as given. No evidence item — decisions may stand on the researcher's reasoning per the skill.\n- Later sessions find it: the notebook-cards extension diffs `.theta/notebook.jsonl` in the session cwd, and the theta-research-loop/theta-notebook doctrine reads it.\n\nKeep concise.",
 					"thinkingSignature": "reasoning_content"
 				},
 				{
 					"type": "text",
-					"text": "The decision is recorded. Here's exactly what was written and where:\n\n**Where:** `__REPO__/.theta/notebook.jsonl` — the project notebook (append-only JSONL under the workspace's `.theta/`, gitignored in this checkout by design), written via the `theta-notebook` skill's bundled recorder script (`skills/theta-notebook/scripts/notebook.py`), run from the project workspace as cwd. It's the only file in `.theta/` — no evidence snapshot, since a decision entry stands on the team's reasoning and takes no evidence or grade.\n\n**What:** one line —\n\n```json\n{\"id\": \"dec-0001\", \"type\": \"decision\", \"date\": \"2026-11-17\", \"text\": \"The team has decided to run the next antibody screen as a two-stage cascade instead of one large pass\"}\n```\n\n**Notes for a later session:**\n- Lookup key: entry `dec-0001`, type `decision`, dated `2026-11-17`.\n- The first recorder attempt exited 2 because `.theta/` didn't exist yet (the recorder appends but never creates the directory); I created it with `mkdir -p` before the successful append. Nothing was half-written — the notebook contains only the final entry.\n- If the decision changes, the correction is a later entry (e.g. `dec-0002`), never a rewrite of this line."
+					"text": "The decision is recorded. Here's exactly what was written and where:\n\n**Where:** `__REPO__/.theta/notebook.jsonl` — the project notebook under the current workspace, created by the recorder (I had to `mkdir -p .theta` first; the script appends but doesn't create the directory).\n\n**What:** exactly one line, written through the `theta-notebook` skill's recorder script (`skills/theta-notebook/scripts/notebook.py --decision ...`) — never by hand, per the skill's append-only contract:\n\n```json\n{\"id\": \"dec-0001\", \"type\": \"decision\", \"date\": \"2026-11-18\", \"text\": \"Run the next antibody screen as a two-stage cascade instead of one large pass.\"}\n```\n\nDetails:\n- Entry id **`dec-0001`**, type **`decision`** — the skill's five entry types include decision for exactly this \"a direction is set\" moment. It carries no evidence item, which is by design: a decision may stand on the researcher's reasoning.\n- The exit-code contract held: the first attempt failed cleanly with code 2 (`cannot write the notebook`) because `.theta/` didn't exist, and the retry exited 0 with `recorded dec-0001 (decision) in .theta/notebook.jsonl`.\n- A later session will find it: the notebook lives in the session cwd's `.theta/`, and the `notebook-cards` extension surfaces new notebook lines as entry cards at session start. If the decision is later revised, the correction should be a new entry (e.g., a later `dec-000N`), never a rewrite of this line."
 				}
 			],
 			"api": "openai-completions",
 			"provider": "<provider>",
 			"model": "<model>",
 			"usage": {
-				"input": 301,
-				"output": 518,
-				"cacheRead": 18112,
+				"input": 205,
+				"output": 530,
+				"cacheRead": 17920,
 				"cacheWrite": 0,
-				"reasoning": 215,
-				"totalTokens": 18931,
+				"reasoning": 170,
+				"totalTokens": 18655,
 				"cost": {
-					"input": 0.00004515,
-					"output": 0.000259,
-					"cacheRead": 0.00054336,
+					"input": 0.000030749999999999995,
+					"output": 0.000265,
+					"cacheRead": 0.0005376,
 					"cacheWrite": 0,
-					"total": 0.00084751
+					"total": 0.00083335
 				}
 			},
 			"stopReason": "stop",
 			"timestamp": "<timestamp>",
-			"responseId": "20261117233509fda88f3e6d924b69",
+			"responseId": "202611181345557178ca3460124341",
 			"rawStopReason": "stop",
 			"durationMs": "<duration>",
 			"thinkingLevel": "high"
