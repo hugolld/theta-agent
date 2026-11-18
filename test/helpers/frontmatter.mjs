@@ -15,7 +15,7 @@ const FRONTMATTER_FENCE = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/;
 
 export function parseFrontmatter(markdown) {
 	const match = FRONTMATTER_FENCE.exec(markdown);
-	if (!match) throw new Error("SKILL.md has no frontmatter block");
+	if (!match) throw new Error("no frontmatter block");
 	return parseYaml(match[1]);
 }
 
