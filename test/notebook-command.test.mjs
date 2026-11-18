@@ -4,6 +4,7 @@ import path from "node:path";
 import { test } from "node:test";
 import { createJiti } from "jiti";
 import { tempDir } from "./helpers/temp-dir.mjs";
+import { recordedNotify } from "./helpers/recorded-notify.mjs";
 import {
 	cnfLine,
 	decLine,
@@ -38,12 +39,6 @@ function tempProject(t) {
 }
 
 const notebookFile = (project) => path.join(project, ".theta", "notebook.jsonl");
-
-function makeNotify() {
-	const calls = [];
-	const notify = (message, level) => calls.push({ message, level });
-	return { calls, notify };
-}
 
 // --- the table --------------------------------------------------------------
 
@@ -128,7 +123,7 @@ test("a session outside a research project reads absence, not error", (t) => {
 
 test("no notebook notifies the absence once, info, never an error", (t) => {
 	const project = tempProject(t);
-	const { calls, notify } = makeNotify();
+	const { calls, notify } = recordedNotify();
 	createNotebookCommand(notify)(project);
 	assert.deepEqual(calls, [{ message: NO_NOTEBOOK_MESSAGE, level: "info" }]);
 });
@@ -139,7 +134,7 @@ test("the table rides one notify — consecutive info notifies replace the statu
 	// would collapse to its last line. The whole table rides one message.
 	const project = tempProject(t);
 	writeNotebook(project, [hypLine, obsLine, mthJobLine, decLine, cnfLine]);
-	const { calls, notify } = makeNotify();
+	const { calls, notify } = recordedNotify();
 	createNotebookCommand(notify)(project);
 	const table = notebookTable(readNotebookEntries(project));
 	assert.deepEqual(calls, [{ message: table.join("\n"), level: "info" }]);
@@ -155,7 +150,7 @@ test("the registered command wires cwd and notify only — a stub context with n
 	assert.equal(registered.length, 1);
 	assert.equal(registered[0].name, "notebook");
 	assert.equal(registered[0].options.description, "Show the project notebook: entries, grades, dates");
-	const { calls, notify } = makeNotify();
+	const { calls, notify } = recordedNotify();
 	// The only UI method this context offers is notify — a dialog call
 	// would throw against the stub, the degradation pin.
 	const ctx = { cwd: project, ui: { notify } };

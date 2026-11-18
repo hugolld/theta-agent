@@ -98,21 +98,15 @@ export function notebookTable(entries: NotebookEntry[]): string[] {
 /** The handler's notify channel — the only UI surface the command touches. */
 export type CommandNotify = (message: string, level: "info" | "warning" | "error") => void;
 
-/** The whole-notebook read — the cards extension's helper by default, injectable in tests. */
-export type CommandReader = (cwd: string) => NotebookEntry[] | undefined;
-
 /**
- * The command's core, notify and reader injected: reads the notebook and
- * renders it, or notifies the absence. Total by construction — the
- * reader returns undefined on any read failure, and the mapping is pure —
- * so a deliberate invocation never throws.
+ * The command's core, notify injected: reads the notebook and renders it,
+ * or notifies the absence. Total by construction — the reader returns
+ * undefined on any read failure, and the mapping is pure — so a
+ * deliberate invocation never throws.
  */
-export function createNotebookCommand(
-	notify: CommandNotify,
-	reader: CommandReader = readNotebookEntries,
-): (cwd: string) => void {
+export function createNotebookCommand(notify: CommandNotify): (cwd: string) => void {
 	return (cwd) => {
-		const entries = reader(cwd);
+		const entries = readNotebookEntries(cwd);
 		if (entries === undefined) {
 			notify(NO_NOTEBOOK_MESSAGE, "info");
 			return;

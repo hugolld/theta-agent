@@ -4,6 +4,7 @@ import path from "node:path";
 import { test } from "node:test";
 import { createJiti } from "jiti";
 import { tempDir } from "./helpers/temp-dir.mjs";
+import { recordedNotify } from "./helpers/recorded-notify.mjs";
 
 // The skill pool loader (spec #160, ADR 0008): the extension that loads the
 // vendored domain packs per research project. The test drives the real
@@ -87,8 +88,8 @@ const stateFor = (packs, classAllow = ["local"]) => ({
 });
 
 function notifyStub(cwd) {
-	const calls = [];
-	return { cwd, calls, ui: { notify: (message, level) => calls.push([message, level]) } };
+	const { calls, notify } = recordedNotify();
+	return { cwd, calls, ui: { notify } };
 }
 
 // The gate's own context stub: cwd + ui + a modelRegistry carrying the
@@ -177,8 +178,8 @@ async function assertSkippedAndNamed(cwd, missPattern) {
 	assert.equal(seam.calls.length, 0, "a material miss must not call the classifier");
 	const ctx = notifyStub(cwd);
 	await runSkillsCommand("", ctx);
-	assert.match(ctx.calls[0][0], /gate: not yet run/);
-	assert.match(ctx.calls[0][0], missPattern);
+	assert.match(ctx.calls[0].message, /gate: not yet run/);
+	assert.match(ctx.calls[0].message, missPattern);
 }
 
 // The failed-write scaffold the two gate write-failure tests share (the
@@ -193,8 +194,8 @@ async function assertFailedGateWrite(cwd, trigger, level) {
 	try {
 		const calls = await trigger();
 		assert.equal(calls.length, 1, "one notify — a failed write must not be followed by the success line");
-		assert.equal(calls[0][1], level);
-		assert.match(calls[0][0], /could not write/);
+		assert.equal(calls[0].level, level);
+		assert.match(calls[0].message, /could not write/);
 		assert.equal(fs.readFileSync(file, "utf8"), before, "the old state survives");
 		assert.equal(fs.existsSync(`${file}.tmp`), false, "no temp survivor");
 	} finally {
@@ -435,7 +436,7 @@ test("bare status prints the table, the class mix, and the zero-state hint", asy
 	const ctx = notifyStub(cwd);
 	await runSkillsCommand("", ctx);
 	assert.equal(ctx.calls.length, 1);
-	const [message, level] = ctx.calls[0];
+	const { message, level } = ctx.calls[0];
 	assert.equal(level, "info");
 	assert.match(message, /skill pool — /);
 	for (const pack of ["bioinformatics", "cheminformatics", "protein-engineering"]) {
@@ -451,9 +452,9 @@ test("an absent pool answers no-pool for status and toggle alike", async (t) => 
 	const cwd = tempDir(t, "pool-cwd-");
 	const ctx = notifyStub(cwd);
 	await runSkillsCommand("", ctx);
-	assert.match(ctx.calls[0][0], /no pool in this install/);
+	assert.match(ctx.calls[0].message, /no pool in this install/);
 	await runSkillsCommand("on bioinformatics", ctx);
-	assert.match(ctx.calls.at(-1)[0], /no pool in this install/);
+	assert.match(ctx.calls.at(-1).message, /no pool in this install/);
 	assert.equal(fs.existsSync(path.join(cwd, STATE_DIR)), false);
 });
 
@@ -477,8 +478,8 @@ test("on toggles a pack, appends history, writes atomically, and says /reload", 
 		false,
 		"no temp file may survive the rename",
 	);
-	assert.equal(ctx.calls[0][1], "info");
-	assert.match(ctx.calls[0][0], /\/reload/);
+	assert.equal(ctx.calls[0].level, "info");
+	assert.match(ctx.calls[0].message, /\/reload/);
 });
 
 test("off appends its decision to the same pack's history", async (t) => {
@@ -493,7 +494,7 @@ test("off appends its decision to the same pack's history", async (t) => {
 		state.packs.bioinformatics.history.map((entry) => entry.decision),
 		["on", "off"],
 	);
-	assert.match(ctx.calls[0][0], /\/reload/);
+	assert.match(ctx.calls[0].message, /\/reload/);
 });
 
 test("an unknown pack refuses with the valid pack list and writes nothing", async (t) => {
@@ -501,10 +502,10 @@ test("an unknown pack refuses with the valid pack list and writes nothing", asyn
 	const cwd = tempDir(t, "pool-cwd-");
 	const ctx = notifyStub(cwd);
 	await runSkillsCommand("on ghost-pack", ctx);
-	assert.equal(ctx.calls[0][1], "error");
-	assert.match(ctx.calls[0][0], /unknown pack "ghost-pack"/);
+	assert.equal(ctx.calls[0].level, "error");
+	assert.match(ctx.calls[0].message, /unknown pack "ghost-pack"/);
 	for (const pack of ["bioinformatics", "cheminformatics", "protein-engineering"]) {
-		assert.ok(ctx.calls[0][0].includes(pack), `valid packs must be named: ${pack}`);
+		assert.ok(ctx.calls[0].message.includes(pack), `valid packs must be named: ${pack}`);
 	}
 	assert.equal(fs.existsSync(path.join(cwd, STATE_DIR)), false);
 });
@@ -518,8 +519,8 @@ test("a broken state file refuses the toggle instead of overwriting it", async (
 	const before = fs.readFileSync(file, "utf8");
 	const ctx = notifyStub(cwd);
 	await runSkillsCommand("on bioinformatics", ctx);
-	assert.equal(ctx.calls[0][1], "error");
-	assert.match(ctx.calls[0][0], /broken/);
+	assert.equal(ctx.calls[0].level, "error");
+	assert.match(ctx.calls[0].message, /broken/);
 	assert.equal(fs.readFileSync(file, "utf8"), before, "the broken file must survive untouched");
 });
 
@@ -533,8 +534,8 @@ test("a failed state write is reported, never thrown, and the old state survives
 	try {
 		const ctx = notifyStub(cwd);
 		await runSkillsCommand("off bioinformatics", ctx);
-		assert.equal(ctx.calls[0][1], "error");
-		assert.match(ctx.calls[0][0], /could not write/);
+		assert.equal(ctx.calls[0].level, "error");
+		assert.match(ctx.calls[0].message, /could not write/);
 		assert.equal(fs.readFileSync(file, "utf8"), before);
 	} finally {
 		fs.chmodSync(path.join(cwd, STATE_DIR), 0o700);
@@ -562,10 +563,10 @@ test("malformed invocations answer the usage line", async (t) => {
 	const cwd = tempDir(t, "pool-cwd-");
 	const ctx = notifyStub(cwd);
 	await runSkillsCommand("frobnicate", ctx);
-	assert.equal(ctx.calls[0][1], "error");
-	assert.match(ctx.calls[0][0], /usage/);
+	assert.equal(ctx.calls[0].level, "error");
+	assert.match(ctx.calls[0].message, /usage/);
 	await runSkillsCommand("on", ctx);
-	assert.equal(ctx.calls[1][1], "error");
+	assert.equal(ctx.calls[1].level, "error");
 });
 
 test("THETA_POOL names the pool root", async (t) => {
@@ -630,9 +631,9 @@ test("keyed start with material fires once, records, and widens", async (t) => {
 	// The success notify — the auto fire's one user-facing line, pinned:
 	// the new classAllow, the record's home, info level.
 	assert.equal(stub.calls.length, 1);
-	assert.equal(stub.calls[0][1], "info");
-	assert.match(stub.calls[0][0], /gate: classAllow is now local, key/);
-	assert.match(stub.calls[0][0], /the record is in \.theta\/skills\.json/);
+	assert.equal(stub.calls[0].level, "info");
+	assert.match(stub.calls[0].message, /gate: classAllow is now local, key/);
+	assert.match(stub.calls[0].message, /the record is in \.theta\/skills\.json/);
 	// The call's state: the notebook's capped entries plus the enabled packs.
 	const state = seam.calls[0].state;
 	assert.ok(Array.isArray(state.notebook));
@@ -726,7 +727,7 @@ test("an absent or empty notebook skips the fire, named in the status block", as
 	writeNotebook(cwd, []);
 	const ctx2 = notifyStub(cwd);
 	await runSkillsCommand("", ctx2);
-	assert.match(ctx2.calls[0][0], /no notebook entries/);
+	assert.match(ctx2.calls[0].message, /no notebook entries/);
 });
 
 test("zero packs enabled skips the fire — the status block names it", async (t) => {
@@ -744,8 +745,8 @@ test("a transport error widens nothing, records nothing, and retries next start"
 	await autoFireGate({ type: "session_start", reason: "startup" }, stub, seam);
 	assert.equal(seam.calls.length, 1, "the call was attempted");
 	assert.equal(stub.calls.length, 1, "one notify names the failure");
-	assert.equal(stub.calls[0][1], "warning");
-	assert.match(stub.calls[0][0], /did not run/);
+	assert.equal(stub.calls[0].level, "warning");
+	assert.match(stub.calls[0].message, /did not run/);
 	const read = readSkillsState(cwd);
 	assert.equal(read.state.gate, undefined, "no record lands on failure");
 	assert.deepEqual(read.state.classAllow, ["local"], "nothing widens");
@@ -763,7 +764,7 @@ test("a stopReason error answer widens nothing and retries next start", async (t
 	await autoFireGate({ type: "session_start", reason: "startup" }, stub, seam);
 	assert.equal(seam.calls.length, 1);
 	assert.equal(stub.calls.length, 1);
-	assert.match(stub.calls[0][0], /stopReason error/);
+	assert.match(stub.calls[0].message, /stopReason error/);
 	const read = readSkillsState(cwd);
 	assert.equal(read.state.gate, undefined);
 	assert.deepEqual(read.state.classAllow, ["local"]);
@@ -839,8 +840,8 @@ test("session_start never throws — the never-throw floor owns the hook", async
 	};
 	const stub3 = gateStub(cwd, seam3);
 	await autoFireGate({ type: "session_start", reason: "startup" }, stub3, seam3);
-	assert.equal(stub3.calls[0][1], "warning");
-	assert.match(stub3.calls[0][0], /did not run/);
+	assert.equal(stub3.calls[0].level, "warning");
+	assert.match(stub3.calls[0].message, /did not run/);
 	assert.equal(readSkillsState(cwd).state.gate, undefined, "nothing lands through the floor");
 });
 
@@ -876,7 +877,7 @@ test("explicit gate re-runs at the auto ceiling: one call, need-key only", async
 	assert.deepEqual(Object.keys(seam.calls[0].questions), ["need-key"], "the auto ceiling asks need-key only");
 	const read = readSkillsState(cwd);
 	assert.deepEqual(read.state.gate.decision, ["local", "key"]);
-	assert.match(ctx.calls[0][0], /run \/reload/);
+	assert.match(ctx.calls[0].message, /run \/reload/);
 });
 
 test("gate cloud runs the full ceiling: one call, two questions", async (t) => {
@@ -928,8 +929,8 @@ test("an explicit gate failure records nothing and answers an error", async (t) 
 	const seam = makeSeam({ throwAtCall: new TypeError("fetch failed") });
 	const ctx = gateStub(cwd, seam);
 	await runSkillsCommand("gate", ctx);
-	assert.equal(ctx.calls[0][1], "error");
-	assert.match(ctx.calls[0][0], /did not run/);
+	assert.equal(ctx.calls[0].level, "error");
+	assert.match(ctx.calls[0].message, /did not run/);
 	const read = readSkillsState(cwd);
 	assert.equal(read.state.gate, undefined);
 	assert.deepEqual(read.state.classAllow, ["local"]);
@@ -944,8 +945,8 @@ test("the explicit gate refuses a broken state instead of overwriting it", async
 	const ctx = gateStub(cwd, seam);
 	await runSkillsCommand("gate", ctx);
 	assert.equal(seam.calls.length, 0, "no call on a broken state");
-	assert.equal(ctx.calls[0][1], "error");
-	assert.match(ctx.calls[0][0], /broken/);
+	assert.equal(ctx.calls[0].level, "error");
+	assert.match(ctx.calls[0].message, /broken/);
 });
 
 test("a failed explicit-gate write answers an error and never says success", async (t) => {
@@ -1007,7 +1008,7 @@ test("the status block carries the gate record line", async (t) => {
 	});
 	const ctx = notifyStub(cwd);
 	await runSkillsCommand("", ctx);
-	assert.match(ctx.calls[0][0], /gate: classify:jev → local, key at 2026-11-16T01:02:03\.000Z/);
+	assert.match(ctx.calls[0].message, /gate: classify:jev → local, key at 2026-11-16T01:02:03\.000Z/);
 });
 
 test("skip reasons name each miss in order", () => {
