@@ -293,3 +293,55 @@ test("gateRefusal reds on a flat gateway error without the gate's wording", () =
 		/no refused gateway call submit_job/,
 	);
 });
+
+// --- notebookCards: the card extension's custom entries (spec #178) ---------
+
+const CARD_TYPE = "theta-notebook-entry";
+const decisionLine = JSON.stringify({
+	id: "dec-0001",
+	type: "decision",
+	date: "2026-11-18",
+	text: "Run the antibody screen as a two-stage cascade",
+});
+const cardEntry = (line) => ({ type: "custom", customType: CARD_TYPE, data: { line } });
+
+test("notebookCards passes when the recording carries the card custom entries", () => {
+	// Cards land mid-session, before the final assistant text — the extra
+	// slot is exactly that position.
+	assertShape(
+		baseEntries("demo", "skills/demo/SKILL.md", [cardEntry(decisionLine)]),
+		{ ...baseShape, notebookCards: true },
+	);
+});
+
+test("notebookCards reds when the extension never fired", () => {
+	assert.throws(() => assertShape(baseEntries(), { ...baseShape, notebookCards: true }), /never fired/);
+});
+
+test("notebookCards reds when a card's line is not a typed, dated provenance entry", () => {
+	assert.throws(
+		() => assertShape([...baseEntries(), cardEntry("{not json")], { ...baseShape, notebookCards: true }),
+		/not a typed, dated provenance entry/,
+	);
+	assert.throws(
+		() =>
+			assertShape([...baseEntries(), cardEntry(JSON.stringify({ id: "x-1", type: "guess", date: "2026-11-18", text: "t" }))], {
+				...baseShape,
+				notebookCards: true,
+			}),
+		/not a typed, dated provenance entry/,
+	);
+});
+
+test("notebookCards ignores other extensions' custom entries", () => {
+	// A custom entry of another type is not the card extension's — its
+	// malformed line must not fail the card assertion.
+	assert.throws(
+		() =>
+			assertShape([...baseEntries(), { type: "custom", customType: "other", data: { line: "{bad" } }], {
+				...baseShape,
+				notebookCards: true,
+			}),
+		/never fired/,
+	);
+});

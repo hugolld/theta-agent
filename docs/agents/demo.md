@@ -30,7 +30,7 @@ note (D1–D6); this doc is the repo's build and runbook surface.
 
 | # | Item | Mechanism | Status |
 |---|---|---|---|
-| B1 | Notebook entry cards — each provenance entry renders as a card in the transcript, badged with the evidence grades of the evidence items it stands on (asserted / cross-checked / re-executed) | recorder hook → `pi.appendEntry()` + `pi.registerEntryRenderer()`; card data is durable, excluded from model context | planned |
+| B1 | Notebook entry cards — each provenance entry renders as a card in the transcript, badged with the evidence grades of the evidence items it stands on (asserted / cross-checked / re-executed) | recorder hook → `pi.appendEntry()` + `pi.registerEntryRenderer()`; card data is durable, excluded from model context | shipped |
 | B2 | `/notebook` command — render the project notebook on demand: entries table, evidence grades, dates | `pi.registerCommand()` reading `.theta/notebook.jsonl`; notify output only — no blocking dialogs — so the command degrades cleanly outside interactive mode | planned |
 | B3 | Demo prompt templates — scripted, repeatable runs (a pharmacology question, the benchmark suite's `lit-triage` shape) | prompt templates shipped with the package; `/demo-lit-triage` | planned |
 | B4 | `/roadmap` command — the future-plans card: M7b web workbench, cloud deployment study, M8 packaging | `pi.registerCommand()` + TUI boxes | planned |

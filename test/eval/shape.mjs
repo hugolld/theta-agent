@@ -38,9 +38,17 @@ import { collectNestedCalls, contentText } from "../../scripts/audit-dogfood.mjs
 // consumes it through jiti, the loader pi runs extensions with (the
 // submit-gate suite's pattern). A prefix change still moves the
 // extensions surface digest and every fixture recaptures.
-const { GATEWAY_PREFIX } = await createJiti(import.meta.url).import(
-	"../../extensions/submit-gate.ts",
-);
+//
+// The card assertion (spec #178) jiti-loads the same way: the custom
+// entry type and the provenance-entry validator both come from
+// extensions/notebook-cards.ts, so the net and the extension speak one
+// grammar — a validator drift moves the extensions digest and recaptures,
+// never splits.
+const jiti = createJiti(import.meta.url);
+const [{ GATEWAY_PREFIX }, { ENTRY_CUSTOM_TYPE, parseProvenanceEntry }] = await Promise.all([
+	jiti.import("../../extensions/submit-gate.ts"),
+	jiti.import("../../extensions/notebook-cards.ts"),
+]);
 
 // Index a session's tool calls and results once for the shape checks: the
 // call map is keyed by tool-call id, the result map by the toolCallId the
@@ -137,6 +145,29 @@ export function assertShape(entries, shape) {
 			flat || nested,
 			`no refused gateway call ${shape.gateRefusal} in the recording`,
 		);
+	}
+
+	if (shape.notebookCards === true) {
+		// The card extension's structural footprint (spec #178): the
+		// session's own custom entries — appended in every mode, print
+		// included, so the transcript is the evidence even where no card
+		// can draw. Each card's line must parse as a typed, dated
+		// provenance entry: the validator is the extension's own (one
+		// grammar, jiti-loaded above).
+		const cards = entries.filter(
+			(entry) => entry?.type === "custom" && entry.customType === ENTRY_CUSTOM_TYPE,
+		);
+		assert.ok(
+			cards.length > 0,
+			`no ${ENTRY_CUSTOM_TYPE} custom entries in the recording — the card extension never fired`,
+		);
+		for (const card of cards) {
+			const line = card?.data?.line;
+			assert.ok(
+				typeof line === "string" && parseProvenanceEntry(line) !== undefined,
+				`a ${ENTRY_CUSTOM_TYPE} custom entry carries a line that is not a typed, dated provenance entry`,
+			);
+		}
 	}
 
 	const last = entries.at(-1);

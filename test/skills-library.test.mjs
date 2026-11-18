@@ -609,6 +609,10 @@ const scanSurfaces = [
 	// (skill pool, domain pack) — the status table, the toggle replies, and
 	// the diagnosis block.
 	"extensions/skill-pool.ts",
+	// extensions/notebook-cards.ts carries the notebook headwords' working
+	// vocabulary (provenance entry, evidence grade) — the card's field
+	// mapping and its rendered lines (spec #178).
+	"extensions/notebook-cards.ts",
 	"test/manifest.test.mjs",
 	"test/skills-library.test.mjs",
 ];

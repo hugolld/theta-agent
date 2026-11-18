@@ -122,6 +122,12 @@ export const SCENARIOS = Object.freeze([
 			advertisesSkill: "theta-notebook",
 			opensSkill: "skills/theta-notebook/SKILL.md",
 			runsScript: "skills/theta-notebook/scripts/notebook.py",
+			// The card extension's footprint (spec #178): the recorder ran
+			// (runsScript above) and the recording carries the
+			// theta-notebook-entry custom entries the diff hook appended as
+			// the recorder wrote — print mode cannot draw cards, so the
+			// custom entries are the rig-side evidence.
+			notebookCards: true,
 		},
 	},
 	{
