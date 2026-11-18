@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { createJiti } from "jiti";
+import { tempDir } from "./helpers/temp-dir.mjs";
 
 // The notebook entry cards (spec #178): the diff hook and the renderer
 // mapping, loaded through jiti — the loader pi runs extensions with — and
@@ -96,9 +96,7 @@ const cnfLine = JSON.stringify({
 // --- the harness ------------------------------------------------------------
 
 function tempProject(t) {
-	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "notebook-cards-"));
-	t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
-	return dir;
+	return tempDir(t, "notebook-cards-");
 }
 
 function writeNotebook(project, lines) {
@@ -258,6 +256,19 @@ test("the reload re-arm fences lines that landed while the extension was away", 
 function expectCard(line) {
 	return { customType: ENTRY_CUSTOM_TYPE, data: { line } };
 }
+
+test("without a session_start, the first diff is its own backlog fence", (t) => {
+	// The floor for a host that never fired session_start: the first diff
+	// baselines from its own read, so the backlog never cards there either.
+	const project = tempProject(t);
+	const { appended, fire } = makeCards(project);
+	writeNotebook(project, [hypLine, decLine]);
+	fire();
+	assert.deepEqual(appended, []);
+	writeNotebook(project, [obsLine]);
+	fire();
+	assert.deepEqual(appended.map((a) => a.data.line), [obsLine]);
+});
 
 // --- parseProvenanceEntry: the typed, dated gate ----------------------------
 

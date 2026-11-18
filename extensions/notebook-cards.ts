@@ -109,6 +109,14 @@ function nonEmptyString(value: unknown): value is string {
 }
 
 /**
+ * One of the three evidence grades — the badge vocabulary, shared by the
+ * item's grade and the observation's own.
+ */
+function isGrade(value: unknown): value is EvidenceGrade {
+	return typeof value === "string" && (GRADES as readonly string[]).includes(value);
+}
+
+/**
  * One evidence item, validated to the fields the card reads: a non-empty
  * source, one of the three grades, a calendar-valid retrieval date, and —
  * when a link rides it — a hypothesis id shape. The item's deeper shape
@@ -120,9 +128,7 @@ function isEvidenceItem(value: unknown): value is EvidenceItem {
 	if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
 	const item = value as Record<string, unknown>;
 	if (!nonEmptyString(item.source)) return false;
-	if (typeof item.grade !== "string" || !(GRADES as readonly string[]).includes(item.grade)) {
-		return false;
-	}
+	if (!isGrade(item.grade)) return false;
 	if (typeof item.retrieved !== "string" || !isCalendarDate(item.retrieved)) return false;
 	if (item.supports !== undefined && !isHypRef(item.supports)) return false;
 	return true;
@@ -171,11 +177,7 @@ export function parseProvenanceEntry(line: string): NotebookEntry | undefined {
 	} else if (evidence !== undefined && !isEvidenceList(evidence)) {
 		return undefined;
 	}
-	if (entryType === "observation") {
-		if (typeof entry.grade !== "string" || !(GRADES as readonly string[]).includes(entry.grade)) {
-			return undefined;
-		}
-	}
+	if (entryType === "observation" && !isGrade(entry.grade)) return undefined;
 	if (entryType === "confidence" && !isHypRef(entry.hypothesis)) return undefined;
 	return { ...(entry as unknown as NotebookEntry) };
 }

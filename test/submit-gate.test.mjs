@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createJiti } from "jiti";
 import { escapeRegExp } from "./helpers/escape-regexp.mjs";
+import { tempDir } from "./helpers/temp-dir.mjs";
 import { GATEWAY_ANNOTATIONS } from "./fixtures/gateway/annotations.mjs";
 
 // The submit gate is the package's tool-call-pipeline permission extension
@@ -297,8 +297,7 @@ test("stacked confirms resolve to their own calls under interleaving", async () 
 });
 
 test("the default log sink appends beside the session transcript, and a missing session logs nowhere", async (t) => {
-	const sd = fs.mkdtempSync(path.join(os.tmpdir(), "gate-log-"));
-	t.after(() => fs.rmSync(sd, { recursive: true, force: true }));
+	const sd = tempDir(t, "gate-log-");
 	const sessionManager = { getSessionFile: () => path.join(sd, "session.jsonl") };
 	const gate = createSubmitGate({ getAllTools: () => TOOL_INFOS });
 	await gate(makeEvent(`${SERVER}submit_job`, { run_name: "r1" }), stubContext(true, sessionManager));
