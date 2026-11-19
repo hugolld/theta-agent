@@ -11,7 +11,7 @@ const manifest = JSON.parse(
 test("package.json carries the pi manifest", () => {
 	assert.equal(manifest.name, "theta-agent");
 	assert.ok(manifest.pi, "missing top-level pi manifest");
-	for (const key of ["extensions", "skills", "prompts"]) {
+	for (const key of ["extensions", "skills", "prompts", "themes"]) {
 		// pi's readPiManifest accepts only arrays of strings; a bare string
 		// field is silently dropped, so `pi -e <root>` would load nothing.
 		assert.ok(
@@ -42,10 +42,21 @@ test("package.json bin exposes the theta launcher", () => {
 });
 
 test("pi manifest targets exist on disk", async () => {
-	for (const dir of [manifest.pi.extensions, manifest.pi.skills, manifest.pi.prompts]) {
+	for (const dir of [manifest.pi.extensions, manifest.pi.skills, manifest.pi.prompts, manifest.pi.themes]) {
 		const dirStat = await stat(new URL(`../${dir}`, import.meta.url));
 		assert.ok(dirStat.isDirectory(), `${dir} is not a directory`);
 	}
+});
+
+test("the shipped theme rides the tarball with its pi manifest entry", () => {
+	// The theme is the one shipped resource whose only consumer is pi's
+	// theme registry: an entry missing from `files` ships no theme and
+	// fails nowhere — the session-start switch goes silent. The tarball
+	// list is the pin; `npm pack --dry-run` is the manual proof.
+	assert.ok(
+		manifest.files.includes("themes/"),
+		`files must carry themes/ (got ${JSON.stringify(manifest.files)})`,
+	);
 });
 
 // A pin names a concrete version: the @ suffix must start with a digit, so
