@@ -34,7 +34,7 @@ note (D1–D6); this doc is the repo's build and runbook surface.
 | B2 | `/notebook` command — render the project notebook on demand: entries table, evidence grades, dates | `pi.registerCommand()` reading `.theta/notebook.jsonl`; notify output only — no blocking dialogs — so the command degrades cleanly outside interactive mode | shipped |
 | B3 | Demo prompt templates — scripted, repeatable runs (a pharmacology question, the benchmark suite's `lit-triage` shape) | prompt templates shipped with the package; `/demo-lit-triage` | shipped |
 | B4 | `/roadmap` command — the future-plans card: M7b web workbench, cloud deployment study, M8 packaging | `pi.registerCommand()` + TUI boxes | shipped |
-| B5 | Theta theme — brand colors, status line | pi theme files | planned |
+| B5 | Theta theme — brand colors, status line: `themes/theta.json` (teal on pi's dark base, shipped through the pi manifest) brands the session at start — the switch fires only when the user set no theme preference — and `theta.ts` sets a persistent branded footer segment (`setStatus`) beside it | pi theme files + session-start switch | shipped |
 | B6 | This runbook + rehearsal | this doc; rig rehearsal before the date | planned |
 
 Mode constraint (binds B1, B2, B4, B5): extension UI is complete in

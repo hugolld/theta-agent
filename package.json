@@ -28,13 +28,15 @@
 		"extensions/",
 		"prompts/",
 		"skills/",
+		"themes/",
 		"README.md",
 		"LICENSE"
 	],
 	"pi": {
 		"extensions": ["./extensions"],
 		"skills": ["./skills"],
-		"prompts": ["./prompts"]
+		"prompts": ["./prompts"],
+		"themes": ["./themes"]
 	},
 	"scripts": {
 		"lint": "eslint .",
