@@ -25,16 +25,20 @@ export default function (pi: ExtensionAPI) {
 	// are additive dressing — no built-in surface is replaced. The switch
 	// fires only when the user set no theme preference (a saved choice or
 	// a --use-theme override both count — the effective settings carry
-	// either) and only where a TUI renders it; an explicit preference is
-	// respected, no setting is mutated (the switch is in-memory), and a
-	// failed switch stays silent — branding never announces itself, and
-	// the demo's visual capture is the proof the theme resolved.
+	// either) and only where a TUI renders it. It must not mutate
+	// settings: setTheme(name) persists the choice into the user's
+	// settings, so the switch loads the registered theme by name and
+	// applies the instance — render-only, marked "<in-memory>" (an
+	// unresolvable name yields undefined and the switch silently skips —
+	// branding never announces itself, and the demo's visual capture is
+	// the proof the theme resolved).
 	pi.on("session_start", (_event, ctx) => {
 		if (ctx.hasUI) {
 			ctx.ui.setStatus("theta", THETA_STATUS_LINE);
 		}
 		if (ctx.mode === "tui" && !pi.getSettings().theme) {
-			ctx.ui.setTheme(THETA_THEME_NAME);
+			const theme = ctx.ui.getTheme(THETA_THEME_NAME);
+			if (theme) ctx.ui.setTheme(theme);
 		}
 	});
 

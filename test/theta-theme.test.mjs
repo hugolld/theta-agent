@@ -206,8 +206,8 @@ function registeredSessionStart({ theme } = {}) {
 	return { handler: starts[0].handler, commands };
 }
 
-function stubCtx({ mode = "tui", setThemeResult = { success: true } } = {}) {
-	const calls = { setTheme: [], setStatus: [] };
+function stubCtx({ mode = "tui", themeFound = true } = {}) {
+	const calls = { getTheme: [], setTheme: [], setStatus: [] };
 	// pi's own docs prescribe guarding fire-and-forget methods (setStatus
 	// among them) on ctx.hasUI — false in print and JSON, where pi installs
 	// a no-op UI. The stub carries no ui surface at all for those modes, so
@@ -220,9 +220,16 @@ function stubCtx({ mode = "tui", setThemeResult = { success: true } } = {}) {
 	};
 	if (hasUI) {
 		ctx.ui = {
-			setTheme: (name) => {
-				calls.setTheme.push(name);
-				return setThemeResult;
+			// The switch's two-step: load the registered theme by name,
+			// apply the instance. setTheme(name) would persist the choice
+			// into the user's settings — the instance path is render-only.
+			getTheme: (name) => {
+				calls.getTheme.push(name);
+				return themeFound ? { marker: "the loaded theta theme instance" } : undefined;
+			},
+			setTheme: (theme) => {
+				calls.setTheme.push(theme);
+				return { success: true };
 			},
 			setStatus: (key, text) => calls.setStatus.push({ key, text }),
 		};
@@ -230,11 +237,15 @@ function stubCtx({ mode = "tui", setThemeResult = { success: true } } = {}) {
 	return { ctx, calls };
 }
 
-test("a TUI session with no theme preference is branded: the switch fires and the footer segment lands", async () => {
+test("a TUI session with no theme preference is branded: the render-only switch fires and the footer segment lands", async () => {
 	const { handler } = registeredSessionStart();
 	const { ctx, calls } = stubCtx({ mode: "tui" });
 	await handler({ type: "session_start", reason: "startup" }, ctx);
-	assert.deepEqual(calls.setTheme, ["theta"]);
+	// The two-step, in order: load by name, apply the loaded instance —
+	// never setTheme(name), which would write the user's settings.
+	assert.deepEqual(calls.getTheme, ["theta"]);
+	assert.equal(calls.setTheme.length, 1);
+	assert.deepEqual(calls.setTheme[0], { marker: "the loaded theta theme instance" });
 	assert.deepEqual(calls.setStatus, [{ key: "theta", text: THETA_STATUS_LINE }]);
 });
 
@@ -243,6 +254,7 @@ test("an explicit theme preference is respected — saved choice or light/dark p
 		const { handler } = registeredSessionStart({ theme });
 		const { ctx, calls } = stubCtx({ mode: "tui" });
 		await handler({ type: "session_start", reason: "startup" }, ctx);
+		assert.deepEqual(calls.getTheme, [], `a saved ${theme} preference must not be overridden`);
 		assert.deepEqual(calls.setTheme, [], `a saved ${theme} preference must not be overridden`);
 		// The footer segment is preference-independent dressing.
 		assert.deepEqual(calls.setStatus, [{ key: "theta", text: THETA_STATUS_LINE }], theme);
@@ -254,6 +266,7 @@ test("only the TUI switches themes — RPC forwards the status, print and JSON t
 	// RPC: hasUI true (the forwarded fire-and-forget), but no TUI to theme.
 	const rpc = stubCtx({ mode: "rpc" });
 	await handler({ type: "session_start", reason: "startup" }, rpc.ctx);
+	assert.deepEqual(rpc.calls.getTheme, []);
 	assert.deepEqual(rpc.calls.setTheme, []);
 	assert.deepEqual(rpc.calls.setStatus, [{ key: "theta", text: THETA_STATUS_LINE }]);
 	// print and json: no UI at all — an unguarded call throws against
@@ -261,18 +274,21 @@ test("only the TUI switches themes — RPC forwards the status, print and JSON t
 	for (const mode of ["print", "json"]) {
 		const headless = stubCtx({ mode });
 		await handler({ type: "session_start", reason: "startup" }, headless.ctx);
+		assert.deepEqual(headless.calls.getTheme, [], mode);
 		assert.deepEqual(headless.calls.setTheme, [], mode);
 		assert.deepEqual(headless.calls.setStatus, [], mode);
 	}
 });
 
-test("a failed switch stays silent — branding never announces itself, and never breaks the session", async () => {
+test("an unresolvable theme name skips the switch silently — branding never announces itself, never writes, never breaks the session", async () => {
 	const { handler } = registeredSessionStart();
-	const { ctx, calls } = stubCtx({ mode: "tui", setThemeResult: { success: false, error: "not found" } });
-	// A rejected or throwing handler would fail this test by itself; the
-	// recorded calls prove the session carried on past the failed switch.
+	const { ctx, calls } = stubCtx({ mode: "tui", themeFound: false });
+	// A throwing handler would fail this test by itself; the recorded
+	// calls prove the session carried on past the missing theme.
 	await handler({ type: "session_start", reason: "startup" }, ctx);
-	assert.deepEqual(calls.setTheme, ["theta"]);
+	assert.deepEqual(calls.getTheme, ["theta"]);
+	assert.deepEqual(calls.setTheme, []);
+	assert.deepEqual(calls.setStatus, [{ key: "theta", text: THETA_STATUS_LINE }]);
 });
 
 test("the /theta status command still registers beside the theme wiring", () => {
