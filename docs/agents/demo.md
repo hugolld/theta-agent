@@ -35,7 +35,7 @@ note (D1–D6); this doc is the repo's build and runbook surface.
 | B3 | Demo prompt templates — scripted, repeatable runs (a pharmacology question, the benchmark suite's `lit-triage` shape) | prompt templates shipped with the package; `/demo-lit-triage` | shipped |
 | B4 | `/roadmap` command — the future-plans card: M7b web workbench, cloud deployment study, M8 packaging | `pi.registerCommand()` + TUI boxes | shipped |
 | B5 | Theta theme — brand colors, status line: `themes/theta.json` (teal on pi's dark base, shipped through the pi manifest) brands the session at start — the switch fires only when the user set no theme preference — and `theta.ts` sets a persistent branded footer segment (`setStatus`) beside it | pi theme files + session-start switch | shipped |
-| B6 | This runbook + rehearsal | this doc; rig rehearsal before the date | planned |
+| B6 | This runbook + rehearsal | this doc; rig rehearsal before the date | in progress |
 
 Mode constraint (binds B1, B2, B4, B5): extension UI is complete in
 interactive mode; RPC forwards dialogs and notifications but not custom
@@ -106,17 +106,18 @@ live run is the same script on the login node.
   cluster's shell, the real terminal size).
 - The rig rehearsal (2026-11-19, #193) measured the pacing: the
   lit-triage leg runs about ten minutes end to end (637 s in the rig).
-  The narration plans around the long middle — search pools scanning,
+  The narration plans around the long middle — searches scanning,
   the abstract fetch, cards landing as the recorder appends.
-- The loop composes two skills: `theta-lit-search` runs the search
-  pools, and the vendored `paper-lookup` runs the documented abstract
+- The loop composes two skills: `theta-lit-search` runs the searches,
+  and the vendored `paper-lookup` runs the documented abstract
   fetch. Both beats belong in the script — the second is not an
   improvisation.
 - Semantic Scholar skips keyless (exit 5, by invariant) in every leg
   that carries no key: a visible, correct beat, not a failure.
 - Prepare the demo project directory before the audience arrives, with
-  `.theta/` already present. The recorder refuses a first record into a
-  fresh project (exit 2) until the directory exists. A prepared
+  `.theta/` already present. The recorder refuses an evidence-free
+  first record into a fresh project (exit 2) until the directory
+  exists — an evidenced first record creates it. A prepared
   directory removes that beat from the live script.
 - Record the login-node rehearsal (asciinema). The recording plus the
   exported HTML travel with the demo as the fallback pair.
