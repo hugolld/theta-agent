@@ -147,3 +147,7 @@ _Avoid_: classifier gate, model gate
 **Class map**:
 The skill pool's per-skill credential class map, `pool/classes.json`: one `<pack>/<skill>` → `local` | `key` | `cloud` entry per pool skill — the machine-readable twin of `pool/index.md`'s class column, which the loader reads to gate what a project's state may load. Rides every `pool:<pack>` surface digest, so a reclass is model-visible exactly like a body edit. Spec #160 decides it.
 _Avoid_: class list, class table
+
+**Web workbench**:
+The browser face of Theta's research loop — one core, two faces: the terminal face (pi's interactive TUI) ships today; the Web workbench is the M7b build, not started yet. The campaign's workbench design note decides the two-face shape beside the cloud feasibility record, and the term goes public on the shipped `/roadmap` card — Spec #186 ships it.
+_Avoid_: web frontend, browser dashboard

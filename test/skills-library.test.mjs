@@ -611,6 +611,10 @@ const scanSurfaces = [
 	// working vocabulary — the table's header, rows, and evidence lines
 	// (spec #182).
 	"extensions/notebook-command.ts",
+	// extensions/roadmap-command.ts carries the Web workbench headword —
+	// the reviewed card's beat title and the command's description (spec
+	// #186).
+	"extensions/roadmap-command.ts",
 	"test/manifest.test.mjs",
 	"test/skills-library.test.mjs",
 ];

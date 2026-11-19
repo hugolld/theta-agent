@@ -14,14 +14,10 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
  */
 export default function (pi: ExtensionAPI) {
 	pi.registerCommand("theta", {
-		description: "Show Theta agent status and roadmap",
+		description: "Show Theta agent status",
 		handler: async (_args, ctx) => {
 			ctx.ui.notify(
 				"Theta — M1 through M6 complete: the theta launcher, the Tier-1 research-loop skill library, the theta-lit-search connector, the theta-notebook project notebook, the theta-compute compute gateway behind the stacked submit gate, the M5 safety gates — the submit capability and submit ceiling server-side — and the M6 eval suite, replay net plus benchmark layer",
-				"info",
-			);
-			ctx.ui.notify(
-				"Next: the standalone theta shell on pi's headless core (M7)",
 				"info",
 			);
 		},
