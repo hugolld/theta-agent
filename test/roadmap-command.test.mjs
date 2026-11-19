@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 import { createJiti } from "jiti";
 import { recordedNotify } from "./helpers/recorded-notify.mjs";
+import { recordedRegister } from "./helpers/registered-command.mjs";
 
 // The /roadmap command (spec #186, demo doctrine B4 —
 // docs/agents/demo.md): the owner-reviewed future-plans card drawn on
@@ -40,10 +41,7 @@ const REVIEWED_CARD = [
 ];
 
 function registeredCommand() {
-	const registered = [];
-	registerRoadmapCommand({
-		registerCommand: (name, options) => registered.push({ name, options }),
-	});
+	const registered = recordedRegister(registerRoadmapCommand);
 	assert.equal(registered.length, 1);
 	return registered[0];
 }
@@ -126,7 +124,14 @@ test("outside interactive mode the card degrades to one notify — RPC forwards 
 
 test("the theta.ts handover: /roadmap is the single roadmap home — no roadmap line left in /theta", async () => {
 	const source = await readFile(new URL("../extensions/theta.ts", import.meta.url), "utf8");
-	// The stale next-milestone notify and the description's roadmap claim
-	// both left with the handover; any return of the token is drift.
+	// The description's roadmap claim left with the handover; any return
+	// of the token is drift.
 	assert.ok(!/roadmap/i.test(source), "extensions/theta.ts still mentions the roadmap — /roadmap owns it now");
+	// The dropped next-milestone notify carries no "roadmap" token of its
+	// own, so its bytes need their own absence pin — else a re-add stays
+	// green under the token pin above.
+	assert.ok(
+		!source.includes("Next: the standalone theta shell on pi's headless core (M7)"),
+		"the stale next-milestone notify line returned to /theta",
+	);
 });
