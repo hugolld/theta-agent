@@ -1,14 +1,14 @@
 {
 	"scenario": "gateway-skill",
-	"sessionPreHead": "e5e216df7be581e5d3e5b396315ccc7a5ec6b2b9",
-	"landedHead": "e5e216df7be581e5d3e5b396315ccc7a5ec6b2b9",
+	"sessionPreHead": "559e874403fd5aac500a62f98459e0673e7d6a1e",
+	"landedHead": "559e874403fd5aac500a62f98459e0673e7d6a1e",
 	"piVersion": "1.4.0",
 	"nodeVersion": "v22.23.4",
 	"surfaces": {
 		"advertisement": "68bc19e716f8a6aa44b92e7f27995fc82b614e3b4e43c1bb78b24d6711493234",
 		"skill:theta-compute": "372f764f01464bcffc1787dcf7b3d51773a14feaa5b902bee41cd133525dc8ab",
 		"skill:theta-notebook": "2264f5e8c459296e510b85c0c2d56eaf46141eeec9c8361c8f61fa3795f83556",
-		"extensions": "dfb1753fc1487965b5ec52b8b809efc15101950d51cc84a0ac25ce6b872f112f",
-		"project-context": "0786524b3928daae53fa41c13e3267017fd21c536688e4e2bcd879980f67e92e"
+		"extensions": "d3553806186eba3f62e7176a903f197fdc6241823183e0670f3ea4b4cdba0289",
+		"project-context": "40e8de85df494fb26abc0414b2fc537136cf741b837319e842af81a3b8066f46"
 	}
 }
