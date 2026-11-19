@@ -11,7 +11,7 @@ const manifest = JSON.parse(
 test("package.json carries the pi manifest", () => {
 	assert.equal(manifest.name, "theta-agent");
 	assert.ok(manifest.pi, "missing top-level pi manifest");
-	for (const key of ["extensions", "skills"]) {
+	for (const key of ["extensions", "skills", "prompts"]) {
 		// pi's readPiManifest accepts only arrays of strings; a bare string
 		// field is silently dropped, so `pi -e <root>` would load nothing.
 		assert.ok(
@@ -42,7 +42,7 @@ test("package.json bin exposes the theta launcher", () => {
 });
 
 test("pi manifest targets exist on disk", async () => {
-	for (const dir of [manifest.pi.extensions, manifest.pi.skills]) {
+	for (const dir of [manifest.pi.extensions, manifest.pi.skills, manifest.pi.prompts]) {
 		const dirStat = await stat(new URL(`../${dir}`, import.meta.url));
 		assert.ok(dirStat.isDirectory(), `${dir} is not a directory`);
 	}
