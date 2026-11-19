@@ -4,7 +4,7 @@ description: Theta's project notebook recorder - appends dated provenance entrie
 allowed-tools: Read Bash
 license: MIT
 metadata:
-  version: "0.3.0"
+  version: "0.4.0"
   authorship: self-authored
 ---
 
@@ -133,7 +133,11 @@ A hypothesis entry, and an observation linked to it, from the same notebook:
 
 The recorder writes `.theta/` under the **current directory**, so run it with
 the research project's workspace as the cwd — never from inside the skill
-tree, which would land the notebook in the package checkout. Resolve the
+tree, which would land the notebook in the package checkout. On a fresh
+project, create `.theta/` before the first record: the recorder refuses
+(exit 2, notebook failure) when the directory is absent, and only an
+evidenced record creates it itself — an evidence-free first record does
+not. Resolve the
 script path against the skill directory (pi's rule for skill-relative paths)
 and pass it absolute:
 

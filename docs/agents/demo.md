@@ -16,12 +16,20 @@ note (D1–D6); this doc is the repo's build and runbook surface.
 - **The cluster leg is optional.** The demo script runs complete without
   it. Enabling the leg requires the deployed compute gateway on the login
   node — owner-run verification, the gateway README's phase-0 recipe; the
-  demo's gateway binds loopback on that node, so no SSH forward and no
-  opened port — and the leg adds the submit-gate confirm, poll, fetch,
-  and job-record path.
-- **The demo runs in tmux on the login node**, over SSH from the seminar
-  room. The gateway is local to the demo — no laptop or VPN dependency
-  for the live run.
+  leg adds the submit-gate confirm, poll, fetch, and job-record path.
+- **The demo runs in tmux on the login node, in the standing allocation's
+  compute node** (the devnode tool: a persistent sbatch allocation whose
+  tmux session lives on the login node and whose pane runs `ssh -t` into
+  the compute node — the venue the 2026-11-19 rehearsal settled, because
+  the login node's hard 5 GB virtual-memory cap breaks pi's provider
+  calls: the bundled undici needs a WASM allocation per HTTP request, and
+  every allocation fails under the cap). The session's environment is
+  prepared once: a uv-managed Python 3.12 venv in the checkout, first on
+  PATH (the compute node's system python predates the connector scripts'
+  3.11 floor), and a loopback forward from the compute node to the
+  login-node gateway, raised before the session boots — pi registers MCP
+  servers at session start only. No laptop or VPN dependency for the live
+  run.
 - **The recording is part of the demo.** Rehearse in the clean-room rig;
   carry an asciinema capture and an exported-HTML session as the fallback
   for any live-run failure.
@@ -35,7 +43,7 @@ note (D1–D6); this doc is the repo's build and runbook surface.
 | B3 | Demo prompt templates — scripted, repeatable runs (a pharmacology question, the benchmark suite's `lit-triage` shape) | prompt templates shipped with the package; `/demo-lit-triage` | shipped |
 | B4 | `/roadmap` command — the future-plans card: M7b web workbench, cloud deployment study, M8 packaging | `pi.registerCommand()` + TUI boxes | shipped |
 | B5 | Theta theme — brand colors, status line: `themes/theta.json` (teal on pi's dark base, shipped through the pi manifest) brands the session at start — the switch fires only when the user set no theme preference — and `theta.ts` sets a persistent branded footer segment (`setStatus`) beside it | pi theme files + session-start switch | shipped |
-| B6 | This runbook + rehearsal | this doc; rig rehearsal before the date | in progress |
+| B6 | This runbook + rehearsal | this doc; rig rehearsal before the date | shipped |
 
 Mode constraint (binds B1, B2, B4, B5): extension UI is complete in
 interactive mode; RPC forwards dialogs and notifications but not custom
@@ -80,8 +88,10 @@ Rehearse the full script in the clean-room rig first
 live run is the same script on the login node.
 
 ```
- 1. SSH to login node → tmux (extended-keys config; pi's tmux doc) →
-    theta --dev (from the checkout)
+ 1. SSH to login node → devnode attach (tmux on the login node; the pane
+    runs ssh -t into the standing allocation's compute node; forward up,
+    venv first on PATH, TERM=xterm-256color) → theta --dev (from the
+    checkout)
     Show: /theta (status); the / command menu — every loaded skill
     lists there as a /skill:name entry
  2. /demo-lit-triage — the scripted pharmacology question; the research
@@ -119,6 +129,11 @@ live run is the same script on the login node.
   first record into a fresh project (exit 2) until the directory
   exists — an evidenced first record creates it. A prepared
   directory removes that beat from the live script.
+- Give `/exit` time before teardown: the session saves slowly on the
+  shared filesystem, and the asciinema cast flushes its final chunk only
+  on the recorder's clean exit — a session killed first keeps its
+  recording truncated at the tail (the 2026-11-19 rehearsal lost only the
+  exit beat that way; the playback otherwise complete).
 - Record the login-node rehearsal (asciinema). The recording plus the
   exported HTML travel with the demo as the fallback pair.
 - A live-run failure (model error, network, queue) falls back to the
