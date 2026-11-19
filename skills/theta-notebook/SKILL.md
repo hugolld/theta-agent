@@ -135,8 +135,8 @@ The recorder writes `.theta/` under the **current directory**, so run it with
 the research project's workspace as the cwd — never from inside the skill
 tree, which would land the notebook in the package checkout. On a fresh
 project, create `.theta/` before the first record: the recorder refuses
-(exit 2, notebook failure) when the directory is absent, and only an
-evidenced record creates it itself — an evidence-free first record does
+an evidence-free first record (exit 2, notebook failure) when the
+directory is absent, and only an evidenced record creates it itself — an evidence-free first record does
 not. Resolve the
 script path against the skill directory (pi's rule for skill-relative paths)
 and pass it absolute:

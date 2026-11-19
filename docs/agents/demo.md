@@ -1,7 +1,7 @@
 # Demo doctrine — the collaborator demonstration
 
 The M7a demo slice: a repeatable, rehearsed demonstration of Theta running
-live in pi's interactive TUI, deployed on the cluster login node, for an
+live in pi's interactive TUI, deployed on the cluster, for an
 audience of pharmacology and wet-lab researchers who will not drive the
 agent themselves. Campaign-level decisions live in the vault's M7a design
 note (D1–D6); this doc is the repo's build and runbook surface.
@@ -85,7 +85,8 @@ B1 (#178) settled it after five attempts:
 
 Rehearse the full script in the clean-room rig first
 (`node test/rig/run.mjs run "<prompt>"` for the legs it covers); the
-live run is the same script on the login node.
+live run is the same script on the standing allocation's compute node
+(the devnode chain).
 
 ```
  1. SSH to login node → devnode attach (tmux on the login node; the pane
@@ -112,8 +113,8 @@ live run is the same script on the login node.
 ## Rehearsal and fallback
 
 - Rehearse end-to-end at least twice before the date: once in the rig,
-  once on the login node itself (the live environment — tmux, the
-  cluster's shell, the real terminal size).
+  once on the devnode chain itself (the live environment — the login
+  node's tmux, the compute node's shell, the real terminal size).
 - The rig rehearsal (2026-11-19, #193) measured the pacing: the
   lit-triage leg runs about ten minutes end to end (637 s in the rig).
   The narration plans around the long middle — searches scanning,
@@ -134,7 +135,7 @@ live run is the same script on the login node.
   on the recorder's clean exit — a session killed first keeps its
   recording truncated at the tail (the 2026-11-19 rehearsal lost only the
   exit beat that way; the playback otherwise complete).
-- Record the login-node rehearsal (asciinema). The recording plus the
+- Record the live rehearsal (asciinema). The recording plus the
   exported HTML travel with the demo as the fallback pair.
 - A live-run failure (model error, network, queue) falls back to the
   recording with narration; the demo does not retry live.
