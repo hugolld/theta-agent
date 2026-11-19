@@ -5,6 +5,7 @@ import { test } from "node:test";
 import { createJiti } from "jiti";
 import { tempDir } from "./helpers/temp-dir.mjs";
 import { recordedNotify } from "./helpers/recorded-notify.mjs";
+import { recordedRegister } from "./helpers/registered-command.mjs";
 import {
 	cnfLine,
 	decLine,
@@ -143,10 +144,7 @@ test("the table rides one notify — consecutive info notifies replace the statu
 test("the registered command wires cwd and notify only — a stub context with no dialog methods", async (t) => {
 	const project = tempProject(t);
 	writeNotebook(project, [decLine]);
-	const registered = [];
-	registerNotebookCommand({
-		registerCommand: (name, options) => registered.push({ name, options }),
-	});
+	const registered = recordedRegister(registerNotebookCommand);
 	assert.equal(registered.length, 1);
 	assert.equal(registered[0].name, "notebook");
 	assert.equal(registered[0].options.description, "Show the project notebook: entries, grades, dates");

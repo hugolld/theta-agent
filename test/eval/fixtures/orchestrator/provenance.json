@@ -1,7 +1,7 @@
 {
 	"scenario": "orchestrator",
-	"sessionPreHead": "850780abfbb0b4add72309c3eefc244779d30685",
-	"landedHead": "850780abfbb0b4add72309c3eefc244779d30685",
+	"sessionPreHead": "6f198d9c4cef98563192d5801d2446b9f2bcc936",
+	"landedHead": "6f198d9c4cef98563192d5801d2446b9f2bcc936",
 	"piVersion": "1.4.0",
 	"nodeVersion": "v22.23.4",
 	"surfaces": {
@@ -10,7 +10,7 @@
 		"skill:hypothesis-generation": "0e5d58860e6021617c0bd01fdabf02385a0c1d7a3aa017085b661b9e8ed83783",
 		"skill:theta-notebook": "2264f5e8c459296e510b85c0c2d56eaf46141eeec9c8361c8f61fa3795f83556",
 		"skill:theta-lit-search": "74cc4a6d1720f17dd2941a6ce5a5e47ff77e4776b7a70cf44f96578f38c11ab9",
-		"extensions": "6f12cacd3f1fa35563f9fdd5fd61b910272ebaea355bee7fa3f813a0252c43ad",
-		"project-context": "81c260351f959e14a8cf3f5563a475759b67384131492e60c4b9f9e5454f529f"
+		"extensions": "dfb1753fc1487965b5ec52b8b809efc15101950d51cc84a0ac25ce6b872f112f",
+		"project-context": "0786524b3928daae53fa41c13e3267017fd21c536688e4e2bcd879980f67e92e"
 	}
 }
