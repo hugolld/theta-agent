@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -25,6 +25,13 @@ test("every banned class hits its own shape", () => {
 		const { hits } = sweepBytes({ transcript: text });
 		assert.ok(hits.includes(expected), `${JSON.stringify(text)} must hit ${expected}, got ${hits.join(",")}`);
 	}
+});
+
+test("below the ban's shape misses — six digits, bare words, no digits", () => {
+	const { hits } = sweepBytes({
+		transcript: "user u123456 queued on gpu, the alias file, node zero",
+	});
+	assert.deepEqual(hits, []);
 });
 
 test("the cluster's bare name is public — no alias, no hit", () => {
@@ -67,4 +74,26 @@ test("placeholders are counted, never flagged — the approved vocabulary", () =
 		transcript: "__REPO__/skills/x __RIG_HOME__/agent __HOST_NODES_CPU_1__ plain",
 	});
 	assert.equal(placeholderCount, 3);
+});
+
+test("every landed fixture stays clean — the sweep runs in the suite, not only at land time", () => {
+	// The land step guards at capture time, but a hook-bypassed commit
+	// could carry a leaky fixture past it; this pin makes CI hold the
+	// same bar continuously (the review round's finding). Token bytes
+	// stay the host-side closeout's check — the token file never exists
+	// on CI, so the class rides the operator CLI there.
+	const fixtureDir = new URL("./fixtures/", import.meta.url);
+	const ids = readdirSync(fixtureDir).filter((name) =>
+		existsSync(new URL(`./fixtures/${name}/session.jsonl`, import.meta.url)),
+	);
+	assert.ok(ids.length > 0, "no landed fixtures to sweep");
+	const offenders = [];
+	for (const id of ids) {
+		const transcript = readFileSync(new URL(`./fixtures/${id}/session.jsonl`, import.meta.url), "utf8");
+		const snapshotPath = new URL(`./snapshots/${id}.json`, import.meta.url);
+		const snapshot = existsSync(snapshotPath) ? readFileSync(snapshotPath, "utf8") : undefined;
+		const { hits } = sweepBytes({ transcript, snapshot });
+		if (hits.length > 0) offenders.push(`${id}: ${hits.join(",")}`);
+	}
+	assert.deepEqual(offenders, [], "landed fixtures hit banned leak classes");
 });

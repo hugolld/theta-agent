@@ -286,6 +286,24 @@ function land(scenario, evidenceDir) {
 			fail(`the sanitized transcript still contains a host machine path (${machine.slice(0, 8)}…) — sanitize before committing`);
 		}
 	}
+	// The snapshot regenerates from the sanitized bytes through the same
+	// normalization the net applies — never hand-edited.
+	const snapshotText = `${JSON.stringify(normalizeTree(parseSessionEntries(sanitized)), null, "\t")}\n`;
+	// The institutional-fact sweep, mechanical where a fixed pattern can
+	// hold (issue #188): accounts, the SSH alias, node names, and the
+	// gateway token's bytes, over the bytes about to land. The sweep runs
+	// BEFORE any write — a hit refuses with the working tree still clean,
+	// the cheaper refusal. A hit means redo the sanitize, never patch the
+	// evidence; the cluster's bare name stays public (ADR 0004), and the
+	// per-capture judgment (bibliographic payloads and the like) stays
+	// the operator's.
+	const tokenBytes = readTokenBytes(path.join(homedir(), ".theta-compute-token"));
+	const sweep = sweepBytes({ transcript: sanitized, snapshot: snapshotText, tokenBytes });
+	if (sweep.hits.length > 0) {
+		fail(
+			`the sanitized bytes hit the leak sweep (${sweep.hits.join(", ")}) — sanitize again, never patch the evidence`,
+		);
+	}
 
 	const fixtureDir = path.join(repoRoot, "test/eval/fixtures", scenario.id);
 	mkdirSync(fixtureDir, { recursive: true });
@@ -312,25 +330,9 @@ function land(scenario, evidenceDir) {
 			"\t",
 		)}\n`,
 	);
-	// The snapshot regenerates from the sanitized bytes through the same
-	// normalization the net applies — never hand-edited.
 	const snapshotDir = path.join(repoRoot, "test/eval/snapshots");
 	mkdirSync(snapshotDir, { recursive: true });
-	const snapshotText = `${JSON.stringify(normalizeTree(parseSessionEntries(sanitized)), null, "\t")}\n`;
 	writeFileSync(path.join(snapshotDir, `${scenario.id}.json`), snapshotText);
-	// The institutional-fact sweep, mechanical where a fixed pattern can
-	// hold (issue #188): accounts, the SSH alias, node names, and the
-	// gateway token's bytes, over the landed fixture and its snapshot.
-	// A hit fails the land — redo the sanitize, never patch the evidence;
-	// the cluster's bare name stays public (ADR 0004), and the per-capture
-	// judgment (bibliographic payloads and the like) stays the operator's.
-	const tokenBytes = readTokenBytes(path.join(homedir(), ".theta-compute-token"));
-	const sweep = sweepBytes({ transcript: sanitized, snapshot: snapshotText, tokenBytes });
-	if (sweep.hits.length > 0) {
-		fail(
-			`the sanitized bytes hit the leak sweep (${sweep.hits.join(", ")}) — sanitize again, never patch the evidence`,
-		);
-	}
 	console.log(`eval-capture: landed fixture ${path.join("test/eval/fixtures", scenario.id)} and its snapshot`);
 	console.log(
 		`eval-capture: leak sweep clean — ${sweep.placeholderCount} approved placeholders, token bytes ${
