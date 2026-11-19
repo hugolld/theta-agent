@@ -74,6 +74,7 @@ import { readSessionEvidence } from "../../scripts/session-evidence.mjs";
 import { REPO_ROOT as repoRoot } from "../helpers/repo-root.mjs";
 import { machinePathPrefixes } from "../helpers/machine-paths.mjs";
 import { normalizeTree } from "./normalize.mjs";
+import { readTokenBytes, sweepBytes } from "./leak-sweep.mjs";
 import { SCENARIOS } from "./scenarios.mjs";
 import { surfaceDigest, surfaceProbePaths } from "./surfaces.mjs";
 
@@ -315,11 +316,27 @@ function land(scenario, evidenceDir) {
 	// normalization the net applies — never hand-edited.
 	const snapshotDir = path.join(repoRoot, "test/eval/snapshots");
 	mkdirSync(snapshotDir, { recursive: true });
-	writeFileSync(
-		path.join(snapshotDir, `${scenario.id}.json`),
-		`${JSON.stringify(normalizeTree(parseSessionEntries(sanitized)), null, "\t")}\n`,
-	);
+	const snapshotText = `${JSON.stringify(normalizeTree(parseSessionEntries(sanitized)), null, "\t")}\n`;
+	writeFileSync(path.join(snapshotDir, `${scenario.id}.json`), snapshotText);
+	// The institutional-fact sweep, mechanical where a fixed pattern can
+	// hold (issue #188): accounts, the SSH alias, node names, and the
+	// gateway token's bytes, over the landed fixture and its snapshot.
+	// A hit fails the land — redo the sanitize, never patch the evidence;
+	// the cluster's bare name stays public (ADR 0004), and the per-capture
+	// judgment (bibliographic payloads and the like) stays the operator's.
+	const tokenBytes = readTokenBytes(path.join(homedir(), ".theta-compute-token"));
+	const sweep = sweepBytes({ transcript: sanitized, snapshot: snapshotText, tokenBytes });
+	if (sweep.hits.length > 0) {
+		fail(
+			`the sanitized bytes hit the leak sweep (${sweep.hits.join(", ")}) — sanitize again, never patch the evidence`,
+		);
+	}
 	console.log(`eval-capture: landed fixture ${path.join("test/eval/fixtures", scenario.id)} and its snapshot`);
+	console.log(
+		`eval-capture: leak sweep clean — ${sweep.placeholderCount} approved placeholders, token bytes ${
+			tokenBytes === undefined ? "unchecked (no token file on this host)" : "absent"
+		}`,
+	);
 	console.log("eval-capture: review the sanitized transcript (payload redaction is a per-capture judgment),");
 	console.log("eval-capture: run npm test, and record the owner's per-capture sign-off in the PR body.");
 }
