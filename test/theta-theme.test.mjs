@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 import { createJiti } from "jiti";
+import { recordedRegister } from "./helpers/registered-command.mjs";
 
 // The Theta theme (spec #190, demo doctrine B5 — docs/agents/demo.md):
 // the brand surface — `themes/theta.json` (teal brand colors on pi's dark
@@ -194,9 +195,7 @@ test("the extension's theme name matches the shipped theme file", () => {
 
 function registeredSessionStart({ theme } = {}) {
 	const subscriptions = [];
-	const commands = [];
-	registerTheta({
-		registerCommand: (name, options) => commands.push({ name, options }),
+	const commands = recordedRegister(registerTheta, {
 		on: (event, handler) => subscriptions.push({ event, handler }),
 		// getSettings lives on the ExtensionAPI object, not the event ctx —
 		// the extension reads the preference through its own factory handle.
@@ -209,8 +208,11 @@ function registeredSessionStart({ theme } = {}) {
 
 function stubCtx({ mode = "tui", setThemeResult = { success: true } } = {}) {
 	const calls = { setTheme: [], setStatus: [] };
-	// print/json stubs carry no ui methods at all: an unguarded UI call
-	// throws against the stub, which is the degradation pin.
+	// pi's own docs prescribe guarding fire-and-forget methods (setStatus
+	// among them) on ctx.hasUI — false in print and JSON, where pi installs
+	// a no-op UI. The stub carries no ui surface at all for those modes, so
+	// a call past the guard throws: the pin is that theta.ts keeps the
+	// documented guard, not that pi lacks the methods.
 	const hasUI = mode === "tui" || mode === "rpc";
 	const ctx = {
 		mode,
