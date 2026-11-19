@@ -57,6 +57,16 @@ B1 (#178) settled it after five attempts:
    capture: `script -q <capture> node bin/theta.mjs --dev --provider
    zai-coding-cn --model glm-5.3-flash`, then run the B-item's
    one-prompt surface against a throwaway `.theta/` in that cwd.
+   The probe's input sequence makes the capture complete: boot outgrew
+   4 s (B5's probe sleeps 8 s first), feed the surface command, a
+   `\r` redraw, then a trailing `/exit\r` — `script`'s typescript
+   flushes in ~4K chunks and the last one flushes only on a clean
+   script exit, so a killed probe stalls the file at a 4096 multiple
+   while the session rendered fine; bound the whole pipeline with a
+   background killer as the backstop (one Ctrl-C rarely exits pi).
+   Verify counts with `grep -o <pat> <capture> | wc -l`: the ANSI
+   capture is one line, so `grep -c` reports 1 regardless of
+   occurrences.
 3. Archive beside the strike evidence: the ANSI original, the faithful
    copy, plus a plain stripped copy that reads cleanly; clear the
    scratch `.theta/` afterwards.
