@@ -339,7 +339,7 @@ function land(scenario, evidenceDir) {
 			tokenBytes === undefined ? "unchecked (no token file on this host)" : "absent"
 		}`,
 	);
-	console.log("eval-capture: review the sanitized transcript (payload redaction is a per-capture judgment),");
+	console.log("eval-capture: review the sanitized transcript — open the toolResult payloads, not only the entry kinds (payload redaction is a per-capture judgment),");
 	console.log("eval-capture: run npm test, and record the owner's per-capture sign-off in the PR body.");
 }
 
