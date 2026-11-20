@@ -55,6 +55,15 @@ export const READ_HEADROOM =
 export const PLAIN_COMMAND =
 	"Run each shell command as one plain command: chain steps with && only, never a semicolon or a trailing status echo.";
 
+// The clean-tree steering (the #193 closeout's orchestrator roll): a session
+// that reaches a file-writing tool parks its scratch outside the checkout,
+// under /tmp, never in the working directory — the auditor's final
+// clean-tree recheck refuses an untracked file after every leg has passed,
+// and the roll is lost (dogfood.md's scratch doctrine; one orchestrator
+// roll died exactly this way, its redo rolled clean).
+export const CLEAN_TREE =
+	"Keep the working tree clean: park any scratch file you need to write under /tmp, never in the working directory.";
+
 export const SCENARIOS = Object.freeze([
 	{
 		id: "connector",
@@ -80,7 +89,7 @@ export const SCENARIOS = Object.freeze([
 	{
 		id: "orchestrator",
 		prompt:
-			`An early experiment in our lab suggests a CRISPR base-editing treatment partially restored immune function in aged mice. Turn this into a disciplined research effort: state the question you would pursue first, the competing explanations worth testing, and what evidence could discriminate between them, and say which direction you are setting and why. ${READ_HEADROOM}`,
+			`An early experiment in our lab suggests a CRISPR base-editing treatment partially restored immune function in aged mice. Turn this into a disciplined research effort: state the question you would pursue first, the competing explanations worth testing, and what evidence could discriminate between them, and say which direction you are setting and why. ${READ_HEADROOM} ${CLEAN_TREE}`,
 		// The orchestrator doctrine (the surface) plus the trees the capture's
 		// session proved to open — the routed vendored skill (the re-sync
 		// drift binding), the project notebook (recording), and the lit

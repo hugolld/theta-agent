@@ -48,6 +48,8 @@ node test/rig/run.mjs build
 node test/rig/run.mjs run "<prompt>"
 ```
 
+Pass `--timeout` for session-class legs: the runner's default is 300 s, and lit-triage-shaped legs have measured from 209 s to past 900 s on glm-5.3-flash under provider latency variance — `--timeout 1800` carries them (the B6 closeout lost two legs to too-tight bounds, one at the default and one at 900, both killed mid-abstract-fetch with the work visibly progressing).
+
 The runner's third mode, `eval <task-id>` (M6 S2), is the benchmark layer's leg — graded tasks, not dogfood captures — and carries only the provider key; its doctrine lives in `docs/agents/eval.md`.
 
 Spot-check leg arguments ride `--leg`, repeatable, one per auditor leg slot in its order (skill, script, notebook) — `-` skips a slot, so a script-plus-notebook capture runs the skill leg as `-`:
@@ -92,6 +94,8 @@ An eval capture (GLOSSARY) is a scenario run recorded deliberately for the repla
 node test/eval/capture.mjs rig <scenario-id>              # rig leg + live audit (~minutes)
 node test/eval/capture.mjs land <scenario-id> <evidence-dir>   # sanitize + fixture + snapshot
 ```
+
+A prompt built from a prompt template stages the expanded body mechanically from the template file — its bytes minus the frontmatter, never a hand-retyped near-copy, which costs the leg the auditor's byte-equality gate (the B6 rehearsal's first roll staged a 772-byte near-copy of the 773-byte body; the final attestation re-staged exactly).
 
 The rig leg reuses everything above — the clean-tree gate, the isolated evidence dir, the auditor's live legs; the `extension-strings` scenario rides `--gateway`, so its forward preflight is the gateway-bearing section's, and the `pool` scenario (spec #167) rides `--pool bioinformatics` — the staged state file, never a credential. The land step sanitizes by the golden-fixture recipe — the checkout root becomes `__REPO__`, the rig home `__RIG_HOME__`, host machine paths and credential bytes absent — and writes the fixture, its provenance manifest (one digest per model-visible surface class), and the regenerated snapshot. Payload redaction splits in two: node lists redact mechanically (`__HOST_NODES_<PARTITION>_<N>__`), the rest is the operator's judgment — read the sanitized transcript's toolResult payload bodies before it lands (the judgment covers payloads, not only entry kinds; bibliographic payloads from public APIs have shipped verbatim) — and every capture carries the owner's per-capture sign-off in the landing PR body (GitHub keeps body edit history, so a scrub-after is not undo). A model-visible change lands only with a fresh capture — the red provenance pin names the stale fixture; the recapture seam and the ordering doctrine: `docs/agents/eval.md`.
 
