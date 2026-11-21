@@ -19,16 +19,17 @@ const { default: registerRoadmapCommand, roadmapCard, ROADMAP_COMMAND_NAME } = a
 	"../extensions/roadmap-command.ts",
 );
 
-// The reviewed card, settled 2026-11-19 (issue #186): every line
-// vault-grounded, no calendar dates, future-only — the bytes this suite
-// freezes against the source's mapping.
+// The reviewed card, settled 2026-11-19 (issue #186), the workbench
+// line re-reviewed 2026-11-21 (issue #198): every line vault-grounded,
+// no calendar dates, future-only — the bytes this suite freezes
+// against the source's mapping.
 const REVIEWED_CARD = [
 	"Theta - the road ahead",
 	"",
 	"Web workbench (M7b)",
 	"  The same research loop in the browser,",
 	"  with no terminal needed.",
-	"  In design; not started yet.",
+	"  M7b-1 shipped; the viewer pane lands at M7b-2.",
 	"",
 	"Cloud deployment study",
 	"  Asking whether Theta itself can run on cloud",

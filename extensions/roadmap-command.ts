@@ -5,7 +5,8 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
  * The /roadmap command (spec #186, demo doctrine B4 —
  * docs/agents/demo.md): the future-plans card drawn on demand — the
  * seminar script's step 5, the demo's closing beat. The card is the
- * owner-reviewed prose (settled 2026-11-19, every line vault-grounded):
+ * owner-reviewed prose (settled 2026-11-19, the workbench line
+ * re-reviewed 2026-11-21, every line vault-grounded):
  * no calendar dates — qualitative status only — future-only, milestone
  * tags on the milestone beats, the cloud beat a study with its explicit
  * no-commitment line, packaging framed as researcher benefit. Static
@@ -43,7 +44,7 @@ const ROADMAP_BEATS: RoadmapBeat[] = [
 		lines: [
 			"The same research loop in the browser,",
 			"with no terminal needed.",
-			"In design; not started yet.",
+			"M7b-1 shipped; the viewer pane lands at M7b-2.",
 		],
 	},
 	{
