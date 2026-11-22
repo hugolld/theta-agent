@@ -1,13 +1,13 @@
 {
 	"scenario": "gateway-skill",
-	"sessionPreHead": "fe498b3450fd368634134899c9253c564dba0595",
-	"landedHead": "fe498b3450fd368634134899c9253c564dba0595",
+	"sessionPreHead": "41b3af4d653ad3879bf7df58a848211e7864bee5",
+	"landedHead": "41b3af4d653ad3879bf7df58a848211e7864bee5",
 	"piVersion": "1.4.0",
 	"nodeVersion": "v22.23.4",
 	"surfaces": {
-		"advertisement": "68bc19e716f8a6aa44b92e7f27995fc82b614e3b4e43c1bb78b24d6711493234",
+		"advertisement": "335e04cc81a61550e8559ced471a41d274160296bc43978155a14a4fc281b3c5",
 		"skill:theta-compute": "372f764f01464bcffc1787dcf7b3d51773a14feaa5b902bee41cd133525dc8ab",
-		"skill:theta-notebook": "5092888df61809a44d6dc3179b8f4b21f14c08fe4fe645b3227435fcf020e995",
+		"skill:theta-notebook": "3e0940fc66cafe55195168b5c2bf1a60209e68dd0cdbc0800985f6ef89beb2cf",
 		"extensions": "d3553806186eba3f62e7176a903f197fdc6241823183e0670f3ea4b4cdba0289",
 		"project-context": "22380faa252d1c172cbbbe82675307b209a97696c9b0c6032aa125c2fdcd21f1"
 	}
