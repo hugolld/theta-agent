@@ -1,14 +1,14 @@
 {
 	"scenario": "orchestrator",
-	"sessionPreHead": "fe498b3450fd368634134899c9253c564dba0595",
-	"landedHead": "fe498b3450fd368634134899c9253c564dba0595",
+	"sessionPreHead": "b236a43b9852620cc37ece875beabda53a2b20fc",
+	"landedHead": "b236a43b9852620cc37ece875beabda53a2b20fc",
 	"piVersion": "1.4.0",
 	"nodeVersion": "v22.23.4",
 	"surfaces": {
-		"advertisement": "68bc19e716f8a6aa44b92e7f27995fc82b614e3b4e43c1bb78b24d6711493234",
+		"advertisement": "335e04cc81a61550e8559ced471a41d274160296bc43978155a14a4fc281b3c5",
 		"skill:theta-research-loop": "4c3380667d5b1415442008180d5a6b2debb418dfd61d4e36ad8546443757f846",
 		"skill:hypothesis-generation": "0e5d58860e6021617c0bd01fdabf02385a0c1d7a3aa017085b661b9e8ed83783",
-		"skill:theta-notebook": "5092888df61809a44d6dc3179b8f4b21f14c08fe4fe645b3227435fcf020e995",
+		"skill:theta-notebook": "3e0940fc66cafe55195168b5c2bf1a60209e68dd0cdbc0800985f6ef89beb2cf",
 		"skill:theta-lit-search": "74cc4a6d1720f17dd2941a6ce5a5e47ff77e4776b7a70cf44f96578f38c11ab9",
 		"extensions": "d3553806186eba3f62e7176a903f197fdc6241823183e0670f3ea4b4cdba0289",
 		"project-context": "22380faa252d1c172cbbbe82675307b209a97696c9b0c6032aa125c2fdcd21f1"
