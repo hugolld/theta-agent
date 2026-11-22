@@ -805,11 +805,11 @@ test("plan write creates the file and reports path and revision", { skip: skipRe
 		run.stdout.trimEnd(),
 		`wrote plan ${expectedPath} revision ${revisionOf(PLAN_TEXT)}`,
 	);
-	// The file: today's date, the slug, the plan's Markdown verbatim.
+	// The file: today's date, the slug, the plan's text as read (LF endings).
 	assert.equal(
 		await readFile(planPath(project, planId), "utf8"),
 		PLAN_TEXT,
-		"plan bytes are written verbatim",
+		"plan text is written as read",
 	);
 	assert.deepEqual(await readdir(path.join(project, ".theta")), ["plans"]);
 });
