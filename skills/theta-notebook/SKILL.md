@@ -1,10 +1,10 @@
 ---
 name: theta-notebook
-description: Theta's project notebook recorder - appends dated provenance entries to the research project's .theta/notebook.jsonl in all five types (hypothesis, method, observation, decision, confidence), storing theta-lit-search structured outputs and gateway job records as content-addressed evidence items under .theta/evidence/, graded asserted, cross-checked, or re-executed. A grade rates the source; a confidence entry records the researcher's judgment. Use when a session forms a hypothesis worth keeping, chooses or discards a method, reads something off a search result, takes a decision, updates its confidence, or closes out a compute run, and holds that evidence behind it, inside the theta-research-loop or after a standalone literature search. Recording runs only through the bundled recorder script, which validates the evidence input, never keeps raw HTTP bodies or file payloads, and reports its exit-code contract. Bibliography and reference management route to citation-management.
+description: Theta's project notebook recorder - appends dated provenance entries (hypothesis, method, observation, decision, confidence) to the research project's .theta/notebook.jsonl, with theta-lit-search outputs and gateway job records as graded, content-addressed evidence under .theta/evidence/ - asserted, cross-checked, or re-executed. A grade rates the source; judgment is the confidence entry type. Also writes the project's plan files (.theta/plans/) - the plan object stated before execution, with its 12-hex revision digest reported on every call. Use when a session forms a hypothesis, chooses or discards a method, reads off a search result, takes a decision, updates its confidence, states or revises a plan before compute, or closes out a compute run, in the theta-research-loop or standalone. Recording and planning run only through the bundled recorder script, which validates inputs, keeps no raw payloads, and reports its exit-code contract. Bibliography and reference management route to citation-management.
 allowed-tools: Read Bash
 license: MIT
 metadata:
-  version: "0.4.0"
+  version: "0.5.0"
   authorship: self-authored
 ---
 
@@ -23,6 +23,9 @@ Plain files under `.theta/` in the workspace the session runs in:
   back up, version — no pi runtime needed.
 - `evidence/` — sha256-addressed snapshots, one file per evidence item. Same
   bytes, same name: identical evidence stored twice is one file.
+- `plans/` — the project's **plan files**, one Markdown document per plan
+  (`<date>-<slug>.md`), written, revised, and re-digested by the recorder's
+  plan operations.
 
 ## The five entry types
 
@@ -113,7 +116,9 @@ A hypothesis entry, and an observation linked to it, from the same notebook:
 - The loop's hypothesize moment: a hypothesis has survived framing and
   search, and the connector output that motivated it is in hand.
 - The design moment: a method is chosen or discarded — record the choice,
-  with the search that motivated it as evidence when there is one.
+  with the search that motivated it as evidence when there is one, and
+  state the run's plan itself as a plan file before any compute
+  (`--plan-write`; the plan-operations section below).
 - The execute moment: reading a result off a search output is an
   observation; when it backs an existing hypothesis, link the evidence. A
   compute run that closes out records its job record as a method entry —
@@ -165,6 +170,12 @@ python3 <theta-notebook-skill-dir>/scripts/notebook.py \
 # (theta-compute's doctrine assembles it from the gateway answers):
 python3 <theta-notebook-skill-dir>/scripts/notebook.py \
   --method "TEXT" --job-record job-record.json --grade re-executed
+
+# State the run's plan before compute, then present it with its revision:
+python3 <theta-notebook-skill-dir>/scripts/notebook.py \
+  --plan-write af3-benchmark --plan-file plan.md
+python3 <theta-notebook-skill-dir>/scripts/notebook.py \
+  --plan-read 2026-11-22-af3-benchmark
 ```
 
 `--evidence` takes the path of a saved `--json` output, or `-` to read it
@@ -214,6 +225,58 @@ and passes it to `--job-record` as JSON (path or `-`):
   `cross-checked` is a retrieval's mark, and the recorder refuses it on a
   job record.
 
+## Plan files
+
+The **plan object** is a file, not an entry: `.theta/plans/<plan-id>.md`,
+plain Markdown stating what a run will compute, on which hypothesis, with
+which method. It carries plan text only — no evidence, no grade: a plan is
+a document, not a graded claim — and the plan operations never touch
+`notebook.jsonl`. The recorder is the loop's writer, not the file's owner:
+a researcher's hand edit is not an error, it is a new revision that a
+later approval must name.
+
+| Operation | Flags | Does |
+|---|---|---|
+| write | `--plan-write <slug> --plan-file <plan.md\|->` | creates `.theta/plans/<today>-<slug>.md`; reports the path and the revision |
+| update | `--plan-update <plan-id> --plan-file <plan.md\|->` | overwrites the named plan's file; reports the new revision and the one it replaces |
+| read | `--plan-read <plan-id>` | reports the path and the current revision — the file's own bytes decide, so a hand edit reads as the new revision |
+
+- **Plan-id grammar**: the recording date plus a short kebab slug —
+  `2026-11-22-af3-benchmark.md`. The slug is 1–48 characters of lowercase
+  letters, digits, and single hyphens; anything else — uppercase,
+  underscores, dots, slashes, a leading, trailing, or doubled hyphen — is
+  refused as a usage error. Sortable, grep-able, no UUID noise. The id is
+  immutable: an update keeps the file's name and date.
+- **Same-day collision**: `--plan-write` refuses a slug that already names
+  a plan today — a collision never clobbers. Write a different slug, or
+  `--plan-update` the recorded plan. The same slug on a later day is a
+  different plan-id, and allowed.
+- **Plan revision**: the first 12 hex of sha256 over the file's bytes —
+  the plan's revision, distinct from evidence snapshots' full sha256
+  content addressing. A changed digest is a new revision, an update's
+  change and a hand edit alike. The recipe is a cross-language contract,
+  pinned by a committed test vector both this script and the TS side of
+  the plan object pass, so every reader computes one revision.
+- Like an evidence-free first record, the first plan write needs the
+  project's `.theta/` to exist (`mkdir .theta`); the write creates
+  `plans/` itself. Plan text is written verbatim — no normalization, no
+  added newline — because the digest reads exactly the bytes on disk.
+
+```bash
+cd /path/to/research-project
+
+# Revise the plan — same plan-id, new revision, the report names both:
+python3 <theta-notebook-skill-dir>/scripts/notebook.py \
+  --plan-update 2026-11-22-af3-benchmark --plan-file plan-v2.md
+```
+
+`--plan-file` takes the plan's Markdown the way `--evidence` takes its
+input: a path, or `-` for stdin. Default output names the plan and its
+revision — `wrote plan .theta/plans/2026-11-22-af3-benchmark.md revision
+<12-hex>` (an update adds `(was <old-revision>)`; a read reports `plan
+<path> revision <12-hex>`); `--json` prints the plan result object
+(`plan`, `path`, `revision`, plus `previous_revision` on an update).
+
 ## Grades
 
 The grade marks how much the evidence can be trusted. It grades the source,
@@ -244,9 +307,9 @@ transport to fail):
 
 | Code | Meaning |
 |---|---|
-| 0 | Success — the entry is appended and named on stdout. |
-| 1 | Usage error — bad arguments, evidence input that is not a valid connector output or gateway job record, or a link naming no recorded hypothesis. |
-| 2 | Notebook failure — the notebook cannot be read (corrupt, or `.theta` is not a directory) or written. |
+| 0 | Success — the entry is appended and named on stdout, or the plan operation reports the plan's path and revision. |
+| 1 | Usage error — bad arguments, evidence input that is not a valid connector output or gateway job record, a link naming no recorded hypothesis, a malformed plan slug or plan-id, a same-day plan collision, or a plan-id naming no written plan. |
+| 2 | Notebook failure — the notebook or a plan file cannot be read (corrupt, `.theta` is not a directory, or absent for a first plan write) or written. |
 
 ## Output discipline
 
@@ -267,6 +330,10 @@ transport to fail):
   are untouched by this skill.
 - One evidence item per call; an entry synthesizing several retrievals is
   recorded per source, cross-checked claims included.
+- Plan operations carry plan text only — no `--evidence`, `--grade`,
+  `--on`, `--supports`, or `--job-record` — and never touch
+  `notebook.jsonl`; one operation per call, an entry or a plan op, never
+  both.
 - `.theta/` belongs to the research project. In the theta-agent repo's own
   dogfood runs it is gitignored so clean-tree proofs hold; in a research
   project, versioning the notebook is the researcher's choice.

@@ -151,3 +151,11 @@ _Avoid_: class list, class table
 **Web workbench**:
 The browser face of Theta's research loop — one core, two faces: the terminal face (pi's interactive TUI) ships today; the Web workbench is the M7b build, not started yet. The campaign's workbench design note decides the two-face shape beside the cloud feasibility record, and the term goes public on the shipped `/roadmap` card — Spec #186 ships it.
 _Avoid_: web frontend, browser dashboard
+
+**Plan object**:
+The `.theta/plans/<plan-id>.md` Markdown file stating what a run will compute before Execute — a document, not a graded claim: no evidence, no grade. Its plan-id is the recording date plus a short kebab slug; the researcher may hand-edit it, and every reader names the file by the plan revision its bytes carry. Spec #201 ships it.
+_Avoid_: plan mode, planning file
+
+**Plan revision**:
+The first 12 hex of a plan object's sha256 over its file bytes — the version a decision entry or a review confirm names. A changed digest is a new revision: an update's change and a researcher's hand edit alike. The recipe is pinned by a committed test vector the TS side passes too, so both languages compute one revision. Spec #201 ships it.
+_Avoid_: version number, content version
