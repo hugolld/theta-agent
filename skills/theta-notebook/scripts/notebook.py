@@ -16,10 +16,14 @@ researcher's judgment -- that judgment is the confidence entry type, and the
 two never merge.
 
 Exit codes -- the documented contract (see SKILL.md):
-  0  success; the entry is appended and named on stdout
+  0  success; the entry is appended and named on stdout, or the plan
+     operation reports the plan's path and revision
   1  usage error (bad arguments, malformed or shape-invalid evidence input,
-     or a link that names no hypothesis in the notebook)
-  2  notebook failure (the notebook cannot be read or written)
+     a link that names no hypothesis in the notebook, a malformed plan slug
+     or plan-id, a same-day plan collision, or a plan-id naming no written
+     plan)
+  2  notebook failure (the notebook or a stored plan file cannot be read
+     or written)
 
 Usage:
   python3 notebook.py --hypothesis "TEXT" --evidence <connector-output.json|->
@@ -299,13 +303,21 @@ def build_parser() -> Parser:
 		"--plan-read or an entry type",
 	)
 	parser.add_argument(
-		"--json", action="store_true", help="print the appended entry as JSON"
+		"--json",
+		action="store_true",
+		help="print the appended entry (or the plan result) as JSON",
 	)
 	return parser
 
 
-def read_evidence(spec: str, flag: str = "--evidence") -> str:
-	"""The evidence source's structured output text, file or stdin (`-`)."""
+def read_text_input(spec: str, flag: str) -> str:
+	"""A text input's bytes as UTF-8 text, file or stdin (`-`).
+
+	Reads `--evidence`, `--job-record`, and `--plan-file` alike: an
+	unreadable or empty input is a usage refusal naming the flag. The
+	text-mode read carries no CRLF through -- line endings land as LF --
+	which the plan write's as-read contract states.
+	"""
 	if spec == "-":
 		text = sys.stdin.read()
 		origin = "stdin"
@@ -855,10 +867,14 @@ def read_plan(plan_id: str) -> bytes:
 
 
 def write_plan(plan_path: Path, text: str) -> None:
-	"""Write the plan's Markdown verbatim, creating the plans directory."""
+	"""Write the plan's text as exact UTF-8 bytes, creating the directory.
+
+	Bytes, not text mode: no platform newline translation anywhere, so the
+	revision digest's input is exactly what lands on disk.
+	"""
 	try:
 		PLANS_DIR.mkdir(parents=True, exist_ok=True)
-		plan_path.write_text(text, encoding="utf-8")
+		plan_path.write_bytes(text.encode("utf-8"))
 	except OSError as error:
 		raise RecorderError(
 			f"notebook.py: cannot write {plan_path}: {error}", 2
@@ -869,15 +885,20 @@ def run_plan_op(args: argparse.Namespace) -> dict:
 	"""One plan operation: write, update, or read, result on stdout.
 
 	The plan text is read and every grammar check fires before anything is
-	touched, so a rejected input leaves no trace. The plan's bytes are
-	written verbatim -- no normalization, no added newline -- because the
-	revision digest reads exactly the bytes on disk.
+	touched, so a rejected input leaves no trace. The text is written as
+	read -- no reformatting, no added newline; line endings land as LF (the
+	text-mode read carries no CRLF through) -- and the revision digest is
+	computed over exactly the bytes on disk.
 	"""
 	if args.plan_op == "--plan-read":
 		check_plan_id(args.plan_read)
 		data = read_plan(args.plan_read)
-		return {"plan": args.plan_read, "revision": plan_revision(data)}
-	text = read_evidence(args.plan_file, "--plan-file")
+		return {
+			"plan": args.plan_read,
+			"revision": plan_revision(data),
+			"path": f"{PLANS_DIR}/{args.plan_read}.md",
+		}
+	text = read_text_input(args.plan_file, "--plan-file")
 	if args.plan_op == "--plan-write":
 		check_plan_slug(args.plan_write)
 		plan_id = f"{date.today().isoformat()}-{args.plan_write}"
@@ -896,7 +917,11 @@ def run_plan_op(args: argparse.Namespace) -> dict:
 				2,
 			)
 		write_plan(plan_path, text)
-		return {"plan": plan_id, "revision": plan_revision(text.encode("utf-8"))}
+		return {
+			"plan": plan_id,
+			"revision": plan_revision(text.encode("utf-8")),
+			"path": f"{PLANS_DIR}/{plan_id}.md",
+		}
 	check_plan_id(args.plan_update)
 	previous = plan_revision(read_plan(args.plan_update))
 	write_plan(PLANS_DIR / f"{args.plan_update}.md", text)
@@ -904,6 +929,7 @@ def run_plan_op(args: argparse.Namespace) -> dict:
 		"plan": args.plan_update,
 		"revision": plan_revision(text.encode("utf-8")),
 		"previous_revision": previous,
+		"path": f"{PLANS_DIR}/{args.plan_update}.md",
 	}
 
 
@@ -925,7 +951,6 @@ def main(argv: list[str] | None = None) -> int:
 	if getattr(args, "plan_op", None) is not None:
 		try:
 			result = run_plan_op(args)
-			result["path"] = f"{PLANS_DIR}/{result['plan']}.md"
 		except RecorderError as error:
 			fail(str(error), error.exit_code)
 		if args.json:
@@ -938,10 +963,10 @@ def main(argv: list[str] | None = None) -> int:
 		snapshot = None
 		evidence_text = ""
 		if args.evidence is not None:
-			evidence_text = read_evidence(args.evidence)
+			evidence_text = read_text_input(args.evidence, "--evidence")
 			item = parse_evidence(evidence_text)
 		elif args.job_record is not None:
-			evidence_text = read_evidence(args.job_record, "--job-record")
+			evidence_text = read_text_input(args.job_record, "--job-record")
 			item = parse_job_record(evidence_text)
 			# re-executed claims the machinery recomputed the result; the
 			# claim stands on the fetched artifacts the manifest names.

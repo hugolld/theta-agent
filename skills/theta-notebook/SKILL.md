@@ -259,8 +259,10 @@ later approval must name.
   the plan object pass, so every reader computes one revision.
 - Like an evidence-free first record, the first plan write needs the
   project's `.theta/` to exist (`mkdir .theta`); the write creates
-  `plans/` itself. Plan text is written verbatim — no normalization, no
-  added newline — because the digest reads exactly the bytes on disk.
+  `plans/` itself. Plan text is written as read — no reformatting, no
+  added newline — with line endings landing as LF (a CRLF input's endings
+  do not survive the read); the revision digest is computed over exactly
+  the bytes on disk.
 
 ```bash
 cd /path/to/research-project

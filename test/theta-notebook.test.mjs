@@ -779,8 +779,9 @@ async function scratchThetaProject(t) {
 }
 
 // The revision digest — first 12 hex of sha256 over the file bytes, the
-// recipe the committed vector below pins cross-language.
-const revisionOf = (text) => createHash("sha256").update(text, "utf8").digest("hex").slice(0, 12);
+// recipe the committed vector below pins cross-language. Delegates to the
+// file's own sha256 helper: one hash home, two recipes off it.
+const revisionOf = (text) => sha256(text).slice(0, 12);
 
 const PLAN_TEXT =
 	"# AF3 benchmark plan\n\nFold the five lysozyme variants and rank them against the controls.\n";
@@ -987,7 +988,12 @@ test("the plan-id grammar on read and update: calendar date plus slug", { skip: 
 			const args = op === "--plan-update" ? [op, planId, "--plan-file", "-"] : [op, planId];
 			const run = runRecorder(args, { cwd: project, stdin: PLAN_TEXT });
 			assert.equal(run.status, 1, `${name} ${op}: should exit 1`);
-			assert.notEqual(run.stderr.trim(), "", `${name} ${op}: stderr says what is wrong`);
+			// The discriminating stderr: this refusal is the grammar's, not a
+			// generic non-empty one (the connector-scripts invariant).
+			assert.ok(
+				run.stderr.includes("plan ids are <YYYY-MM-DD>-<slug>"),
+				`${name} ${op}: stderr names the plan-id grammar`,
+			);
 			assert.equal(run.stdout, "");
 		}
 	}
@@ -1007,26 +1013,29 @@ test("the plan-id grammar on read and update: calendar date plus slug", { skip: 
 });
 
 test("plan-flag pairing errors exit 1 and write nothing", { skip: skipReason }, async (t) => {
+	// Each case also names the stderr that discriminates it (the
+	// connector-scripts invariant): the refusal must be this one, not any
+	// non-empty stderr.
 	const cases = [
-		{ name: "write without --plan-file", args: ["--plan-write", "af3-benchmark"] },
-		{ name: "update without --plan-file", args: ["--plan-update", planIdToday("af3-benchmark")] },
-		{ name: "--plan-file with read", args: ["--plan-read", planIdToday("x"), "--plan-file", "-"], stdin: PLAN_TEXT },
-		{ name: "--plan-file with an entry", args: ["--decision", "x", "--plan-file", "-"], stdin: PLAN_TEXT },
-		{ name: "write beside an entry flag", args: ["--plan-write", "af3-benchmark", "--plan-file", "-", "--decision", "x"], stdin: PLAN_TEXT },
-		{ name: "read with --grade", args: ["--plan-read", planIdToday("x"), "--grade", "asserted"] },
-		{ name: "write with --evidence", args: ["--plan-write", "af3-benchmark", "--plan-file", "-", "--evidence", evidenceFixture, "--grade", "asserted"], stdin: PLAN_TEXT },
-		{ name: "write with --supports", args: ["--plan-write", "af3-benchmark", "--plan-file", "-", "--supports", "hyp-0001"], stdin: PLAN_TEXT },
-		{ name: "write with --on", args: ["--plan-write", "af3-benchmark", "--plan-file", "-", "--on", "hyp-0001"], stdin: PLAN_TEXT },
-		{ name: "write with --job-record", args: ["--plan-write", "af3-benchmark", "--plan-file", "-", "--job-record", jobRecordFixture, "--grade", "asserted"], stdin: PLAN_TEXT },
-		{ name: "empty plan text", args: ["--plan-write", "af3-benchmark", "--plan-file", "-"], stdin: "  \n" },
-		{ name: "plan file missing", args: ["--plan-write", "af3-benchmark", "--plan-file", "/nonexistent/plan.md"] },
-		{ name: "no operation at all", args: [] },
+		{ name: "write without --plan-file", args: ["--plan-write", "af3-benchmark"], err: "--plan-write requires --plan-file" },
+		{ name: "update without --plan-file", args: ["--plan-update", planIdToday("af3-benchmark")], err: "--plan-update requires --plan-file" },
+		{ name: "--plan-file with read", args: ["--plan-read", planIdToday("x"), "--plan-file", "-"], stdin: PLAN_TEXT, err: "--plan-file is not accepted with --plan-read" },
+		{ name: "--plan-file with an entry", args: ["--decision", "x", "--plan-file", "-"], stdin: PLAN_TEXT, err: "--plan-file is only accepted with --plan-write or" },
+		{ name: "write beside an entry flag", args: ["--plan-write", "af3-benchmark", "--plan-file", "-", "--decision", "x"], stdin: PLAN_TEXT, err: "not accepted with an entry type -- one operation per call" },
+		{ name: "read with --grade", args: ["--plan-read", planIdToday("x"), "--grade", "asserted"], err: "--grade is not accepted with --plan-read" },
+		{ name: "write with --evidence", args: ["--plan-write", "af3-benchmark", "--plan-file", "-", "--evidence", evidenceFixture, "--grade", "asserted"], stdin: PLAN_TEXT, err: "--evidence is not accepted with --plan-write" },
+		{ name: "write with --supports", args: ["--plan-write", "af3-benchmark", "--plan-file", "-", "--supports", "hyp-0001"], stdin: PLAN_TEXT, err: "--supports is not accepted with --plan-write" },
+		{ name: "write with --on", args: ["--plan-write", "af3-benchmark", "--plan-file", "-", "--on", "hyp-0001"], stdin: PLAN_TEXT, err: "--on is not accepted with --plan-write" },
+		{ name: "write with --job-record", args: ["--plan-write", "af3-benchmark", "--plan-file", "-", "--job-record", jobRecordFixture, "--grade", "asserted"], stdin: PLAN_TEXT, err: "--job-record is not accepted with --plan-write" },
+		{ name: "empty plan text", args: ["--plan-write", "af3-benchmark", "--plan-file", "-"], stdin: "  \n", err: "--plan-file is empty" },
+		{ name: "plan file missing", args: ["--plan-write", "af3-benchmark", "--plan-file", "/nonexistent/plan.md"], err: "--plan-file unreadable" },
+		{ name: "no operation at all", args: [], err: "or plan operation (--plan-write, --plan-update, --plan-read) is required" },
 	];
-	for (const { name, args, stdin } of cases) {
+	for (const { name, args, stdin, err } of cases) {
 		const project = await scratchThetaProject(t);
 		const run = runRecorder(args, { cwd: project, stdin });
 		assert.equal(run.status, 1, `${name}: should exit 1`);
-		assert.notEqual(run.stderr.trim(), "", `${name}: stderr must say what is wrong`);
+		assert.ok(run.stderr.includes(err), `${name}: stderr names the refusal (${err})`);
 		assert.equal(run.stdout, "", `${name}: no stdout on failure`);
 		assert.deepEqual(await readdir(path.join(project, ".theta")), [], `${name}: wrote nothing`);
 	}
