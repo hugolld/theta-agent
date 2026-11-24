@@ -16,10 +16,14 @@ researcher's judgment -- that judgment is the confidence entry type, and the
 two never merge.
 
 Exit codes -- the documented contract (see SKILL.md):
-  0  success; the entry is appended and named on stdout
+  0  success; the entry is appended and named on stdout, or the plan
+     operation reports the plan's path and revision
   1  usage error (bad arguments, malformed or shape-invalid evidence input,
-     or a link that names no hypothesis in the notebook)
-  2  notebook failure (the notebook cannot be read or written)
+     a link that names no hypothesis in the notebook, a malformed plan slug
+     or plan-id, a same-day plan collision, or a plan-id naming no written
+     plan)
+  2  notebook failure (the notebook or a stored plan file cannot be read
+     or written)
 
 Usage:
   python3 notebook.py --hypothesis "TEXT" --evidence <connector-output.json|->
@@ -31,6 +35,9 @@ Usage:
   python3 notebook.py --confidence "TEXT" --on hyp-NNNN [--json]
   python3 notebook.py --method "TEXT" --job-record <job-record.json|->
       --grade {asserted,re-executed} [--json]
+  python3 notebook.py --plan-write <slug> --plan-file <plan.md|-> [--json]
+  python3 notebook.py --plan-update <date>-<slug> --plan-file <plan.md|-> [--json]
+  python3 notebook.py --plan-read <date>-<slug> [--json]
 
 `--evidence` is required for hypothesis and observation entries, optional
 for method and decision, and rejected for confidence (a judgment is not a
@@ -47,6 +54,20 @@ observed date, and the artifact manifest when the artifacts were fetched
 are `asserted` and `re-executed` (cross-checked is a retrieval's mark). The
 grade `re-executed` claims the machinery recomputed the result, so the
 recorder accepts it only when the record carries the artifact manifest.
+
+Plan operations (parent #200) carry plan text only, no evidence semantics
+-- the plan is a document, not a graded claim. `--plan-write` creates
+`.theta/plans/<YYYY-MM-DD>-<slug>.md` (the slug: 1-48 characters of
+lowercase letters, digits, and single hyphens) and refuses a slug that
+already names a plan today -- a same-day collision never clobbers.
+`--plan-update` overwrites the named plan-id with new Markdown: the
+plan-id is immutable, and the new content is a new revision. `--plan-read`
+reports the path and the current revision digest. The revision digest is
+the first 12 hex of sha256 over the file bytes -- a changed digest is a
+new revision, and a researcher's hand edit is a new revision, not an
+error: the recorder is the loop's writer, not the file's owner. The
+recipe is a cross-language contract (the committed test vector), so the
+TS side of the plan object computes the same revision.
 
 Contract basis: docs/adr/0003-provenance-is-a-project-notebook.md,
 docs/adr/0004-compute-is-a-native-mcp-server.md, and the connector-script
@@ -69,6 +90,7 @@ from typing import NoReturn
 THETA_DIR = Path(".theta")
 NOTEBOOK_PATH = THETA_DIR / "notebook.jsonl"
 EVIDENCE_DIR = THETA_DIR / "evidence"
+PLANS_DIR = THETA_DIR / "plans"
 
 GRADES = ("asserted", "cross-checked", "re-executed")
 
@@ -95,6 +117,16 @@ DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 JOB_ID_RE = re.compile(r"^\d+$")
 RUN_NAME_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 DIGEST_RE = re.compile(r"^[0-9a-f]{64}$")
+
+#: The plan object's naming grammar (parent #200, spec #201): a plan-id is
+#: the recording date plus a short kebab slug -- sortable, grep-able, no
+#: UUID noise. The slug is lowercase letters, digits, and single hyphens
+#: (a leading, trailing, or doubled hyphen is not a slug), capped at 48 so
+#: the date-prefixed file name stays readable; the date half must name a
+#: real calendar date, the same check `calendar_date` applies to entries.
+PLAN_SLUG_MAX = 48
+PLAN_SLUG_RE = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
+PLAN_ID_RE = re.compile(r"^(\d{4}-\d{2}-\d{2})-([a-z0-9]+(?:-[a-z0-9]+)*)$")
 
 _CONTROL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 _WHITESPACE = re.compile(r"\s+")
@@ -183,7 +215,11 @@ def build_parser() -> Parser:
 		".theta/, storing the evidence source's structured output as a "
 		"content-addressed evidence item when the entry carries evidence.",
 	)
-	types = parser.add_mutually_exclusive_group(required=True)
+	# The entry types are one mutually exclusive family and the plan
+	# operations another; neither family is required at the argparse layer,
+	# because one call must carry exactly one operation across both --
+	# checked below, where the refusal can name both families.
+	types = parser.add_mutually_exclusive_group()
 	types.add_argument(
 		"--hypothesis", help="the hypothesis text to record (evidence required)",
 	)
@@ -237,14 +273,51 @@ def build_parser() -> Parser:
 		help="mark the recorded evidence as supporting this existing "
 		"hypothesis; observation entries only",
 	)
+	plans = parser.add_mutually_exclusive_group()
+	plans.add_argument(
+		"--plan-write",
+		metavar="SLUG",
+		help="write a new plan file .theta/plans/<date>-<slug>.md from "
+		"--plan-file's Markdown; refuses a slug that already names a plan "
+		"today (a same-day collision never clobbers)",
+	)
+	plans.add_argument(
+		"--plan-update",
+		metavar="PLAN_ID",
+		help="overwrite the named plan with --plan-file's Markdown -- the "
+		"plan-id is immutable, the new content is a new revision; the report "
+		"names the revision it replaces",
+	)
+	plans.add_argument(
+		"--plan-read",
+		metavar="PLAN_ID",
+		help="report the named plan's path and its current revision digest "
+		"-- the file's own bytes decide, so a hand edit reads as a new "
+		"revision",
+	)
 	parser.add_argument(
-		"--json", action="store_true", help="print the appended entry as JSON"
+		"--plan-file",
+		metavar="PATH|-",
+		help="path to the plan's Markdown, or - to read it from stdin; "
+		"required with --plan-write and --plan-update, not accepted with "
+		"--plan-read or an entry type",
+	)
+	parser.add_argument(
+		"--json",
+		action="store_true",
+		help="print the appended entry (or the plan result) as JSON",
 	)
 	return parser
 
 
-def read_evidence(spec: str, flag: str = "--evidence") -> str:
-	"""The evidence source's structured output text, file or stdin (`-`)."""
+def read_text_input(spec: str, flag: str) -> str:
+	"""A text input's bytes as UTF-8 text, file or stdin (`-`).
+
+	Reads `--evidence`, `--job-record`, and `--plan-file` alike: an
+	unreadable or empty input is a usage refusal naming the flag. The
+	text-mode read carries no CRLF through -- line endings land as LF --
+	which the plan write's as-read contract states.
+	"""
 	if spec == "-":
 		text = sys.stdin.read()
 		origin = "stdin"
@@ -606,8 +679,78 @@ def write_entry(entry: dict, snapshot: tuple[str, str] | None) -> None:
 		) from None
 
 
+#: The three plan operations, as the CLI spells them, with the value each
+#: one carries (the slug a write coins, the plan-id the other two name).
+PLAN_OPS = {
+	"--plan-write": "plan_write",
+	"--plan-update": "plan_update",
+	"--plan-read": "plan_read",
+}
+
+
+def plan_op_of(args: argparse.Namespace) -> str | None:
+	"""The plan operation this call carries, if any (checked before types)."""
+	for flag, dest in PLAN_OPS.items():
+		if getattr(args, dest) is not None:
+			return flag
+	return None
+
+
+def parse_plan_args(args: argparse.Namespace, plan_op: str) -> argparse.Namespace:
+	"""Validate a plan operation's flags; plan ops carry plan text only.
+
+	One operation per call: a plan flag beside an entry type refuses, and
+	the entry-only flags (evidence, grades, links) refuse with every plan
+	operation -- a plan is a document, not a graded claim. The slug and
+	plan-id grammar checks sit in run_plan_op, where the shared
+	RecorderError-to-exit translation already lives.
+	"""
+	if any(getattr(args, t) is not None for t in TYPE_PREFIX):
+		fail(
+			f"notebook.py: {plan_op} is not accepted with an entry type -- one "
+			"operation per call",
+			1,
+		)
+	for dest in ("evidence", "job_record", "grade", "on", "supports"):
+		if getattr(args, dest) is not None:
+			flag = f"--{dest.replace('_', '-')}"
+			fail(
+				f"notebook.py: {flag} is not accepted with {plan_op}; plan "
+				"operations carry plan text only",
+				1,
+			)
+	if plan_op == "--plan-read":
+		if args.plan_file is not None:
+			fail("notebook.py: --plan-file is not accepted with --plan-read", 1)
+	else:
+		if args.plan_file is None:
+			fail(
+				f"notebook.py: {plan_op} requires --plan-file (path or -) "
+				"carrying the plan's Markdown",
+				1,
+			)
+	args.plan_op = plan_op
+	return args
+
+
 def parse_args(argv: list[str] | None) -> argparse.Namespace:
 	args = build_parser().parse_args(argv)
+	plan_op = plan_op_of(args)
+	if plan_op is not None:
+		return parse_plan_args(args, plan_op)
+	if not any(getattr(args, t) is not None for t in TYPE_PREFIX):
+		fail(
+			"notebook.py: one entry type (--hypothesis, --method, "
+			"--observation, --decision, --confidence) or plan operation "
+			"(--plan-write, --plan-update, --plan-read) is required",
+			1,
+		)
+	if args.plan_file is not None:
+		fail(
+			"notebook.py: --plan-file is only accepted with --plan-write or "
+			"--plan-update",
+			1,
+		)
 	args.type = next(t for t in TYPE_PREFIX if getattr(args, t) is not None)
 	args.text = collapse_ws(getattr(args, args.type))
 	if not args.text:
@@ -670,20 +813,160 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
 	return args
 
 
+def plan_revision(data: bytes) -> str:
+	"""The first 12 hex of sha256 over the plan file's bytes.
+
+	The plan's revision -- distinct from evidence snapshots' full sha256
+	content addressing -- and a cross-language contract: the TS side of the
+	plan object passes the same committed test vector, so both languages
+	compute one revision for one plan. A changed digest is a new revision.
+	"""
+	return hashlib.sha256(data).hexdigest()[:12]
+
+
+def check_plan_slug(slug: str) -> None:
+	"""The write path's slug grammar, or the usage refusal naming it."""
+	if len(slug) > PLAN_SLUG_MAX or not PLAN_SLUG_RE.match(slug):
+		raise RecorderError(
+			f"notebook.py: --plan-write slug must be 1-{PLAN_SLUG_MAX} characters "
+			"of lowercase letters, digits, and single hyphens (a leading, "
+			f"trailing, or doubled hyphen is not a slug), got: {slug!r}",
+			1,
+		)
+
+
+def check_plan_id(plan_id: str) -> None:
+	"""The read/update path's plan-id grammar: a calendar date plus a slug."""
+	match = PLAN_ID_RE.match(plan_id)
+	if match is None or len(match.group(2)) > PLAN_SLUG_MAX or not calendar_date(
+		match.group(1)
+	):
+		raise RecorderError(
+			f"notebook.py: plan ids are <YYYY-MM-DD>-<slug> -- a real calendar "
+			"date and a lowercase kebab slug, as --plan-write names it on "
+			f"stdout, got: {plan_id!r}",
+			1,
+		)
+
+
+def read_plan(plan_id: str) -> bytes:
+	"""An existing plan file's bytes, or the refusal that names why not."""
+	plan_path = PLANS_DIR / f"{plan_id}.md"
+	try:
+		return plan_path.read_bytes()
+	except FileNotFoundError:
+		raise RecorderError(
+			f"notebook.py: no plan {plan_id} in {PLANS_DIR} -- the id a write "
+			"names on stdout is the id a read or update takes",
+			1,
+		) from None
+	except OSError as error:
+		raise RecorderError(
+			f"notebook.py: cannot read {plan_path}: {error}", 2
+		) from None
+
+
+def write_plan(plan_path: Path, text: str) -> None:
+	"""Write the plan's text as exact UTF-8 bytes, creating the directory.
+
+	Bytes, not text mode: no platform newline translation anywhere, so the
+	revision digest's input is exactly what lands on disk.
+	"""
+	try:
+		PLANS_DIR.mkdir(parents=True, exist_ok=True)
+		plan_path.write_bytes(text.encode("utf-8"))
+	except OSError as error:
+		raise RecorderError(
+			f"notebook.py: cannot write {plan_path}: {error}", 2
+		) from None
+
+
+def run_plan_op(args: argparse.Namespace) -> dict:
+	"""One plan operation: write, update, or read, result on stdout.
+
+	The plan text is read and every grammar check fires before anything is
+	touched, so a rejected input leaves no trace. The text is written as
+	read -- no reformatting, no added newline; line endings land as LF (the
+	text-mode read carries no CRLF through) -- and the revision digest is
+	computed over exactly the bytes on disk.
+	"""
+	if args.plan_op == "--plan-read":
+		check_plan_id(args.plan_read)
+		data = read_plan(args.plan_read)
+		return {
+			"plan": args.plan_read,
+			"revision": plan_revision(data),
+			"path": f"{PLANS_DIR}/{args.plan_read}.md",
+		}
+	text = read_text_input(args.plan_file, "--plan-file")
+	if args.plan_op == "--plan-write":
+		check_plan_slug(args.plan_write)
+		plan_id = f"{date.today().isoformat()}-{args.plan_write}"
+		plan_path = PLANS_DIR / f"{plan_id}.md"
+		if plan_path.exists():
+			raise RecorderError(
+				f"notebook.py: plan {plan_id} already exists -- a same-day "
+				"collision never clobbers; write a different slug, or "
+				f"--plan-update {plan_id} to revise the recorded plan",
+				1,
+			)
+		if not THETA_DIR.is_dir():
+			raise RecorderError(
+				"notebook.py: .theta is absent -- create the project's .theta "
+				"before the first plan (an evidenced record creates it too)",
+				2,
+			)
+		write_plan(plan_path, text)
+		return {
+			"plan": plan_id,
+			"revision": plan_revision(text.encode("utf-8")),
+			"path": f"{PLANS_DIR}/{plan_id}.md",
+		}
+	check_plan_id(args.plan_update)
+	previous = plan_revision(read_plan(args.plan_update))
+	write_plan(PLANS_DIR / f"{args.plan_update}.md", text)
+	return {
+		"plan": args.plan_update,
+		"revision": plan_revision(text.encode("utf-8")),
+		"previous_revision": previous,
+		"path": f"{PLANS_DIR}/{args.plan_update}.md",
+	}
+
+
+def print_plan(result: dict, plan_op: str) -> None:
+	"""Report the plan path and its revision, connector-footer style."""
+	line = f"plan {result['path']} revision {result['revision']}"
+	previous = result.get("previous_revision")
+	if previous is not None:
+		line += f" (was {previous})"
+	verb = {"--plan-write": "wrote", "--plan-update": "updated"}.get(plan_op)
+	print(f"{verb} {line}" if verb else line)
+
+
 def main(argv: list[str] | None = None) -> int:
 	require_python()
 	args = parse_args(argv)
 	if THETA_DIR.exists() and not THETA_DIR.is_dir():
 		fail("notebook.py: .theta exists but is not a directory", 2)
+	if getattr(args, "plan_op", None) is not None:
+		try:
+			result = run_plan_op(args)
+		except RecorderError as error:
+			fail(str(error), error.exit_code)
+		if args.json:
+			emit(result)
+		else:
+			print_plan(result, args.plan_op)
+		return 0
 	try:
 		item = None
 		snapshot = None
 		evidence_text = ""
 		if args.evidence is not None:
-			evidence_text = read_evidence(args.evidence)
+			evidence_text = read_text_input(args.evidence, "--evidence")
 			item = parse_evidence(evidence_text)
 		elif args.job_record is not None:
-			evidence_text = read_evidence(args.job_record, "--job-record")
+			evidence_text = read_text_input(args.job_record, "--job-record")
 			item = parse_job_record(evidence_text)
 			# re-executed claims the machinery recomputed the result; the
 			# claim stands on the fetched artifacts the manifest names.

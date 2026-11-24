@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
+import { existsSync } from "node:fs";
 import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -34,6 +35,15 @@ const jobRecordFixture = fileURLToPath(
 const jobRecordArgumentsDigest =
 	"b7fadc2c62709af32f3d165655772cd301c5050db8bff6e9df46579f79e155a1";
 const pubmedFixtures = fileURLToPath(new URL("fixtures/pubmed/", import.meta.url));
+// The plan test vector (spec #201): known Markdown bytes to a known revision
+// digest. The recipe — first 12 hex of sha256 over the file bytes — is a
+// cross-language contract: the TS side of the plan object (the decision-entry
+// citation and the review gate, parent #200 T2/T3) pins the same fixture and
+// the same literal, so both languages compute one revision for one plan.
+const planVectorFixture = fileURLToPath(
+	new URL("fixtures/notebook/plan-vector.md", import.meta.url),
+);
+const planVectorRevision = "c6f6084b0e5f";
 
 // The script requires Python 3.11+. `python3` is 3.9 on some macOS setups, so
 // probe the versioned names too — same fallback list the script's version gate
@@ -753,4 +763,356 @@ test("a raw submit's job record: template null, no manifest, footer says so", { 
 	const [entry] = await readEntries(project);
 	assert.equal(entry.evidence[0].template, null);
 	assert.equal(entry.evidence[0].artifacts, undefined);
+});
+
+// --- The plan-object path (spec #201, parent #200): .theta/plans/ write,
+// --- read, update — the plan document the loop states before Execute. The
+// --- ops carry plan text only: no evidence semantics, no notebook entries.
+
+// A scratch project with `.theta/` already created: plan ops follow the
+// entry rule that the researcher (or an evidenced record) creates the
+// directory, and a fresh-project plan write refuses until then.
+async function scratchThetaProject(t) {
+	const project = await scratchProject(t);
+	await mkdir(path.join(project, ".theta"));
+	return project;
+}
+
+// The revision digest — first 12 hex of sha256 over the file bytes, the
+// recipe the committed vector below pins cross-language. Delegates to the
+// file's own sha256 helper: one hash home, two recipes off it.
+const revisionOf = (text) => sha256(text).slice(0, 12);
+
+const PLAN_TEXT =
+	"# AF3 benchmark plan\n\nFold the five lysozyme variants and rank them against the controls.\n";
+const PLAN_REVISED =
+	"# AF3 benchmark plan\n\nFold the five variants, then the two controls, ranking every output by pLDDT.\n";
+const planPath = (project, planId) => path.join(project, ".theta", "plans", `${planId}.md`);
+const planIdToday = (slug) => `${localDate()}-${slug}`;
+
+test("plan write creates the file and reports path and revision", { skip: skipReason }, async (t) => {
+	const project = await scratchThetaProject(t);
+	const run = runRecorder(["--plan-write", "af3-benchmark", "--plan-file", "-"], {
+		cwd: project,
+		stdin: PLAN_TEXT,
+	});
+	assert.equal(run.status, 0, `stderr: ${run.stderr}`);
+	assert.equal(run.stderr, "");
+
+	const planId = planIdToday("af3-benchmark");
+	const expectedPath = `.theta/plans/${planId}.md`;
+	assert.equal(
+		run.stdout.trimEnd(),
+		`wrote plan ${expectedPath} revision ${revisionOf(PLAN_TEXT)}`,
+	);
+	// The file: today's date, the slug, the plan's text as read (LF endings).
+	assert.equal(
+		await readFile(planPath(project, planId), "utf8"),
+		PLAN_TEXT,
+		"plan text is written as read",
+	);
+	assert.deepEqual(await readdir(path.join(project, ".theta")), ["plans"]);
+});
+
+test("the committed plan vector: known bytes to the pinned revision digest", { skip: skipReason }, async (t) => {
+	// The cross-language contract (spec #201): these fixture bytes digest to
+	// this literal revision. The TS side (parent #200 T2/T3) pins the same
+	// pair, so both languages compute one revision for one plan.
+	const project = await scratchThetaProject(t);
+	const run = runRecorder(["--plan-write", "plan-vector", "--plan-file", planVectorFixture], {
+		cwd: project,
+	});
+	assert.equal(run.status, 0, `stderr: ${run.stderr}`);
+	assert.ok(
+		run.stdout.includes(`revision ${planVectorRevision}`),
+		`stdout names the pinned revision: ${run.stdout}`,
+	);
+	// The read op reports the same revision for the same bytes.
+	const readBack = runRecorder(["--plan-read", planIdToday("plan-vector")], { cwd: project });
+	assert.equal(readBack.status, 0, `stderr: ${readBack.stderr}`);
+	assert.ok(
+		readBack.stdout.includes(`revision ${planVectorRevision}`),
+		`read names the pinned revision: ${readBack.stdout}`,
+	);
+});
+
+test("plan read reports the path and the current revision", { skip: skipReason }, async (t) => {
+	const project = await scratchThetaProject(t);
+	const write = runRecorder(["--plan-write", "af3-benchmark", "--plan-file", "-"], {
+		cwd: project,
+		stdin: PLAN_TEXT,
+	});
+	assert.equal(write.status, 0, `stderr: ${write.stderr}`);
+
+	const planId = planIdToday("af3-benchmark");
+	const run = runRecorder(["--plan-read", planId], { cwd: project });
+	assert.equal(run.status, 0, `stderr: ${run.stderr}`);
+	assert.equal(
+		run.stdout.trimEnd(),
+		`plan .theta/plans/${planId}.md revision ${revisionOf(PLAN_TEXT)}`,
+	);
+});
+
+test("plan update overwrites with a new revision, naming the one it replaces", { skip: skipReason }, async (t) => {
+	const project = await scratchThetaProject(t);
+	const write = runRecorder(["--plan-write", "af3-benchmark", "--plan-file", "-"], {
+		cwd: project,
+		stdin: PLAN_TEXT,
+	});
+	assert.equal(write.status, 0, `stderr: ${write.stderr}`);
+
+	const planId = planIdToday("af3-benchmark");
+	const run = runRecorder(["--plan-update", planId, "--plan-file", "-"], {
+		cwd: project,
+		stdin: PLAN_REVISED,
+	});
+	assert.equal(run.status, 0, `stderr: ${run.stderr}`);
+	assert.equal(
+		run.stdout.trimEnd(),
+		`updated plan .theta/plans/${planId}.md revision ${revisionOf(PLAN_REVISED)} (was ${revisionOf(PLAN_TEXT)})`,
+	);
+	// The plan-id is immutable across the update: same file, new bytes.
+	assert.equal(await readFile(planPath(project, planId), "utf8"), PLAN_REVISED);
+	const readBack = runRecorder(["--plan-read", planId], { cwd: project });
+	assert.ok(readBack.stdout.includes(`revision ${revisionOf(PLAN_REVISED)}`));
+});
+
+test("a hand edit is a new revision, not an error: read reports the edited bytes", { skip: skipReason }, async (t) => {
+	const project = await scratchThetaProject(t);
+	const planId = planIdToday("af3-benchmark");
+	const write = runRecorder(["--plan-write", "af3-benchmark", "--plan-file", "-"], {
+		cwd: project,
+		stdin: PLAN_TEXT,
+	});
+	assert.equal(write.status, 0, `stderr: ${write.stderr}`);
+
+	// The researcher hand-edits the Markdown — the recorder is the loop's
+	// writer, not the file's owner. Reading the plan afterwards reports the
+	// edited bytes' digest: the revision later approval must name.
+	const handEdited = `${PLAN_TEXT}Added by hand: the negative control arm.\n`;
+	await writeFile(planPath(project, planId), handEdited, "utf8");
+	const run = runRecorder(["--plan-read", planId], { cwd: project });
+	assert.equal(run.status, 0, `stderr: ${run.stderr}`);
+	assert.ok(
+		run.stdout.includes(`revision ${revisionOf(handEdited)}`),
+		`read names the hand-edited revision: ${run.stdout}`,
+	);
+	// And the recorder can still update over the hand edit.
+	const update = runRecorder(["--plan-update", planId, "--plan-file", "-"], {
+		cwd: project,
+		stdin: PLAN_REVISED,
+	});
+	assert.equal(update.status, 0, `stderr: ${update.stderr}`);
+	assert.ok(update.stdout.includes(`(was ${revisionOf(handEdited)})`));
+});
+
+test("a same-day collision refuses: the slug names a plan that already exists", { skip: skipReason }, async (t) => {
+	const project = await scratchThetaProject(t);
+	const first = runRecorder(["--plan-write", "af3-benchmark", "--plan-file", "-"], {
+		cwd: project,
+		stdin: PLAN_TEXT,
+	});
+	assert.equal(first.status, 0, `stderr: ${first.stderr}`);
+
+	const second = runRecorder(["--plan-write", "af3-benchmark", "--plan-file", "-"], {
+		cwd: project,
+		stdin: PLAN_REVISED,
+	});
+	assert.equal(second.status, 1);
+	assert.match(second.stderr, /already exists/);
+	assert.match(second.stderr, /af3-benchmark/);
+	assert.match(second.stderr, /--plan-update/);
+	assert.equal(second.stdout, "");
+	// The first plan is unchanged — a collision never clobbers.
+	assert.equal(await readFile(planPath(project, planIdToday("af3-benchmark")), "utf8"), PLAN_TEXT);
+});
+
+test("the slug grammar: date-prefixable kebab, lowercase, capped", { skip: skipReason }, async (t) => {
+	const valid = ["af3", "af3-benchmark", "a1-b2-c3", "x".repeat(48)];
+	for (const slug of valid) {
+		const project = await scratchThetaProject(t);
+		const run = runRecorder(["--plan-write", slug, "--plan-file", "-"], {
+			cwd: project,
+			stdin: PLAN_TEXT,
+		});
+		assert.equal(run.status, 0, `${slug}: should write`);
+		assert.ok(existsSync(planPath(project, planIdToday(slug))), `${slug}: file named by the slug`);
+	}
+	const invalid = [
+		["uppercase", "AF3-Benchmark"],
+		["underscore", "af3_benchmark"],
+		["space", "af3 benchmark"],
+		["leading hyphen", "-af3"],
+		["trailing hyphen", "af3-"],
+		["double hyphen", "af3--benchmark"],
+		["dot separator", "af3.benchmark"],
+		["path escape", "../escape"],
+		["non-ascii", "af3-é"],
+		["over the cap", "a".repeat(49)],
+	];
+	for (const [name, slug] of invalid) {
+		const project = await scratchThetaProject(t);
+		// The `=` form hands argparse the slug verbatim -- a leading hyphen
+		// would otherwise read as a flag before the grammar check runs.
+		const run = runRecorder([`--plan-write=${slug}`, "--plan-file", "-"], {
+			cwd: project,
+			stdin: PLAN_TEXT,
+		});
+		assert.equal(run.status, 1, `${name}: should exit 1`);
+		assert.match(run.stderr, /slug/, `${name}: stderr names the slug grammar`);
+		assert.equal(run.stdout, "");
+		assert.deepEqual(
+			await readdir(path.join(project, ".theta")),
+			[],
+			`${name}: wrote nothing`,
+		);
+	}
+});
+
+test("the plan-id grammar on read and update: calendar date plus slug", { skip: skipReason }, async (t) => {
+	const project = await scratchThetaProject(t);
+	const write = runRecorder(["--plan-write", "af3-benchmark", "--plan-file", "-"], {
+		cwd: project,
+		stdin: PLAN_TEXT,
+	});
+	assert.equal(write.status, 0, `stderr: ${write.stderr}`);
+
+	for (const [name, planId] of [
+		["slug without a date", "af3-benchmark"],
+		["date not calendar-valid", "2026-13-01-af3"],
+		["date not shaped", "20261122-af3"],
+		["uppercase slug", "2026-11-22-AF3"],
+		["path escape", "../../etc/passwd"],
+	]) {
+		for (const op of ["--plan-read", "--plan-update"]) {
+			const args = op === "--plan-update" ? [op, planId, "--plan-file", "-"] : [op, planId];
+			const run = runRecorder(args, { cwd: project, stdin: PLAN_TEXT });
+			assert.equal(run.status, 1, `${name} ${op}: should exit 1`);
+			// The discriminating stderr: this refusal is the grammar's, not a
+			// generic non-empty one (the connector-scripts invariant).
+			assert.ok(
+				run.stderr.includes("plan ids are <YYYY-MM-DD>-<slug>"),
+				`${name} ${op}: stderr names the plan-id grammar`,
+			);
+			assert.equal(run.stdout, "");
+		}
+	}
+
+	// A well-shaped plan-id that names no written plan is a usage error too.
+	const missing = runRecorder(["--plan-read", "2026-01-01-none-such"], { cwd: project });
+	assert.equal(missing.status, 1);
+	assert.match(missing.stderr, /no plan/);
+	assert.match(missing.stderr, /2026-01-01-none-such/);
+
+	const updateMissing = runRecorder(["--plan-update", "2026-01-01-none-such", "--plan-file", "-"], {
+		cwd: project,
+		stdin: PLAN_TEXT,
+	});
+	assert.equal(updateMissing.status, 1);
+	assert.match(updateMissing.stderr, /no plan/);
+});
+
+test("plan-flag pairing errors exit 1 and write nothing", { skip: skipReason }, async (t) => {
+	// Each case also names the stderr that discriminates it (the
+	// connector-scripts invariant): the refusal must be this one, not any
+	// non-empty stderr.
+	const cases = [
+		{ name: "write without --plan-file", args: ["--plan-write", "af3-benchmark"], err: "--plan-write requires --plan-file" },
+		{ name: "update without --plan-file", args: ["--plan-update", planIdToday("af3-benchmark")], err: "--plan-update requires --plan-file" },
+		{ name: "--plan-file with read", args: ["--plan-read", planIdToday("x"), "--plan-file", "-"], stdin: PLAN_TEXT, err: "--plan-file is not accepted with --plan-read" },
+		{ name: "--plan-file with an entry", args: ["--decision", "x", "--plan-file", "-"], stdin: PLAN_TEXT, err: "--plan-file is only accepted with --plan-write or" },
+		{ name: "write beside an entry flag", args: ["--plan-write", "af3-benchmark", "--plan-file", "-", "--decision", "x"], stdin: PLAN_TEXT, err: "not accepted with an entry type -- one operation per call" },
+		{ name: "read with --grade", args: ["--plan-read", planIdToday("x"), "--grade", "asserted"], err: "--grade is not accepted with --plan-read" },
+		{ name: "write with --evidence", args: ["--plan-write", "af3-benchmark", "--plan-file", "-", "--evidence", evidenceFixture, "--grade", "asserted"], stdin: PLAN_TEXT, err: "--evidence is not accepted with --plan-write" },
+		{ name: "write with --supports", args: ["--plan-write", "af3-benchmark", "--plan-file", "-", "--supports", "hyp-0001"], stdin: PLAN_TEXT, err: "--supports is not accepted with --plan-write" },
+		{ name: "write with --on", args: ["--plan-write", "af3-benchmark", "--plan-file", "-", "--on", "hyp-0001"], stdin: PLAN_TEXT, err: "--on is not accepted with --plan-write" },
+		{ name: "write with --job-record", args: ["--plan-write", "af3-benchmark", "--plan-file", "-", "--job-record", jobRecordFixture, "--grade", "asserted"], stdin: PLAN_TEXT, err: "--job-record is not accepted with --plan-write" },
+		{ name: "empty plan text", args: ["--plan-write", "af3-benchmark", "--plan-file", "-"], stdin: "  \n", err: "--plan-file is empty" },
+		{ name: "plan file missing", args: ["--plan-write", "af3-benchmark", "--plan-file", "/nonexistent/plan.md"], err: "--plan-file unreadable" },
+		{ name: "no operation at all", args: [], err: "or plan operation (--plan-write, --plan-update, --plan-read) is required" },
+	];
+	for (const { name, args, stdin, err } of cases) {
+		const project = await scratchThetaProject(t);
+		const run = runRecorder(args, { cwd: project, stdin });
+		assert.equal(run.status, 1, `${name}: should exit 1`);
+		assert.ok(run.stderr.includes(err), `${name}: stderr names the refusal (${err})`);
+		assert.equal(run.stdout, "", `${name}: no stdout on failure`);
+		assert.deepEqual(await readdir(path.join(project, ".theta")), [], `${name}: wrote nothing`);
+	}
+});
+
+test("plan ops leave the notebook alone; entries sequence after plans", { skip: skipReason }, async (t) => {
+	const project = await scratchThetaProject(t);
+	const write = runRecorder(["--plan-write", "af3-benchmark", "--plan-file", "-"], {
+		cwd: project,
+		stdin: PLAN_TEXT,
+	});
+	assert.equal(write.status, 0, `stderr: ${write.stderr}`);
+	const read = runRecorder(["--plan-read", planIdToday("af3-benchmark")], { cwd: project });
+	assert.equal(read.status, 0, `stderr: ${read.stderr}`);
+
+	// No notebook file appeared: the plan object is a document, not an entry.
+	assert.equal(existsSync(path.join(project, ".theta", "notebook.jsonl")), false);
+
+	// And an entry records normally beside the plan, ids starting fresh.
+	const entry = runRecorder(["--decision", DECISION], { cwd: project });
+	assert.equal(entry.status, 0, `stderr: ${entry.stderr}`);
+	const entries = await readEntries(project);
+	assert.deepEqual(entries.map((e) => e.id), ["dec-0001"]);
+	assert.deepEqual(await readdir(path.join(project, ".theta")), ["notebook.jsonl", "plans"]);
+});
+
+test("--json prints the plan result object", { skip: skipReason }, async (t) => {
+	const project = await scratchThetaProject(t);
+	const write = runRecorder(
+		["--plan-write", "af3-benchmark", "--plan-file", "-", "--json"],
+		{ cwd: project, stdin: PLAN_TEXT },
+	);
+	assert.equal(write.status, 0, `stderr: ${write.stderr}`);
+	const planId = planIdToday("af3-benchmark");
+	assert.deepEqual(JSON.parse(write.stdout), {
+		plan: planId,
+		path: `.theta/plans/${planId}.md`,
+		revision: revisionOf(PLAN_TEXT),
+	});
+
+	const update = runRecorder(
+		["--plan-update", planId, "--plan-file", "-", "--json"],
+		{ cwd: project, stdin: PLAN_REVISED },
+	);
+	assert.equal(update.status, 0, `stderr: ${update.stderr}`);
+	assert.deepEqual(JSON.parse(update.stdout), {
+		plan: planId,
+		path: `.theta/plans/${planId}.md`,
+		revision: revisionOf(PLAN_REVISED),
+		previous_revision: revisionOf(PLAN_TEXT),
+	});
+
+	const read = runRecorder(["--plan-read", planId, "--json"], { cwd: project });
+	assert.equal(read.status, 0, `stderr: ${read.stderr}`);
+	assert.deepEqual(JSON.parse(read.stdout), {
+		plan: planId,
+		path: `.theta/plans/${planId}.md`,
+		revision: revisionOf(PLAN_REVISED),
+	});
+});
+
+test("a fresh project refuses the first plan write until .theta exists; a non-directory .theta exits 2", { skip: skipReason }, async (t) => {
+	const fresh = await scratchProject(t);
+	const noTheta = runRecorder(["--plan-write", "af3-benchmark", "--plan-file", "-"], {
+		cwd: fresh,
+		stdin: PLAN_TEXT,
+	});
+	assert.equal(noTheta.status, 2);
+	assert.match(noTheta.stderr, /\.theta/);
+	assert.deepEqual(await readdir(fresh), [], "wrote nothing");
+
+	const project = await scratchProject(t);
+	await writeFile(path.join(project, ".theta"), "not a directory\n", "utf8");
+	const notDir = runRecorder(["--plan-write", "af3-benchmark", "--plan-file", "-"], {
+		cwd: project,
+		stdin: PLAN_TEXT,
+	});
+	assert.equal(notDir.status, 2);
+	assert.ok(notDir.stderr.includes(".theta"));
 });
