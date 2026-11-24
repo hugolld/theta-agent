@@ -1,11 +1,11 @@
 {
 	"scenario": "pool",
-	"sessionPreHead": "e613b00533f915f0a643e7a6ce782d51e01c0a10",
-	"landedHead": "e613b00533f915f0a643e7a6ce782d51e01c0a10",
+	"sessionPreHead": "a675a7819ae7578728550d255fbb6a3420668f95",
+	"landedHead": "a675a7819ae7578728550d255fbb6a3420668f95",
 	"piVersion": "1.4.0",
 	"nodeVersion": "v22.23.4",
 	"surfaces": {
-		"advertisement": "68bc19e716f8a6aa44b92e7f27995fc82b614e3b4e43c1bb78b24d6711493234",
+		"advertisement": "335e04cc81a61550e8559ced471a41d274160296bc43978155a14a4fc281b3c5",
 		"pool:bioinformatics": "a103f210eb5d3d334e1afff2ffcaeadd4271b18a0a740acded2a7fdb645877d2",
 		"extensions": "7bcf75106b98a599c0da80917897da0a281c9eb3fd48274b4c064306a054d8b0",
 		"project-context": "22380faa252d1c172cbbbe82675307b209a97696c9b0c6032aa125c2fdcd21f1"
