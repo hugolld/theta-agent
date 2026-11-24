@@ -159,3 +159,7 @@ _Avoid_: plan mode, planning file
 **Plan revision**:
 The first 12 hex of a plan object's sha256 over its file bytes — the version a decision entry or a review confirm names. A changed digest is a new revision: an update's change and a researcher's hand edit alike. The recipe is pinned by a committed test vector the TS side passes too, so both languages compute one revision. Spec #201 ships it.
 _Avoid_: version number, content version
+
+**Plan citation**:
+The decision entry's name for the plan it weighs: `planPath` (the plan object's path), `planRevision` (the digest the decision names), `decision` (`approved` or `refused` — a refusal is provenance and cites the plan the same way), and an optional free-text rationale. The recorder resolves the citation against disk before writing — the cited revision must be the plan's current one — so a recorded decision always names a state the plan carried. Spec #202 ships it.
+_Avoid_: plan approval field, verdict tag

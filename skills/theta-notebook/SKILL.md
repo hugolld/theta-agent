@@ -4,7 +4,7 @@ description: Theta's project notebook recorder - appends dated provenance entrie
 allowed-tools: Read Bash
 license: MIT
 metadata:
-  version: "0.5.0"
+  version: "0.6.0"
   authorship: self-authored
 ---
 
@@ -37,7 +37,7 @@ per type), its `type`, the `date` it was recorded, and its `text`.
 | hypothesis | `hyp-0001`… | `--hypothesis` | required | — |
 | method | `mth-0001`… | `--method` | optional | — |
 | observation | `obs-0001`… | `--observation` | required | its own `grade`; items may link |
-| decision | `dec-0001`… | `--decision` | optional | — |
+| decision | `dec-0001`… | `--decision` | optional | the plan citation when one rides (`--plan-cite`): `planPath`, `planRevision`, `decision` (`approved`/`refused`), optional `rationale` |
 | confidence | `cnf-0001`… | `--confidence` | never | the `hypothesis` it judges (`--on`) |
 
 - A hypothesis or an observation is a claim about what a source showed, so
@@ -118,7 +118,9 @@ A hypothesis entry, and an observation linked to it, from the same notebook:
 - The design moment: a method is chosen or discarded — record the choice,
   with the search that motivated it as evidence when there is one, and
   state the run's plan itself as a plan file before any compute
-  (`--plan-write`; the plan-operations section below).
+  (`--plan-write`; the plan-operations section below). The plan's approval
+  or refusal is a decision entry citing it (`--plan-cite`; the
+  decisions-cite-the-plan section below).
 - The execute moment: reading a result off a search output is an
   observation; when it backs an existing hypothesis, link the evidence. A
   compute run that closes out records its job record as a method entry —
@@ -176,6 +178,12 @@ python3 <theta-notebook-skill-dir>/scripts/notebook.py \
   --plan-write af3-benchmark --plan-file plan.md
 python3 <theta-notebook-skill-dir>/scripts/notebook.py \
   --plan-read 2026-11-22-af3-benchmark
+
+# Approve the plan by the revision it carries — the citation resolves
+# against the plan on disk, and a stale revision is refused:
+python3 <theta-notebook-skill-dir>/scripts/notebook.py \
+  --decision "TEXT" --plan-cite 2026-11-22-af3-benchmark \
+  --revision <12-hex> --verdict approved
 ```
 
 `--evidence` takes the path of a saved `--json` output, or `-` to read it
@@ -279,6 +287,48 @@ revision — `wrote plan .theta/plans/2026-11-22-af3-benchmark.md revision
 <path> revision <12-hex>`); `--json` prints the plan result object
 (`plan`, `path`, `revision`, plus `previous_revision` on an update).
 
+### Decisions cite the plan
+
+The loop states the plan, then records its approval or refusal as a
+**decision entry citing the plan** (parent #200): the entry carries
+`planPath` (`.theta/plans/<plan-id>.md`, the path every plan operation
+reports), `planRevision` (the digest the decision weighs), `decision`
+(`approved` or `refused` — a refusal is provenance and cites the plan the
+same way), and an optional free-text `rationale`. Both verdicts record;
+the citation resolves against disk before anything is written:
+
+- `--decision "TEXT" --plan-cite <plan-id> --revision <12-hex>
+  --verdict approved|refused` records the citation; `--rationale "TEXT"`
+  adds the rationale when there is one.
+- The plan-id must name a written plan, and the revision must be that
+  file's current digest — a missing plan or a stale revision is a usage
+  refusal (exit 1), never an entry: cite the revision `--plan-read`
+  names, and re-read after a hand edit, which is a new revision.
+- `--plan-decision <plan-id> --revision <12-hex>` reads the notebook
+  back: the latest decision entry citing that plan path and revision —
+  `decision <verdict> for <path> revision <digest> (<id>)`, or a clear
+  `no decision for ...` report; `--json` prints the entry under `latest`.
+
+A citing decision entry:
+
+```json
+{
+  "id": "dec-0001",
+  "type": "decision",
+  "date": "2026-11-18",
+  "text": "Approve the AF3 benchmark plan",
+  "planPath": ".theta/plans/2026-11-18-af3-benchmark.md",
+  "planRevision": "c6f6084b0e5f",
+  "decision": "approved",
+  "rationale": "Digest matches the plan on disk"
+}
+```
+
+The cited revision is the committed plan vector's digest, and the grammar
+— field names, shapes, id sequencing — is pinned by that committed
+fixture entry against both this recorder and the TS side's entry
+validator.
+
 ## Grades
 
 The grade marks how much the evidence can be trusted. It grades the source,
@@ -310,7 +360,7 @@ transport to fail):
 | Code | Meaning |
 |---|---|
 | 0 | Success — the entry is appended and named on stdout, or the plan operation reports the plan's path and revision. |
-| 1 | Usage error — bad arguments, evidence input that is not a valid connector output or gateway job record, a link naming no recorded hypothesis, a malformed plan slug or plan-id, a same-day plan collision, or a plan-id naming no written plan. |
+| 1 | Usage error — bad arguments, evidence input that is not a valid connector output or gateway job record, a link naming no recorded hypothesis, a malformed plan slug or plan-id, a same-day plan collision, a plan-id naming no written plan, a malformed plan citation, or a citation revision stale against the plan on disk. |
 | 2 | Notebook failure — the notebook or a plan file cannot be read (corrupt, `.theta` is not a directory, or absent for a first plan write) or written. |
 
 ## Output discipline
@@ -332,10 +382,12 @@ transport to fail):
   are untouched by this skill.
 - One evidence item per call; an entry synthesizing several retrievals is
   recorded per source, cross-checked claims included.
-- Plan operations carry plan text only — no `--evidence`, `--grade`,
-  `--on`, `--supports`, or `--job-record` — and never touch
-  `notebook.jsonl`; one operation per call, an entry or a plan op, never
-  both.
+- Plan write, update, and read carry plan text only — no `--evidence`,
+  `--grade`, `--on`, `--supports`, or `--job-record` — and never touch
+  `notebook.jsonl`; `--plan-decision` reads the notebook and writes
+  nothing; one operation per call, an entry or a plan operation, never
+  both. The citation flags (`--plan-cite`, `--revision`, `--verdict`,
+  `--rationale`) ride only a `--decision` entry.
 - `.theta/` belongs to the research project. In the theta-agent repo's own
   dogfood runs it is gitignored so clean-tree proofs hold; in a research
   project, versioning the notebook is the researcher's choice.

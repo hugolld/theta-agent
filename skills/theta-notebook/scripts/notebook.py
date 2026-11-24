@@ -20,8 +20,9 @@ Exit codes -- the documented contract (see SKILL.md):
      operation reports the plan's path and revision
   1  usage error (bad arguments, malformed or shape-invalid evidence input,
      a link that names no hypothesis in the notebook, a malformed plan slug
-     or plan-id, a same-day plan collision, or a plan-id naming no written
-     plan)
+     or plan-id, a same-day plan collision, a malformed plan citation, a
+     plan-id naming no written plan, or a citation revision stale against
+     the plan on disk)
   2  notebook failure (the notebook or a stored plan file cannot be read
      or written)
 
@@ -32,12 +33,15 @@ Usage:
   python3 notebook.py --observation "TEXT" --evidence <...> --grade <...>
       [--supports hyp-NNNN] [--json]
   python3 notebook.py --decision "TEXT" [--evidence <...> --grade <...>] [--json]
+  python3 notebook.py --decision "TEXT" --plan-cite <date>-<slug> --revision <12-hex>
+      --verdict {approved,refused} [--rationale "TEXT"] [--json]
   python3 notebook.py --confidence "TEXT" --on hyp-NNNN [--json]
   python3 notebook.py --method "TEXT" --job-record <job-record.json|->
       --grade {asserted,re-executed} [--json]
   python3 notebook.py --plan-write <slug> --plan-file <plan.md|-> [--json]
   python3 notebook.py --plan-update <date>-<slug> --plan-file <plan.md|-> [--json]
   python3 notebook.py --plan-read <date>-<slug> [--json]
+  python3 notebook.py --plan-decision <date>-<slug> --revision <12-hex> [--json]
 
 `--evidence` is required for hypothesis and observation entries, optional
 for method and decision, and rejected for confidence (a judgment is not a
@@ -55,8 +59,8 @@ are `asserted` and `re-executed` (cross-checked is a retrieval's mark). The
 grade `re-executed` claims the machinery recomputed the result, so the
 recorder accepts it only when the record carries the artifact manifest.
 
-Plan operations (parent #200) carry plan text only, no evidence semantics
--- the plan is a document, not a graded claim. `--plan-write` creates
+Plan operations (parent #200) carry no evidence semantics -- the plan is a
+document, not a graded claim. `--plan-write` creates
 `.theta/plans/<YYYY-MM-DD>-<slug>.md` (the slug: 1-48 characters of
 lowercase letters, digits, and single hyphens) and refuses a slug that
 already names a plan today -- a same-day collision never clobbers.
@@ -68,6 +72,20 @@ new revision, and a researcher's hand edit is a new revision, not an
 error: the recorder is the loop's writer, not the file's owner. The
 recipe is a cross-language contract (the committed test vector), so the
 TS side of the plan object computes the same revision.
+
+A decision entry may cite the plan it weighs (parent #200's T2):
+`--decision "TEXT" --plan-cite <plan-id> --revision <12-hex> --verdict
+approved` stores `planPath` (`.theta/plans/<plan-id>.md`, the path
+`--plan-read` names), `planRevision` (the digest the decision weighs),
+`decision` (approved or refused -- both verdicts record, a refusal cites
+the plan the same way), and an optional `--rationale` as `rationale`.
+The citation resolves against disk before anything is written: the
+plan-id must name a written plan and the revision must be that file's
+current digest -- missing or stale is exit 1, never an entry, so a
+recorded decision always names a revision the plan carried when the
+decision was made. `--plan-decision <plan-id> --revision <12-hex>` reads
+the notebook back: the latest decision entry citing that plan path and
+revision, or a clear no-decision report.
 
 Contract basis: docs/adr/0003-provenance-is-a-project-notebook.md,
 docs/adr/0004-compute-is-a-native-mcp-server.md, and the connector-script
@@ -127,6 +145,15 @@ DIGEST_RE = re.compile(r"^[0-9a-f]{64}$")
 PLAN_SLUG_MAX = 48
 PLAN_SLUG_RE = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
 PLAN_ID_RE = re.compile(r"^(\d{4}-\d{2}-\d{2})-([a-z0-9]+(?:-[a-z0-9]+)*)$")
+
+#: A plan citation's revision shape (spec #202): 12 lowercase hex digits,
+#: the digest every plan operation reports as `revision` -- the revision a
+#: decision entry weighs and a decision read takes.
+PLAN_REV_RE = re.compile(r"^[0-9a-f]{12}$")
+
+#: The two verdicts a plan-citing decision records (parent #200): both are
+#: provenance -- an approval and a refusal cite the plan the same way.
+VERDICTS = ("approved", "refused")
 
 _CONTROL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 _WHITESPACE = re.compile(r"\s+")
@@ -273,6 +300,30 @@ def build_parser() -> Parser:
 		help="mark the recorded evidence as supporting this existing "
 		"hypothesis; observation entries only",
 	)
+	parser.add_argument(
+		"--plan-cite",
+		metavar="PLAN_ID",
+		help="cite the named plan in the recorded decision entry -- decision "
+		"entries only; requires --revision and --verdict, and stores "
+		"planPath, planRevision, and decision on the entry",
+	)
+	parser.add_argument(
+		"--revision",
+		metavar="12-HEX",
+		help="the plan revision the decision weighs -- required with "
+		"--plan-cite and --plan-decision, refused elsewhere",
+	)
+	parser.add_argument(
+		"--verdict",
+		choices=VERDICTS,
+		help="the verdict on the cited plan, stored as the entry's decision "
+		"field -- approved or refused; required with --plan-cite",
+	)
+	parser.add_argument(
+		"--rationale",
+		help="free-text rationale on a plan-citing decision; optional, "
+		"and only with --plan-cite",
+	)
 	plans = parser.add_mutually_exclusive_group()
 	plans.add_argument(
 		"--plan-write",
@@ -294,6 +345,13 @@ def build_parser() -> Parser:
 		help="report the named plan's path and its current revision digest "
 		"-- the file's own bytes decide, so a hand edit reads as a new "
 		"revision",
+	)
+	plans.add_argument(
+		"--plan-decision",
+		metavar="PLAN_ID",
+		help="report the latest decision entry citing the named plan at "
+		"--revision's digest -- a notebook read; the entry, or a clear "
+		"no-decision report",
 	)
 	parser.add_argument(
 		"--plan-file",
@@ -685,6 +743,7 @@ PLAN_OPS = {
 	"--plan-write": "plan_write",
 	"--plan-update": "plan_update",
 	"--plan-read": "plan_read",
+	"--plan-decision": "plan_decision",
 }
 
 
@@ -700,10 +759,10 @@ def parse_plan_args(args: argparse.Namespace, plan_op: str) -> argparse.Namespac
 	"""Validate a plan operation's flags; plan ops carry plan text only.
 
 	One operation per call: a plan flag beside an entry type refuses, and
-	the entry-only flags (evidence, grades, links) refuse with every plan
-	operation -- a plan is a document, not a graded claim. The slug and
-	plan-id grammar checks sit in run_plan_op, where the shared
-	RecorderError-to-exit translation already lives.
+	the entry-only flags (evidence, grades, links, the decision citation)
+	refuse with every plan operation -- a plan is a document, not a graded
+	claim. The slug, plan-id, and revision grammar checks sit in run_plan_op,
+	where the shared RecorderError-to-exit translation already lives.
 	"""
 	if any(getattr(args, t) is not None for t in TYPE_PREFIX):
 		fail(
@@ -711,7 +770,16 @@ def parse_plan_args(args: argparse.Namespace, plan_op: str) -> argparse.Namespac
 			"operation per call",
 			1,
 		)
-	for dest in ("evidence", "job_record", "grade", "on", "supports"):
+	for dest in (
+		"evidence",
+		"job_record",
+		"grade",
+		"on",
+		"supports",
+		"plan_cite",
+		"verdict",
+		"rationale",
+	):
 		if getattr(args, dest) is not None:
 			flag = f"--{dest.replace('_', '-')}"
 			fail(
@@ -719,9 +787,9 @@ def parse_plan_args(args: argparse.Namespace, plan_op: str) -> argparse.Namespac
 				"operations carry plan text only",
 				1,
 			)
-	if plan_op == "--plan-read":
+	if plan_op in ("--plan-read", "--plan-decision"):
 		if args.plan_file is not None:
-			fail("notebook.py: --plan-file is not accepted with --plan-read", 1)
+			fail(f"notebook.py: --plan-file is not accepted with {plan_op}", 1)
 	else:
 		if args.plan_file is None:
 			fail(
@@ -729,6 +797,19 @@ def parse_plan_args(args: argparse.Namespace, plan_op: str) -> argparse.Namespac
 				"carrying the plan's Markdown",
 				1,
 			)
+	if plan_op == "--plan-decision":
+		if args.revision is None:
+			fail(
+				"notebook.py: --plan-decision requires --revision naming the "
+				"revision whose decision it reports",
+				1,
+			)
+	elif args.revision is not None:
+		fail(
+			"notebook.py: --revision is only accepted with --plan-cite or "
+			"--plan-decision",
+			1,
+		)
 	args.plan_op = plan_op
 	return args
 
@@ -810,6 +891,40 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
 				f"got: {value}",
 				1,
 			)
+	cite_touched = [
+		dest
+		for dest in ("plan_cite", "revision", "verdict", "rationale")
+		if getattr(args, dest) is not None
+	]
+	if cite_touched:
+		if args.type != "decision":
+			flags = ", ".join(f"--{dest.replace('_', '-')}" for dest in cite_touched)
+			fail(
+				f"notebook.py: {flags} only accepted with --decision -- the "
+				"plan citation rides a decision entry",
+				1,
+			)
+		if args.plan_cite is None:
+			fail(
+				"notebook.py: --plan-cite is required with --revision, "
+				"--verdict, and --rationale -- the citation is the "
+				"decision's object",
+				1,
+			)
+		if args.revision is None:
+			fail(
+				"notebook.py: --plan-cite requires --revision naming the "
+				"revision the decision weighs",
+				1,
+			)
+		if args.verdict is None:
+			fail(
+				"notebook.py: --plan-cite requires --verdict "
+				"(approved or refused)",
+				1,
+			)
+		if args.rationale is not None and not collapse_ws(args.rationale):
+			fail("notebook.py: --rationale must be non-empty text", 1)
 	return args
 
 
@@ -849,6 +964,43 @@ def check_plan_id(plan_id: str) -> None:
 		)
 
 
+def check_plan_revision(revision: str) -> None:
+	"""The citation's revision shape: 12 lowercase hex digits, the digest
+	every plan operation reports."""
+	if not PLAN_REV_RE.match(revision):
+		raise RecorderError(
+			"notebook.py: --revision must be 12 lowercase hex digits -- the "
+			"revision digest every plan operation reports, got: "
+			f"{revision!r}",
+			1,
+		)
+
+
+def resolve_plan_citation(args: argparse.Namespace) -> str:
+	"""A decision's plan citation, resolved against disk before any write.
+
+	Returns the planPath the entry stores. The honesty the citation stands
+	on: the plan-id must name a written plan, and the cited revision must
+	be that file's current digest -- a citation naming no plan, or a stale
+	one naming a revision the plan no longer carries, would record a
+	decision about a plan state that does not exist. Either is a usage
+	refusal, never an entry. Both verdicts resolve the same way: a refusal
+	cites the revision it refused, while that revision is current.
+	"""
+	check_plan_id(args.plan_cite)
+	check_plan_revision(args.revision)
+	plan_path = f"{PLANS_DIR}/{args.plan_cite}.md"
+	current = plan_revision(read_plan(args.plan_cite))
+	if args.revision != current:
+		raise RecorderError(
+			f"notebook.py: --revision {args.revision} is stale for {plan_path} "
+			f"-- the plan's current revision is {current}; cite the revision "
+			"--plan-read names",
+			1,
+		)
+	return plan_path
+
+
 def read_plan(plan_id: str) -> bytes:
 	"""An existing plan file's bytes, or the refusal that names why not."""
 	plan_path = PLANS_DIR / f"{plan_id}.md"
@@ -882,14 +1034,30 @@ def write_plan(plan_path: Path, text: str) -> None:
 
 
 def run_plan_op(args: argparse.Namespace) -> dict:
-	"""One plan operation: write, update, or read, result on stdout.
+	"""One plan operation: write, update, read, or the decision read.
 
 	The plan text is read and every grammar check fires before anything is
 	touched, so a rejected input leaves no trace. The text is written as
 	read -- no reformatting, no added newline; line endings land as LF (the
 	text-mode read carries no CRLF through) -- and the revision digest is
-	computed over exactly the bytes on disk.
+	computed over exactly the bytes on disk. The decision read touches no
+	plan bytes at all: it queries the notebook for the latest decision
+	entry citing the named plan at the given revision, in file order --
+	append-only, so file order is recording order.
 	"""
+	if args.plan_op == "--plan-decision":
+		check_plan_id(args.plan_decision)
+		check_plan_revision(args.revision)
+		plan_path = f"{PLANS_DIR}/{args.plan_decision}.md"
+		latest = None
+		for entry in load_notebook():
+			if (
+				entry.get("type") == "decision"
+				and entry.get("planPath") == plan_path
+				and entry.get("planRevision") == args.revision
+			):
+				latest = entry
+		return {"planPath": plan_path, "planRevision": args.revision, "latest": latest}
 	if args.plan_op == "--plan-read":
 		check_plan_id(args.plan_read)
 		data = read_plan(args.plan_read)
@@ -935,6 +1103,20 @@ def run_plan_op(args: argparse.Namespace) -> dict:
 
 def print_plan(result: dict, plan_op: str) -> None:
 	"""Report the plan path and its revision, connector-footer style."""
+	if plan_op == "--plan-decision":
+		latest = result["latest"]
+		if latest is None:
+			print(
+				f"no decision for {result['planPath']} revision "
+				f"{result['planRevision']}"
+			)
+		else:
+			print(
+				f"decision {latest.get('decision')} for {result['planPath']} "
+				"revision "
+				f"{result['planRevision']} ({latest.get('id')})"
+			)
+		return
 	line = f"plan {result['path']} revision {result['revision']}"
 	previous = result.get("previous_revision")
 	if previous is not None:
@@ -987,6 +1169,9 @@ def main(argv: list[str] | None = None) -> int:
 		entries = load_notebook()
 		resolve_ref(entries, args.on, "--on")
 		resolve_ref(entries, args.supports, "--supports")
+		plan_path = (
+			resolve_plan_citation(args) if args.plan_cite is not None else None
+		)
 		entry = {
 			"id": next_id(args.type, entries),
 			"type": args.type,
@@ -995,6 +1180,12 @@ def main(argv: list[str] | None = None) -> int:
 		if args.type == "confidence":
 			entry["hypothesis"] = args.on
 		entry["text"] = args.text
+		if plan_path is not None:
+			entry["planPath"] = plan_path
+			entry["planRevision"] = args.revision
+			entry["decision"] = args.verdict
+			if args.rationale is not None:
+				entry["rationale"] = collapse_ws(args.rationale)
 		if args.type == "observation":
 			entry["grade"] = args.grade
 		if item is not None:
@@ -1013,6 +1204,11 @@ def print_text(entry: dict) -> None:
 	print(f"recorded {entry['id']} ({entry['type']}) in {NOTEBOOK_PATH}")
 	if entry["type"] == "confidence":
 		print(f"# judgment on {entry['hypothesis']}")
+	if entry.get("planPath") is not None:
+		print(
+			f"# plan: {entry['planPath']} revision {entry['planRevision']} "
+			f"{entry['decision']}"
+		)
 	if entry["type"] == "observation":
 		print(f"# grade: {entry['grade']}")
 		supports = entry["evidence"][0].get("supports")
