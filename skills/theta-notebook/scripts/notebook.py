@@ -35,7 +35,8 @@ Usage:
   python3 notebook.py --observation "TEXT" --evidence <...> --grade <...>
       [--supports hyp-NNNN] [--json]
   python3 notebook.py --decision "TEXT" [--evidence <...> --grade <...>] [--json]
-  python3 notebook.py --decision "TEXT" --plan-cite <date>-<slug> --revision <12-hex>
+  python3 notebook.py --decision "TEXT" [--evidence <...> --grade <...>]
+      --plan-cite <date>-<slug> --revision <12-hex>
       --verdict {approved,refused} [--rationale "TEXT"] [--json]
   python3 notebook.py --confidence "TEXT" --on hyp-NNNN [--json]
   python3 notebook.py --method "TEXT" --job-record <job-record.json|->
@@ -145,17 +146,18 @@ DIGEST_RE = re.compile(r"^[0-9a-f]{64}$")
 #: (a leading, trailing, or doubled hyphen is not a slug), capped at 48 so
 #: the date-prefixed file name stays readable; the date half must name a
 #: real calendar date, the same check `calendar_date` applies to entries.
+#: All three plan grammars (slug, plan-id, revision) are checked with
+#: fullmatch: under `match`, a `$` anchor also sits before a trailing
+#: newline, so a value carrying one would pass the shape check and then
+#: name no plan and match no entry -- a slug would even write a plan file
+#: no other operation can name.
 PLAN_SLUG_MAX = 48
 PLAN_SLUG_RE = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
 PLAN_ID_RE = re.compile(r"^(\d{4}-\d{2}-\d{2})-([a-z0-9]+(?:-[a-z0-9]+)*)$")
 
 #: A plan citation's revision shape (spec #202): 12 lowercase hex digits,
 #: the digest every plan operation reports as `revision` -- the revision a
-#: decision entry weighs and a decision read takes. Both citation-path
-#: grammars (this and the plan-id above) are checked with fullmatch: under
-#: `match`, a `$` anchor also sits before a trailing newline, so a value
-#: carrying one would pass the shape check and then match no plan and no
-#: entry.
+#: decision entry weighs and a decision read takes.
 PLAN_REV_RE = re.compile(r"^[0-9a-f]{12}$")
 
 #: The two verdicts a plan-citing decision records (parent #200): both are
@@ -763,7 +765,8 @@ def plan_op_of(args: argparse.Namespace) -> str | None:
 
 
 def parse_plan_args(args: argparse.Namespace, plan_op: str) -> argparse.Namespace:
-	"""Validate a plan operation's flags; plan ops carry plan text only.
+	"""Validate a plan operation's flags; the plan-text operations carry
+	plan text only, and the decision read carries a plan id and a revision.
 
 	One operation per call: a plan flag beside an entry type refuses, and
 	the entry-only flags (evidence, grades, links, the decision citation)
@@ -955,7 +958,7 @@ def plan_revision(data: bytes) -> str:
 
 def check_plan_slug(slug: str) -> None:
 	"""The write path's slug grammar, or the usage refusal naming it."""
-	if len(slug) > PLAN_SLUG_MAX or not PLAN_SLUG_RE.match(slug):
+	if len(slug) > PLAN_SLUG_MAX or not PLAN_SLUG_RE.fullmatch(slug):
 		raise RecorderError(
 			f"notebook.py: --plan-write slug must be 1-{PLAN_SLUG_MAX} characters "
 			"of lowercase letters, digits, and single hyphens (a leading, "
@@ -1058,9 +1061,11 @@ def run_plan_op(args: argparse.Namespace) -> dict:
 	computed over exactly the bytes on disk. The decision read touches no
 	plan bytes at all: it queries the notebook for the latest decision
 	entry citing the named plan at the given revision, in file order --
-	append-only, so file order is recording order. A line whose citation
-	is malformed (no verdict) is no citing decision: it is skipped, the
-	same refusal the TS validator holds on that line.
+	append-only, so file order is recording order. A line that is not a
+	citing decision -- another entry type, or a decision without a
+	verdict -- is skipped: the two bars that make a citation, the same
+	the TS validator holds. The rest of the entry grammar (ids, dates, the
+	rationale's shape) is the validator's business, not this read's.
 	"""
 	if args.plan_op == "--plan-decision":
 		check_plan_id(args.plan_decision)

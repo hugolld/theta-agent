@@ -958,6 +958,10 @@ test("the slug grammar: date-prefixable kebab, lowercase, capped", { skip: skipR
 		["path escape", "../escape"],
 		["non-ascii", "af3-é"],
 		["over the cap", "a".repeat(49)],
+		// The write must hold the same grammar the naming operations do: a
+		// slug carrying a newline would write a plan file no read, update,
+		// citation, or decision read can name.
+		["trailing newline", "af3-benchmark\n"],
 	];
 	for (const [name, slug] of invalid) {
 		const project = await scratchThetaProject(t);
@@ -1422,6 +1426,7 @@ test("citation-flag pairing errors exit 1 and write nothing", { skip: skipReason
 		{ name: "plan-cite with a trailing newline", args: ["--decision", "x", "--plan-cite", `${planDecisionPlanId}\n`, "--revision", planVectorRevision, "--verdict", "approved"], err: "plan ids are <YYYY-MM-DD>-<slug>" },
 		{ name: "citation revision with a trailing newline", args: ["--decision", "x", "--plan-cite", planDecisionPlanId, "--revision", `${planVectorRevision}\n`, "--verdict", "approved"], err: "12 lowercase hex" },
 		{ name: "decision-read plan-id with a trailing newline", args: ["--plan-decision", `${planDecisionPlanId}\n`, "--revision", planVectorRevision], err: "plan ids are <YYYY-MM-DD>-<slug>" },
+		{ name: "decision-read revision with a trailing newline", args: ["--plan-decision", planDecisionPlanId, "--revision", `${planVectorRevision}\n`], err: "12 lowercase hex" },
 	];
 	for (const { name, args, stdin, err } of cases) {
 		const project = await scratchProject(t);
@@ -1475,11 +1480,13 @@ test("the shared grammar fixture: the recorder reads it back and ids sequence pa
 });
 
 test("the decision read skips lines that are not citing decisions", { skip: skipReason }, async (t) => {
-	// The reader's notion of a citing decision is the TS validator's: a
-	// decision entry carrying a verdict. A citation on another entry type,
-	// or a citing decision with no verdict (hand edits the recorder never
+	// The reader holds the TS validator's two citation bars: a decision
+	// entry carrying a verdict. A citation on another entry type, or a
+	// citing decision with no verdict (hand edits the recorder never
 	// writes), matches no query — they sit after the fixture line, so a
 	// reader that ignored the type or the verdict would answer one of them.
+	// The validator's wider entry grammar (ids, dates, the rationale's
+	// shape) is not this read's.
 	const project = await scratchProject(t);
 	await mkdir(path.join(project, ".theta"));
 	const fixtureLine = (await readFile(planDecisionFixture, "utf8")).trimEnd();

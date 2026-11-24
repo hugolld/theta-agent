@@ -196,10 +196,10 @@ no recorded hypothesis is a usage error, never an entry.
 Requires Python 3.11+ (standard library only). If `python3` is older, run
 `python3.13`, `python3.12`, or `python3.11` — the script names them when the
 gate trips. Default output is the recorded line, then the entry's specifics
-— the evidence item's source and retrieval date with its grade, the
-snapshot address, and on a citing decision the `# plan:` line naming the
-path, the revision, and the verdict; `--json` prints the appended entry
-itself instead.
+— on a citing decision first the `# plan:` line naming the path, the
+revision, and the verdict, then the evidence item's source and retrieval
+date with its grade, then the snapshot address; `--json` prints the
+appended entry itself instead.
 
 ### The job record's shape
 

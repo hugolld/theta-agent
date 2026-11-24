@@ -161,5 +161,5 @@ The first 12 hex of a plan object's sha256 over its file bytes — the version a
 _Avoid_: version number, content version
 
 **Plan citation**:
-The decision entry's name for the plan it weighs: `planPath` (the plan object's path), `planRevision` (the digest the decision names), `decision` (`approved` or `refused` — a refusal is provenance and cites the plan the same way), and an optional free-text rationale. The recorder resolves the citation against disk before writing — the cited revision must be the plan's current one — so a recorded decision always names a state the plan carried. Spec #202 ships it.
+The decision entry's name for the plan it weighs: `planPath` (the plan object's path), `planRevision` (the digest the decision names), `decision` (`approved` or `refused` — a refusal is provenance and cites the plan the same way), and an optional free-text rationale. The recorder resolves the citation against disk before writing — the cited revision must be the plan's current one — so a recorded decision always names a state the plan carried. The decision read (`--plan-decision`) answers the latest citing decision for a plan path and revision, or that none cites it. Spec #202 ships it.
 _Avoid_: plan approval field, verdict tag
