@@ -16,8 +16,10 @@ researcher's judgment -- that judgment is the confidence entry type, and the
 two never merge.
 
 Exit codes -- the documented contract (see SKILL.md):
-  0  success; the entry is appended and named on stdout, or the plan
-     operation reports the plan's path and revision
+  0  success; the entry is appended and named on stdout, the plan
+     operation reports the plan's path and revision, or the decision read
+     reports the latest citing decision -- or that none cites the plan
+     (an answer, not a failure: branch on the report, never on the code)
   1  usage error (bad arguments, malformed or shape-invalid evidence input,
      a link that names no hypothesis in the notebook, a malformed plan slug
      or plan-id, a same-day plan collision, a malformed plan citation, a
@@ -83,9 +85,10 @@ The citation resolves against disk before anything is written: the
 plan-id must name a written plan and the revision must be that file's
 current digest -- missing or stale is exit 1, never an entry, so a
 recorded decision always names a revision the plan carried when the
-decision was made. `--plan-decision <plan-id> --revision <12-hex>` reads
-the notebook back: the latest decision entry citing that plan path and
-revision, or a clear no-decision report.
+decision was made (record a verdict before any update: an update makes
+the cited revision stale). `--plan-decision <plan-id> --revision
+<12-hex>` reads the notebook back: the latest decision entry citing that
+plan path and revision, or a clear no-decision report -- both exit 0.
 
 Contract basis: docs/adr/0003-provenance-is-a-project-notebook.md,
 docs/adr/0004-compute-is-a-native-mcp-server.md, and the connector-script
@@ -148,7 +151,11 @@ PLAN_ID_RE = re.compile(r"^(\d{4}-\d{2}-\d{2})-([a-z0-9]+(?:-[a-z0-9]+)*)$")
 
 #: A plan citation's revision shape (spec #202): 12 lowercase hex digits,
 #: the digest every plan operation reports as `revision` -- the revision a
-#: decision entry weighs and a decision read takes.
+#: decision entry weighs and a decision read takes. Both citation-path
+#: grammars (this and the plan-id above) are checked with fullmatch: under
+#: `match`, a `$` anchor also sits before a trailing newline, so a value
+#: carrying one would pass the shape check and then match no plan and no
+#: entry.
 PLAN_REV_RE = re.compile(r"^[0-9a-f]{12}$")
 
 #: The two verdicts a plan-citing decision records (parent #200): both are
@@ -349,16 +356,16 @@ def build_parser() -> Parser:
 	plans.add_argument(
 		"--plan-decision",
 		metavar="PLAN_ID",
-		help="report the latest decision entry citing the named plan at "
-		"--revision's digest -- a notebook read; the entry, or a clear "
-		"no-decision report",
+		help="report the latest decision citing the named plan at "
+		"--revision's digest -- its verdict and id, or a clear no-decision "
+		"report (both exit 0)",
 	)
 	parser.add_argument(
 		"--plan-file",
 		metavar="PATH|-",
 		help="path to the plan's Markdown, or - to read it from stdin; "
 		"required with --plan-write and --plan-update, not accepted with "
-		"--plan-read or an entry type",
+		"--plan-read, --plan-decision, or an entry type",
 	)
 	parser.add_argument(
 		"--json",
@@ -737,8 +744,8 @@ def write_entry(entry: dict, snapshot: tuple[str, str] | None) -> None:
 		) from None
 
 
-#: The three plan operations, as the CLI spells them, with the value each
-#: one carries (the slug a write coins, the plan-id the other two name).
+#: The four plan operations, as the CLI spells them, with the value each
+#: one carries (the slug a write coins, the plan-id the other three name).
 PLAN_OPS = {
 	"--plan-write": "plan_write",
 	"--plan-update": "plan_update",
@@ -770,6 +777,13 @@ def parse_plan_args(args: argparse.Namespace, plan_op: str) -> argparse.Namespac
 			"operation per call",
 			1,
 		)
+	# The decision read carries no plan text; the clause names what each
+	# operation does carry.
+	reason = (
+		"the decision read carries a plan id and a revision only"
+		if plan_op == "--plan-decision"
+		else "plan operations carry plan text only"
+	)
 	for dest in (
 		"evidence",
 		"job_record",
@@ -783,8 +797,7 @@ def parse_plan_args(args: argparse.Namespace, plan_op: str) -> argparse.Namespac
 		if getattr(args, dest) is not None:
 			flag = f"--{dest.replace('_', '-')}"
 			fail(
-				f"notebook.py: {flag} is not accepted with {plan_op}; plan "
-				"operations carry plan text only",
+				f"notebook.py: {flag} is not accepted with {plan_op}; {reason}",
 				1,
 			)
 	if plan_op in ("--plan-read", "--plan-decision"):
@@ -823,7 +836,8 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
 		fail(
 			"notebook.py: one entry type (--hypothesis, --method, "
 			"--observation, --decision, --confidence) or plan operation "
-			"(--plan-write, --plan-update, --plan-read) is required",
+			"(--plan-write, --plan-update, --plan-read, --plan-decision) "
+			"is required",
 			1,
 		)
 	if args.plan_file is not None:
@@ -951,8 +965,9 @@ def check_plan_slug(slug: str) -> None:
 
 
 def check_plan_id(plan_id: str) -> None:
-	"""The read/update path's plan-id grammar: a calendar date plus a slug."""
-	match = PLAN_ID_RE.match(plan_id)
+	"""The plan-id grammar on every path that names a plan: a calendar
+	date plus a slug."""
+	match = PLAN_ID_RE.fullmatch(plan_id)
 	if match is None or len(match.group(2)) > PLAN_SLUG_MAX or not calendar_date(
 		match.group(1)
 	):
@@ -967,7 +982,7 @@ def check_plan_id(plan_id: str) -> None:
 def check_plan_revision(revision: str) -> None:
 	"""The citation's revision shape: 12 lowercase hex digits, the digest
 	every plan operation reports."""
-	if not PLAN_REV_RE.match(revision):
+	if not PLAN_REV_RE.fullmatch(revision):
 		raise RecorderError(
 			"notebook.py: --revision must be 12 lowercase hex digits -- the "
 			"revision digest every plan operation reports, got: "
@@ -1009,7 +1024,7 @@ def read_plan(plan_id: str) -> bytes:
 	except FileNotFoundError:
 		raise RecorderError(
 			f"notebook.py: no plan {plan_id} in {PLANS_DIR} -- the id a write "
-			"names on stdout is the id a read or update takes",
+			"names on stdout is the id a read, an update, or a citation takes",
 			1,
 		) from None
 	except OSError as error:
@@ -1043,7 +1058,9 @@ def run_plan_op(args: argparse.Namespace) -> dict:
 	computed over exactly the bytes on disk. The decision read touches no
 	plan bytes at all: it queries the notebook for the latest decision
 	entry citing the named plan at the given revision, in file order --
-	append-only, so file order is recording order.
+	append-only, so file order is recording order. A line whose citation
+	is malformed (no verdict) is no citing decision: it is skipped, the
+	same refusal the TS validator holds on that line.
 	"""
 	if args.plan_op == "--plan-decision":
 		check_plan_id(args.plan_decision)
@@ -1055,6 +1072,7 @@ def run_plan_op(args: argparse.Namespace) -> dict:
 				entry.get("type") == "decision"
 				and entry.get("planPath") == plan_path
 				and entry.get("planRevision") == args.revision
+				and entry.get("decision") in VERDICTS
 			):
 				latest = entry
 		return {"planPath": plan_path, "planRevision": args.revision, "latest": latest}
@@ -1112,9 +1130,8 @@ def print_plan(result: dict, plan_op: str) -> None:
 			)
 		else:
 			print(
-				f"decision {latest.get('decision')} for {result['planPath']} "
-				"revision "
-				f"{result['planRevision']} ({latest.get('id')})"
+				f"decision {latest['decision']} for {result['planPath']} "
+				f"revision {result['planRevision']} ({latest.get('id')})"
 			)
 		return
 	line = f"plan {result['path']} revision {result['revision']}"

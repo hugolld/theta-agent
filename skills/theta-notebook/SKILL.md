@@ -196,8 +196,10 @@ no recorded hypothesis is a usage error, never an entry.
 Requires Python 3.11+ (standard library only). If `python3` is older, run
 `python3.13`, `python3.12`, or `python3.11` — the script names them when the
 gate trips. Default output is the recorded line, then the entry's specifics
-— the evidence item's source and retrieval date with its grade, and the
-snapshot address; `--json` prints the appended entry itself instead.
+— the evidence item's source and retrieval date with its grade, the
+snapshot address, and on a citing decision the `# plan:` line naming the
+path, the revision, and the verdict; `--json` prints the appended entry
+itself instead.
 
 ### The job record's shape
 
@@ -238,8 +240,9 @@ and passes it to `--job-record` as JSON (path or `-`):
 The **plan object** is a file, not an entry: `.theta/plans/<plan-id>.md`,
 plain Markdown stating what a run will compute, on which hypothesis, with
 which method. It carries plan text only — no evidence, no grade: a plan is
-a document, not a graded claim — and the plan operations never touch
-`notebook.jsonl`. The recorder is the loop's writer, not the file's owner:
+a document, not a graded claim — and the plan write, update, and read
+never touch `notebook.jsonl` (the decision read, `--plan-decision`, reads
+it and writes nothing). The recorder is the loop's writer, not the file's owner:
 a researcher's hand edit is not an error, it is a new revision that a
 later approval must name.
 
@@ -248,6 +251,7 @@ later approval must name.
 | write | `--plan-write <slug> --plan-file <plan.md\|->` | creates `.theta/plans/<today>-<slug>.md`; reports the path and the revision |
 | update | `--plan-update <plan-id> --plan-file <plan.md\|->` | overwrites the named plan's file; reports the new revision and the one it replaces |
 | read | `--plan-read <plan-id>` | reports the path and the current revision — the file's own bytes decide, so a hand edit reads as the new revision |
+| decision read | `--plan-decision <plan-id> --revision <12-hex>` | reports the latest decision entry citing the plan at that revision, or that none cites it — the decisions-cite-the-plan section below; a notebook read, no plan bytes |
 
 - **Plan-id grammar**: the recording date plus a short kebab slug —
   `2026-11-22-af3-benchmark.md`. The slug is 1–48 characters of lowercase
@@ -303,11 +307,16 @@ the citation resolves against disk before anything is written:
 - The plan-id must name a written plan, and the revision must be that
   file's current digest — a missing plan or a stale revision is a usage
   refusal (exit 1), never an entry: cite the revision `--plan-read`
-  names, and re-read after a hand edit, which is a new revision.
+  names, and re-read after a hand edit, which is a new revision. Record
+  the verdict before any `--plan-update` — an update makes the cited
+  revision stale, a refusal's included.
 - `--plan-decision <plan-id> --revision <12-hex>` reads the notebook
   back: the latest decision entry citing that plan path and revision —
   `decision <verdict> for <path> revision <digest> (<id>)`, or a clear
-  `no decision for ...` report; `--json` prints the entry under `latest`.
+  `no decision for ...` report. Both answers exit 0 (an answer, not a
+  failure): branch on the report, or on `--json`'s object — `planPath`,
+  `planRevision`, and `latest`, the entry itself or `null` when nothing
+  cites it.
 
 A citing decision entry:
 
@@ -359,7 +368,7 @@ transport to fail):
 
 | Code | Meaning |
 |---|---|
-| 0 | Success — the entry is appended and named on stdout, or the plan operation reports the plan's path and revision. |
+| 0 | Success — the entry is appended and named on stdout, the plan operation reports the plan's path and revision, or the decision read reports the latest citing decision or that none cites the plan (an answer, not a failure). |
 | 1 | Usage error — bad arguments, evidence input that is not a valid connector output or gateway job record, a link naming no recorded hypothesis, a malformed plan slug or plan-id, a same-day plan collision, a plan-id naming no written plan, a malformed plan citation, or a citation revision stale against the plan on disk. |
 | 2 | Notebook failure — the notebook or a plan file cannot be read (corrupt, `.theta` is not a directory, or absent for a first plan write) or written. |
 
@@ -386,8 +395,9 @@ transport to fail):
   `--grade`, `--on`, `--supports`, or `--job-record` — and never touch
   `notebook.jsonl`; `--plan-decision` reads the notebook and writes
   nothing; one operation per call, an entry or a plan operation, never
-  both. The citation flags (`--plan-cite`, `--revision`, `--verdict`,
-  `--rationale`) ride only a `--decision` entry.
+  both. The citation flags (`--plan-cite`, `--verdict`, `--rationale`)
+  ride only a `--decision` entry; `--revision` rides `--plan-cite` and
+  `--plan-decision`.
 - `.theta/` belongs to the research project. In the theta-agent repo's own
   dogfood runs it is gitignored so clean-tree proofs hold; in a research
   project, versioning the notebook is the researcher's choice.

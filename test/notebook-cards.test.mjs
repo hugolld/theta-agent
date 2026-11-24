@@ -301,6 +301,15 @@ test("a citing decision without the optional rationale parses", () => {
 	assert.ok(parseProvenanceEntry(line) !== undefined);
 });
 
+test("both verdicts parse: the refused citation carries the same field set", () => {
+	const line = JSON.stringify({ ...JSON.parse(planDecisionLine), decision: "refused" });
+	const entry = parseProvenanceEntry(line);
+	assert.ok(entry !== undefined);
+	assert.equal(entry.decision, "refused");
+	assert.equal(entry.planPath, ".theta/plans/2026-11-18-af3-benchmark.md");
+	assert.equal(entry.planRevision, "c6f6084b0e5f");
+});
+
 test("the citation grammar refuses every malformed shape", () => {
 	const base = JSON.parse(planDecisionLine);
 	const mutate = (patch) => JSON.stringify({ ...base, ...patch });
@@ -322,11 +331,15 @@ test("the citation grammar refuses every malformed shape", () => {
 		mutate({ planPath: ".theta/plans/af3-benchmark.md" }),
 		mutate({ planPath: ".theta/plans/2026-13-01-af3-benchmark.md" }),
 		mutate({ planPath: ".theta/plans/2026-11-18-af3--benchmark.md" }),
+		mutate({ planPath: `.theta/plans/2026-11-18-${"a".repeat(49)}.md` }),
 		mutate({ planPath: ".theta/plans/2026-11-18/af3-benchmark.md" }),
 		mutate({ planPath: ".theta/plans/2026-11-18-af3-benchmark" }),
 		mutate({ planPath: null }),
 		mutate({ rationale: "" }),
 		mutate({ rationale: null }),
+		// A rationale without the citation fields is not an all-or-nothing
+		// citation — it rides only an entry that cites.
+		JSON.stringify({ ...base, planPath: undefined, planRevision: undefined, decision: undefined }),
 		mutate({ type: "method", id: "mth-0001" }),
 	]) {
 		assert.equal(
