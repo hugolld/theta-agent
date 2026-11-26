@@ -9,7 +9,7 @@ import type {
 	SessionStartEvent,
 	ToolResultEvent,
 } from "@earendil-works/pi-coding-agent";
-import { isCalendarDate, isPlanPath, PLAN_REVISION_RE } from "./plan-object.ts";
+import { isCalendarDate, isPlanPath, PLAN_REVISION_RE } from "./lib/plan-object.ts";
 
 /**
  * The notebook entry cards (spec #178, demo doctrine B1 —
@@ -142,19 +142,6 @@ function isEvidenceList(value: unknown): value is EvidenceItem[] {
 		value.every((item) => isEvidenceItem(item))
 	);
 }
-
-/**
- * The plan citation's grammar (spec #202), pinned against the shared
- * fixture entry both suites read: `planPath` names a plan object by its
- * recorded path — `.theta/plans/<plan-id>.md`, the form every plan
- * operation reports — `planRevision` is the 12-hex digest the decision
- * weighs, and `decision` is one of the two verdicts. The fields are
- * all-or-nothing on a decision entry and ride only a decision: the
- * recorder resolved the citation against disk before writing (a missing
- * plan or a stale revision never became an entry), so this validator
- * pins the shapes, not the disk state. The shapes themselves live in
- * plan-object.ts since spec #203 made the gate their second reader.
- */
 
 function isDecisionVerdict(value: unknown): value is DecisionVerdict {
 	return (

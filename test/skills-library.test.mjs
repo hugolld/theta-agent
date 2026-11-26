@@ -606,8 +606,8 @@ const scanSurfaces = [
 	// extensions/gate-framework.ts and extensions/plan-object.ts carry the
 	// same stop's working vocabulary — the framework's extraction home and
 	// the plan object's TS side (spec #203).
-	"extensions/gate-framework.ts",
-	"extensions/plan-object.ts",
+	"extensions/lib/gate-framework.ts",
+	"extensions/lib/plan-object.ts",
 	// extensions/skill-pool.ts carries the pool headwords' working vocabulary
 	// (skill pool, domain pack) — the status table, the toggle replies, and
 	// the diagnosis block.

@@ -3,8 +3,9 @@ import { createHash } from "node:crypto";
 /**
  * The plan object's TS side (spec #201 → #203): the citation grammar the
  * cards validator and the plan-review gate share, and the plan revision's
- * digest recipe. This module is a library, not an extension — no default
- * export, so pi's loader skips it.
+ * digest recipe. This module is a library, not an extension: it lives
+ * under `extensions/lib/`, a directory pi's extension discovery skips (no
+ * index file, no pi manifest), so no session loads it as an extension.
  *
  * The recipe mirrors the recorder's (`skills/theta-notebook/scripts/
  * notebook.py`): the first 12 hex of the sha256 over the plan file's raw

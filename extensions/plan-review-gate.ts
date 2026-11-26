@@ -12,8 +12,8 @@ import {
 	type GateLogSink,
 	runGateChecks,
 	writeGateDecision,
-} from "./gate-framework.ts";
-import { isPlanPath, planRevisionOf } from "./plan-object.ts";
+} from "./lib/gate-framework.ts";
+import { isPlanPath, planRevisionOf } from "./lib/plan-object.ts";
 
 /**
  * The plan-review gate (spec #203): the research loop's stop between
@@ -29,7 +29,7 @@ import { isPlanPath, planRevisionOf } from "./plan-object.ts";
  * The check stack, in order:
  *
  * 1. `durable-approval` — the plan file is digested on disk (the plan
- *    revision, plan-object.ts's recipe), then the project notebook is
+ *    revision, lib/plan-object.ts's recipe), then the project notebook is
  *    read for the latest decision entry citing the same path and
  *    revision. An approved citation satisfies the stop with no dialog —
  *    the durable-approval rule; a refusal is provenance the same way, so
@@ -43,10 +43,12 @@ import { isPlanPath, planRevisionOf } from "./plan-object.ts";
  * Fail-closed by construction: no approval at this revision, an
  * unanswered or refused dialog, a missing plan file, or a malformed path
  * all refuse — no Execute, this run — and every refusal names the gate so
- * the model asks the user instead of retrying unprompted. Mode
- * degradation follows the M5 precedent: print and json modes' no-op UI
- * denies every confirm, so the stop refuses there; RPC answers headlessly
- * (the rig driver, test/rig/rpc-driver.mjs).
+ * the model asks the user instead of retrying unprompted. One log line
+ * records each decided stop; the usage-class refusals (a malformed path,
+ * a missing plan) refuse before the stack and log nothing, like every
+ * ungated call. Mode degradation follows the M5 precedent: print and json
+ * modes' no-op UI denies every confirm, so the stop refuses there; RPC
+ * answers headlessly (the rig driver, test/rig/rpc-driver.mjs).
  *
  * The gate logs its decision; the loop records the `decision` entry
  * through the recorder after an approval (spec #204's doctrine). If the
@@ -89,13 +91,21 @@ const durableApprovalCheck: GateCheck<PlanReviewEnv> = {
 		if (lines.at(-1) === "") lines.pop();
 		let latest: { decision: "approved" | "refused" } | undefined;
 		for (let i = 0; i < lines.length; i++) {
+			// blank lines ride along: the recorder skips them too
+			if (lines[i].trim() === "") continue;
 			let entry: unknown;
 			try {
 				entry = JSON.parse(lines[i]);
 			} catch {
 				return {
 					decision: "refused" as const,
-					reason: `the notebook at ${NOTEBOOK_RELATIVE} is not valid JSONL (line ${i + 1}) — the plan-review stop refuses rather than prompt over a corrupt provenance ledger; repair the notebook before Execute`,
+					reason: `the notebook at ${NOTEBOOK_RELATIVE} is not valid JSONL (line ${i + 1}) — the plan-review gate refuses rather than prompt over a corrupt provenance ledger; repair the notebook before Execute`,
+				};
+			}
+			if (entry === null || typeof entry !== "object" || Array.isArray(entry)) {
+				return {
+					decision: "refused" as const,
+					reason: `the notebook at ${NOTEBOOK_RELATIVE} carries a non-entry line (line ${i + 1}) — the plan-review gate refuses rather than prompt over a corrupt provenance ledger; repair the notebook before Execute`,
 				};
 			}
 			const record = entry as Record<string, unknown>;
@@ -113,7 +123,7 @@ const durableApprovalCheck: GateCheck<PlanReviewEnv> = {
 			? { decision: "approved" as const }
 			: {
 					decision: "refused" as const,
-					reason: `${planPath} at revision ${digest} was refused at the plan-review stop — the notebook's latest decision for this plan at this revision is a recorded refusal (a refusal is provenance the same way); a new revision needs a new decision. Never proceed the stop unprompted`,
+					reason: `${planPath} at revision ${digest} was refused by the plan-review gate — the notebook's latest decision for this plan at this revision is a recorded refusal (a refusal is provenance the same way); a new revision needs a new decision. Never proceed the stop unprompted`,
 				};
 	},
 };
@@ -127,13 +137,13 @@ const confirmCheck: GateCheck<PlanReviewEnv> = {
 	run: async ({ ctx, planPath, digest }) => {
 		const approved = await ctx.ui.confirm(
 			"theta plan-review gate",
-			`Allow Execute for plan ${planPath} at revision ${digest}? The stop gates the run's compute work.`,
+			`Allow Execute for plan ${planPath} at revision ${digest}? The stop gates Execute for this run.`,
 		);
 		return approved
 			? { decision: "approved" as const }
 			: {
 					decision: "refused" as const,
-					reason: `${planPath} at revision ${digest} was refused at the plan-review stop — the dialog's answer declined Execute; ask the user to approve the plan, never proceed the stop unprompted`,
+					reason: `${planPath} at revision ${digest} was refused by the plan-review gate — the dialog's answer declined Execute; ask the user to approve the plan, never proceed the stop unprompted`,
 				};
 	},
 };

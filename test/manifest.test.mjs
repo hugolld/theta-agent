@@ -126,3 +126,58 @@ test("the version names its three prose surfaces", async () => {
 		);
 	}
 });
+
+// pi's real extension discovery over the shipped extensions dir (spec
+// #203): every direct .ts under extensions/ loads as an extension module,
+// and a module whose default export is not a factory lands in the result's
+// errors — an [Extension issues] block in every interactive session. The
+// library modules (lib/gate-framework.ts, lib/plan-object.ts) stay out of
+// discovery by living under extensions/lib/, a subdirectory with no index
+// and no pi manifest, which the discovery skips; this pin reds the day a
+// library module strays back to the top level or a shipped extension
+// loses its factory, instead of every session naming it an issue. The
+// loader is a deep module, resolved through the installed tree the suite
+// already tests against, and the agent dir is isolated so the discovery
+// reads only this package (the default would sweep ~/.pi/agent too).
+test("pi's extension discovery loads every shipped extension and reports no issues", async (t) => {
+	const { pathToFileURL, fileURLToPath } = await import("node:url");
+	const nodePath = await import("node:path");
+	const indexUrl = import.meta.resolve("@earendil-works/pi-coding-agent");
+	const loaderUrl = pathToFileURL(
+		nodePath.join(
+			nodePath.dirname(fileURLToPath(indexUrl)),
+			"core",
+			"extensions",
+			"loader.js",
+		),
+	);
+	const { discoverAndLoadExtensions } = await import(loaderUrl.href);
+	const root = fileURLToPath(new URL("../", import.meta.url));
+	const { tempDir } = await import("./helpers/temp-dir.mjs");
+	const isolatedAgentDir = tempDir(t, "pi-agent-dir-");
+	const result = await discoverAndLoadExtensions(
+		[nodePath.join(root, "extensions")],
+		root,
+		isolatedAgentDir,
+	);
+	assert.deepEqual(
+		result.errors.map((error) => `${error.path}: ${error.error}`),
+		[],
+		"pi's discovery reports extension issues — a module under extensions/ is not a valid extension",
+	);
+	assert.deepEqual(
+		result.extensions
+			.map((extension) => nodePath.relative(root, extension.path))
+			.sort(),
+		[
+			"extensions/notebook-cards.ts",
+			"extensions/notebook-command.ts",
+			"extensions/plan-review-gate.ts",
+			"extensions/roadmap-command.ts",
+			"extensions/skill-pool.ts",
+			"extensions/submit-gate.ts",
+			"extensions/theta.ts",
+		],
+		"pi's discovery must load exactly the shipped extension files",
+	);
+});

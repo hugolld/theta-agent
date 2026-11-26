@@ -7,12 +7,13 @@ import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
  * tool-gating extensions — the decision vocabulary, the check stack, the
  * verdict type, the gate log's line shape and sink — extracted from
  * submit-gate.ts on its second use, the plan-review gate. This module is a
- * library, not an extension: it has no default export, so pi's loader
- * skips it. Each gate keeps its own specifics (its trigger surface, its
- * checks, its result mapping) and takes the framework's two disciplines:
- * a verdict ends the stack and every refusal carries a reason, and the
- * log is the audit trail, never the gate — a log-write failure never
- * changes the decision.
+ * library, not an extension: it lives under `extensions/lib/`, a directory
+ * pi's extension discovery skips (no index file, no pi manifest), so no
+ * session loads it as an extension. Each gate keeps its own specifics (its
+ * trigger surface, its checks, its result mapping) and takes the
+ * framework's two disciplines: a verdict ends the stack and every refusal
+ * carries a reason, and the log is the audit trail, never the gate — a
+ * log-write failure never changes the decision.
  */
 
 /**
@@ -20,7 +21,8 @@ import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
  * (the session dir is the evidence channel: `--session-dir` captures it
  * with the run), one JSONL line per gated decision — never for ungated
  * calls, which stay frictionless by design. One ledger renders every
- * gate: each line's `check` names the gate and the check that decided.
+ * gate: each line's `tool` names the gate and its `check` the check that
+ * decided.
  */
 export const GATE_LOG_NAME = "gate.jsonl";
 

@@ -165,5 +165,5 @@ The decision entry's name for the plan it weighs: `planPath` (the plan object's 
 _Avoid_: plan approval field, verdict tag
 
 **Plan-review gate**:
-The gate framework's second instance — the research loop's stop between Design and Execute, fail-closed and revision-bound: the plan's current revision needs a recorded approved decision (the durable approval, no dialog) or the user's confirm, print and json modes degrade to a refusal, and one session-dir `gate.jsonl` line logs the verdict beside the submit gate's, the extension-registered tool `theta_plan_review` its trigger surface. Spec #203 ships it.
+The gate framework's second instance — the research loop's stop between Design and Execute, fail-closed and revision-bound: the latest recorded decision citing the plan's current revision decides the stop before any dialog (an approval is the durable approval and passes with no dialog; a refusal is provenance and refuses without re-prompting), an undecided revision asks the user's confirm, print and json modes degrade to a refusal, and one session-dir `gate.jsonl` line logs the verdict beside the submit gate's, the extension-registered tool `theta_plan_review` its trigger surface. Spec #203 ships it.
 _Avoid_: plan approval gate, execute gate

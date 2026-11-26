@@ -9,8 +9,7 @@ import {
 	type GateLogSink,
 	runGateChecks,
 	writeGateDecision,
-	GATE_LOG_NAME,
-} from "./gate-framework.ts";
+} from "./lib/gate-framework.ts";
 
 /**
  * The Submit gate — the package's tool-call-pipeline permission extension
@@ -18,15 +17,11 @@ import {
  * stack of checks judges every theta-compute gateway call before it
  * reaches the gateway; read-only gateway tools run ungated. The framework
  * (the decision vocabulary, the stack, the verdicts, the log's line shape
- * and sink) lives in gate-framework.ts since spec #203's extraction; this
- * file keeps the submit gate's specifics — its trigger surface, its two
- * checks, and the pipeline mapping — and is byte-for-byte unchanged in
- * behavior.
+ * and sink) lives in lib/gate-framework.ts since spec #203's extraction;
+ * this file keeps the submit gate's specifics — its trigger surface, its
+ * two checks, and the pipeline mapping — and is byte-for-byte unchanged
+ * in behavior.
  */
-
-// The shared log name re-exports so the gate's own imports (and the pins
-// that read them) keep one home to import from.
-export { GATE_LOG_NAME };
 
 /**
  * pi registers MCP tools as `mcp__<server>__<tool>`, sanitized: every

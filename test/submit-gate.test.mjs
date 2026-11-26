@@ -5,6 +5,7 @@ import { test } from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createJiti } from "jiti";
 import { escapeRegExp } from "./helpers/escape-regexp.mjs";
+import { stubGateContext } from "./helpers/gate-stubs.mjs";
 import { tempDir } from "./helpers/temp-dir.mjs";
 import { GATEWAY_ANNOTATIONS } from "./fixtures/gateway/annotations.mjs";
 
@@ -18,8 +19,9 @@ import { GATEWAY_ANNOTATIONS } from "./fixtures/gateway/annotations.mjs";
 // pi 1.4.0 concurrent-dialog case), nested codemode context with
 // parentToolCallId-bearing events.
 const jiti = createJiti(import.meta.url);
-const { createSubmitGate, CONFIRM_SET, GATE_LOG_NAME, GATEWAY_PREFIX, default: registerSubmitGate } =
+const { createSubmitGate, CONFIRM_SET, GATEWAY_PREFIX, default: registerSubmitGate } =
 	await jiti.import("../extensions/submit-gate.ts");
+const { GATE_LOG_NAME } = await jiti.import("../extensions/lib/gate-framework.ts");
 
 // pi sanitizes registered MCP tool names: every character outside
 // [A-Za-z0-9_] becomes `_` (pi's createMcpToolName), so the server's
@@ -40,23 +42,14 @@ const gatewayTool = (row) => ({
 });
 const TOOL_INFOS = GATEWAY_ANNOTATIONS.map(gatewayTool);
 
-// A stub handler context whose confirm records its arguments and answers
-// with the test's scripted boolean. The sessionManager is absent unless a
-// test supplies one — the gate log's default sink must tolerate that (an
-// in-memory context logs nowhere), which is also the stub's job to pin.
-function stubContext(answer, sessionManager) {
-	const calls = [];
-	return {
-		calls,
-		ui: {
-			confirm: async (...args) => {
-				calls.push(args);
-				return answer;
-			},
-		},
-		...(sessionManager !== undefined ? { sessionManager } : {}),
-	};
-}
+// The stub context is the shared helper's (test/helpers/gate-stubs.mjs,
+// the plan-review gate suite's second caller made it move); this suite's
+// calls keep the positional shape the pins were written with. The
+// sessionManager stays absent unless a test supplies one — the gate log's
+// default sink must tolerate that (an in-memory context logs nowhere),
+// which is also the stub's job to pin.
+const stubContext = (answer, sessionManager) =>
+	stubGateContext({ answer, sessionManager });
 
 const makeEvent = (toolName, input = {}, parentToolCallId) => ({
 	type: "tool_call",
