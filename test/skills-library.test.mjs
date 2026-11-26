@@ -603,9 +603,9 @@ const scanSurfaces = [
 	// working vocabulary — the dialog title, the durable-approval rule, and
 	// the refusal reasons (spec #203).
 	"extensions/plan-review-gate.ts",
-	// extensions/gate-framework.ts and extensions/plan-object.ts carry the
-	// same stop's working vocabulary — the framework's extraction home and
-	// the plan object's TS side (spec #203).
+	// extensions/lib/gate-framework.ts and extensions/lib/plan-object.ts
+	// carry the same stop's working vocabulary — the framework's extraction
+	// home and the plan object's TS side (spec #203).
 	"extensions/lib/gate-framework.ts",
 	"extensions/lib/plan-object.ts",
 	// extensions/skill-pool.ts carries the pool headwords' working vocabulary
