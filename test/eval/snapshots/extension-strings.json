@@ -211,21 +211,20 @@
 			"content": [
 				{
 					"type": "thinking",
-					"thinking": "The user wants me to submit a staged validation run named \"smoke-check\" through the cluster gateway. The environment provides guidance for cluster work — there's a skill called `theta-compute` that covers the Slurm job lifecycle through the theta-compute gateway MCP server. I should read that skill file first, whole, in a single call with a limit larger than its line count.\n\nAlso there's a project instruction to read CLAUDE.md in full before working here. Let me check that too.\n\nThe user says: \"Before you rely on any instruction or reference file, read it whole in a single call, with a limit larger than its line count — never an exact-count or fragmented read.\"\n\nSo I need to:\n1. Read CLAUDE.md (the repo steering doc) fully.\n2. Read the theta-compute skill SKILL.md fully.\n\nLet me do these reads. First, let me check the files exist and their sizes, but the user said read whole in a single call with a limit larger than line count. I can do a wc -l via bash to find sizes, but then reading with a limit larger than that count — they said never an exact-count read, so I should use a generous limit like 2000. Actually the read tool truncates to 2000 lines by default; if I pass no limit... the parameters require offset and limit (both nullable but required in schema — they're \"anyOf number or null\", required). I can pass offset: 1 (or null?) — required keys, so I should pass something. Let me pass offset: 1, limit: 2000 to be safe. 2000 is larger than likely line counts, and not exact.\n\nActually, let me first find the skill location: __REPO__/skills/theta-compute/SKILL.md. And CLAUDE.md at repo root — __REPO__/CLAUDE.md presumably.\n\nLet me do both reads in parallel in one block. Also maybe check for the staged run — but the skill will tell me how to interact with the gateway. The gateway is MCP server mcp__theta_compute, accessed via codemode.\n\nPlan:\n1. Read CLAUDE.md and theta-compute SKILL.md fully (parallel).\n2. Follow the skill: likely it instructs to list staged runs/jobs, submit via gateway tool, poll, fetch artifacts, record job ID in notebook via theta-notebook skill.\n3. Report exactly what happened, including anything that stopped it.\n\nThe mention of \"smoke-check\" staged run — the gateway likely has tools to list staged submissions. Let me read the skill first.\n\nLet me read both files now.",
+					"thinking": "The user wants me to submit a staged validation run named \"smoke-check\" through the cluster gateway, following the guidance this environment provides for cluster work. The relevant skill is `theta-compute`. I should read that skill file first, whole, in a single call with a limit larger than its line count.\n\nAlso, the AGENTS.md says the repo's steering doc is CLAUDE.md — I should read it in full before working here. Let me read both files.\n\nLet me start by reading the skill file and CLAUDE.md in parallel.",
 					"thinkingSignature": "reasoning_content"
 				},
 				{
 					"type": "text",
-					"text": "I'll follow the environment's guidance for cluster work. First, let me read the repo steering doc and the theta-compute skill in full, each in a single call with a generous limit."
+					"text": "I'll start by reading the environment's guidance files whole — the repo's steering doc (`CLAUDE.md`) and the `theta-compute` skill — before touching the gateway."
 				},
 				{
 					"type": "toolCall",
 					"id": "<id#7>",
-					"name": "read",
+					"name": "bash",
 					"arguments": {
-						"path": "__REPO__/CLAUDE.md",
-						"offset": 1,
-						"limit": 2000
+						"command": "wc -l __REPO__/CLAUDE.md __REPO__/skills/theta-compute/SKILL.md 2>&1; ls __REPO__",
+						"timeout": 15
 					}
 				},
 				{
@@ -233,9 +232,19 @@
 					"id": "<id#8>",
 					"name": "read",
 					"arguments": {
-						"path": "__REPO__/skills/theta-compute/SKILL.md",
+						"limit": 20000,
 						"offset": 1,
-						"limit": 2000
+						"path": "__REPO__/skills/theta-compute/SKILL.md"
+					}
+				},
+				{
+					"type": "toolCall",
+					"id": "<id#9>",
+					"name": "read",
+					"arguments": {
+						"limit": 20000,
+						"offset": 1,
+						"path": "__REPO__/CLAUDE.md"
 					}
 				}
 			],
@@ -244,22 +253,22 @@
 			"model": "<model>",
 			"usage": {
 				"input": 5845,
-				"output": 663,
+				"output": 275,
 				"cacheRead": 0,
 				"cacheWrite": 0,
-				"reasoning": 555,
-				"totalTokens": 6508,
+				"reasoning": 113,
+				"totalTokens": 6120,
 				"cost": {
 					"input": 0.0008767499999999999,
-					"output": 0.0003315,
+					"output": 0.00013749999999999998,
 					"cacheRead": 0,
 					"cacheWrite": 0,
-					"total": 0.00120825
+					"total": 0.00101425
 				}
 			},
 			"stopReason": "toolUse",
 			"timestamp": "<timestamp>",
-			"responseId": "20261124155846f34014921ec64e81",
+			"responseId": "2026112617411809d311483bcf4a2c",
 			"rawStopReason": "tool_calls",
 			"durationMs": "<duration>",
 			"thinkingLevel": "high"
@@ -267,17 +276,17 @@
 	},
 	{
 		"type": "message",
-		"id": "<id#9>",
+		"id": "<id#10>",
 		"parentId": "<id#6>",
 		"timestamp": "<timestamp>",
 		"message": {
 			"role": "toolResult",
 			"toolCallId": "<id#7>",
-			"toolName": "read",
+			"toolName": "bash",
 			"content": [
 				{
 					"type": "text",
-					"text": "# CLAUDE.md\n\nThis file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.\n\n## What this repository is\n\n`theta-agent` — a **pi package** (extensions + skills for the [pi](https://pi.dev) coding agent) that grows into **Theta**, a science co-researcher agent for biology/biomedicine. It is the code repo of the Theta campaign; design decisions (T1–T10), milestone definitions, and task handoffs live in the campaign vault (path in `CLAUDE.local.md`). Treat the vault as read-only reference.\n\nCurrent state: 0.6.0 — M6 shipped. The M1 base ships the `theta` launcher (a thin `bin/theta.mjs` that runs `pi -e <package-root>`; macOS/Linux — Windows waits for M8, tracked in issue #2) and the Tier-1 library: K-Dense skills vendored verbatim per ADR 0001 plus the self-authored `theta-research-loop` orchestrator, with re-syncs at milestone boundaries (`docs/agents/resync.md`). M2 adds the first connector skill, `theta-lit-search` (PubMed, arXiv, Semantic Scholar), landed tracer-first: search and get-by-identifier with pacing, in-200 error detection, and credential redaction enforced in its scripts (ADR 0002; script invariants in `docs/agents/connector-scripts.md`). M3 adds `theta-notebook`, the project notebook skill (ADR 0003): five dated provenance-entry types with content-addressed, graded evidence snapshots under the research project's `.theta/`, a recorder script under the connector-script invariants, a notebook-written attestation in the dogfood auditor, and orchestrator doctrine weaving recording into all six loop stages. M4 ships the compute gateway `theta-compute` (ADR 0004) from `gateway/` — a FastMCP server wrapping the Slurm CLI with argv arrays only, bearer auth from deploy-time env, one audit JSONL line per tool call, and the seven generic tools (the read-only environments/status pair plus the stage–submit–logs–cancel–fetch lifecycle) behind the path sandbox and the command guard, plus the typed `run_alphafold3` rendering the deploy-time template registry's registered template with its free variables only — all out of the npm tarball. On the theta side, M4 landed the gateway skill's lifecycle doctrine and the submit gate (#54), and the notebook's job-record path (#55): a compute run records a method entry whose evidence item is the assembled gateway job record, graded `re-executed` when its artifacts were fetched, and the orchestrator's execute stage routes cluster jobs to `theta-compute`.\n\nM5 stacks the safety gates: the deploy-time submit capability (ADR 0006) and the per-principal submit ceiling on the gateway, and on the theta side the submit gate grown into the stacked gate framework (#95) — the literal three-tool confirm set pinned against the gateway's destructive annotations (disagreement is drift and refuses loudly), concurrency-safe stacked confirms (pi 1.4.0's concurrent-dialog fix is the floor), `parentToolCallId` riding prompts, refusals, and the session-dir gate log (`gate.jsonl`, one JSONL line per gated decision), and the dogfood auditor reading codemode's `nestedCalls` records instead of assuming a flat call sequence. M5 S3 (#96) makes the rig itself gateway-bearing: the clean-room rig admits the gateway token as its second credential (`--gateway`, URL host rewritten to the Docker host alias, preflighted in-container before launch — the token rides a 0600 env file, never argv), a checked-in RPC confirm driver (`test/rig/rpc-driver.mjs`) answers the submit gate for headless `--rpc` evidence legs, the gateway skill carries the capability/throttle/codemode doctrine, the auditor finds the transcript by its own name grammar beside the gate log, and the M5 dogfood (gated submit with confirm, held refusal, throttle) ran in the rig against the live gateway.\n\nM6 opens the eval suite (ADR 0007) with the replay net's tracer (#133): a checked-in scenario list (`test/eval/scenarios.mjs`), the typed normalization layer with its five rewrite classes, and one connector fixture — a sanitized rig capture — pinned three ways in the keyless standard suite (provenance: one digest per model-visible surface class, so a model-visible edit reds until a fresh capture; snapshot: the normalized entry tree equals its committed snapshot; determinism: pi's reconstruction yields one context hash), with the capture pipeline (`test/eval/capture.mjs`) and doctrine in `docs/agents/eval.md` — all outside the npm tarball. M6 S1 (#134) extends the net to one fixture per model-visible surface class — orchestrator doctrine, the notebook recorder, the gateway skill, and the extension's user-facing strings (the submit gate's refusal, captured on a `--gateway` rig leg where print mode refuses the submit before any server call) — each with its scenario, sanitized fixture, and the three pins; the per-scenario shape assertion lives in `test/eval/shape.mjs`, and the orchestrator fixture binds the vendored skill its doctrine routes to, so a body-only re-sync reds by name. M6 S2 (#135) lands the benchmark layer's tracer beside the net: the rig runner's eval mode runs one checked-in benchmark task end-to-end from one command carrying only the provider key (it refuses `--gateway`/`--rpc` — no gateway token path exists on a benchmark leg), grades workspace-as-oracle through declarative checks run in-container plus one `models.classify()` judge whose named slot runs host-side so its key never enters the rig, and writes the report — task grade, judge tier, UsageEntry totals — beside the recorded exit status. M6 S3 (#136) grows the benchmark suite beside the tracer: four checked-in tasks, one per benchmark class, graded workspace-as-oracle through declarative checks run in-container plus two-tier judging through named OpenRouter config slots — a disclosed bend from ADR 0007's campaign-provider letter (pi's classifier catalog is closed to its families, so both tiers ride OpenRouter; the tiers never share a model family, and the slot ids are pinned against the installed catalog) — one judge call per fresh child process, a suite mode running the whole list from one command, and a per-run report; a benchmark leg still carries only the provider key. M6 S4 (#137) lands the steering: the eval-capture procedure rides the dogfood doc, a re-sync's model-visible diff owes a fresh capture, and the capture-trigger rule — reproduce a red before paying it — joins the eval section below.\n\nPast M6, the skill pool lands in steps (ADR 0008): `pool/` — the versioned in-repo library of vendored domain packs (first wave 2026-11-15: protein-engineering, bioinformatics, cheminformatics — 48 skills) under the ADR 0001 verbatim rules, outside the npm tarball — loads per research project through `.theta/skills.json` instead of shipping in every session; S1 (#160) ships the loader extension `extensions/skill-pool.ts`, with the class map `pool/classes.json` gating what may load and the pack as the re-sync unit (`docs/agents/resync.md`), and S2 (#162) the Jev gate: a one-call `models.classify()` judgment over the project notebook's recent entries and the enabled pack names decides which credential classes a project's `skills.json` may load beyond `local` — firing once per project at a keyed session start, then only as an explicit owner act; a human-widened allow set outranks it, the metered `cloud` class never enters without the owner's explicit run, the decision and rationale land in the state file, and the classifier key stays host-side. S3 (#167) joins the pool to the replay net: the `pool:<pack>` surface class (one digest over a pack's whole tree plus the class map), the rig's `--pool` leg staging the state file into the clone — keyless, so the Jev gate cannot fire in the rig — a pool-aware auditor, the sixth eval capture (the bioinformatics pack, `pydeseq2` opened), and one loaded-pack dogfood; #164 beside it teaches the RPC driver its session cwd. #172 pays the #167 retro in the environment — the digested-tree doctrine's reach, the rig's dirt-naming refusal, and check-strike's spec-close leg, whose closing forms admit `owner/repo#<n>` URLs. S4 (#168) sweeps the pool's doctrine to the landed surface — the README's tier story, this manual's pool sections, the loaded-pack dogfood procedure home — and pays the capture debt the manual's rewrite owes.\n\nM7a opens the demo slice (#177, doctrine in `docs/agents/demo.md`): B1 (#178) ships the notebook entry cards — `extensions/notebook-cards.ts` diffs `.theta/notebook.jsonl` in the session cwd on every `tool_result` (a codemode-wrapped recorder run still surfaces one outer result) and appends one durable `theta-notebook-entry` custom entry per new line that parses as a typed, dated provenance entry — line bytes the identity (re-runs and retries dedupe), malformed lines never card, the seen-set rebuilds at `session_start` from the session's own custom entries beside the startup backlog fence (lines present when the session opened never card — B2 owns the trail display on demand), and no notebook file leaves the hook inert. The paired `registerEntryRenderer` draws the card in interactive mode only (evidence sources with their grades badged, the observation's own grade, `supports` links as hypothesis references, the expanded raw entry; custom entries land in every mode, so print-mode transcripts carry them); the recorder script and skill trees stay frozen (the hook reads the file), and the notebook scenario's shape pin carries the card assertion on the recaptured fixtures. B2 (#182) ships the `<path>` command — `extensions/notebook-command.ts` renders the whole project notebook on demand through the cards extension's exported grammar (the validator, the whole-notebook read, and the evidence detail stay in one home): a header with entry count and grade totals, one aligned row per entry in file order (the journal is append-only, so file order is provenance order), evidence items as indented grade-badged lines. The output rides one notify — pi's interactive mode overwrites an info status text in place, so a line-by-line table would collapse to its last line — and the command never opens a dialog: complete in interactive mode, forwarded in RPC, a silent no-op in print and JSON, with the absence (no `.theta/notebook.jsonl`) notified as info, never an error. B3 (#184) ships the demo prompt templates: `prompts/demo-lit-triage.md` rides the `pi.prompts` manifest field into the npm tarball, and pi's native template expansion turns `<path>` into the scripted pharmacology question — the benchmark `lit-triage` shape with its steering sentences inlined verbatim, pure ASCII, argument-free (a scripted run's bytes are fixed) — which the orchestrator's doctrine routes through the research loop so B1's cards appear as the recorder appends; no extension code changes hands, and `test/demo-prompts.test.mjs` owns the class pins (ASCII, steering verbatim from the scenario list's home, zero variance, plain-scalar-safe frontmatter, no institutional facts). B4 (#186) ships the `<path>` command — `extensions/roadmap-command.ts` draws the owner-reviewed future-plans card (the M7b web workbench, the cloud deployment study, M8 packaging — settled 2026-11-19, static bytes, no file reads, no dynamic state) as a pi-tui Box composition on `ctx.ui.custom()` in interactive mode, with the blank separators on Spacer lines (a Text child swallows blank bytes); RPC degrades to one notify carrying the card's plain text, print and JSON stay a silent no-op, and `<path>` is the single roadmap home — `<path>`'s status notify drops its stale next-milestone line in the same strike, the strike adds the Web workbench glossary headword, and `test/roadmap-command.test.mjs` pins the reviewed bytes verbatim, the mode degradation, and the handover. B5 (#190) ships the Theta theme — `themes/theta.json` (teal brand colors on a fork of pi's dark base, the semantic roles kept so the grade badges and tool boxes never inherit the brand hue) rides the `pi.themes` manifest field into the npm tarball, and `theta.ts` brands the session at `session_start`: a persistent footer segment (`ctx.ui.setStatus`, ASCII bytes, preference-independent) beside an in-memory switch to the theta theme that fires only when the user set no theme preference (`pi.getSettings().theme` unset — a saved choice or a `--use-theme` override is respected) and only in interactive mode (RPC forwards the status as a fire-and-forget request; print and JSON touch no UI), with an unresolvable theme name skipping the switch silently — branding never announces itself, and the demo's operator-vouched visual capture is the proof the theme resolved; no B1/B4 renderer changes hands (the cards and the roadmap box re-color through the role tokens), and `test/theta-theme.test.mjs` owns the pins (the schema-required roles in pi's color grammar, the brand family on the teal band, the status bytes, the switch guards, and the mode degradation). B6 (#193) closes the slice with the rehearsal, run as a split strike: the rig leg ran the scripted pharmacology question through the research loop green on the first roll (the auditor's skill/script/notebook legs attested), and the login-node rehearsal settled the demo's venue on the devnode chain — tmux on the login node whose pane runs `ssh -t` into the standing allocation's compute node, because the login node's hard 5 GB virtual-memory cap breaks pi's provider calls (the bundled undici needs a WASM allocation per HTTP request, and every allocation fails under the cap; escape hatches exhausted — the diagnosis lives on the spec). The environment is prepared once: a uv-managed Python 3.12 venv in the checkout, first on PATH (the compute node's system python predates the connector scripts' 3.11 floor), and a loopback forward from the compute node to the login-node gateway, raised before the session boots (pi registers MCP servers at session start only). The full script walked live — the `/` menu, `<path>` with cards appearing as the recorder appends, `<path>`, the gated submit confirmed by the operator (the job record graded `re-executed` after the fetch), `<path>`, `<path>` — and the fallback pair (asciinema cast plus exported HTML) is archived under the owner's evidence root. The same strike amends `demo.md` throughout to the devnode venue — the standing decisions (the venue rewrite; the cluster-leg bullet drops its no-forward clause), the intro, the build table's B6 row to shipped, the runbook (the devnode attach step; the `<path>` patience note: the cast flushes its final chunk only on the recorder's clean exit), and the rehearsal doctrine's findings — and lands the `theta-notebook` fresh-project sentence (create `.theta/` before the first record; the recorder's exit-2 refusal scopes to evidence-free first records) with its version bump to 0.4.0.\n\n## pi-package rules\n\n- Host-provided packages (`@earendil-works/pi-coding-agent`, `@earendil-works/pi-ai`, `@earendil-works/pi-agent-core`, `@earendil-works/pi-tui`, `typebox`) go in `peerDependencies` with `\"*\"` ranges — never `dependencies`, never bundled.\n- Keep the `pi-package` keyword (gallery eligibility) and the explicit `pi` manifest (`extensions`, `skills`, `prompts`, `themes`) in `package.json`. Manifest fields are arrays of strings — pi silently drops bare-string fields (guarded by `test/manifest.test.mjs`). The skill pool stays out of the manifest and the tarball by design — its packs load per research project through the loader extension (`extensions/skill-pool.ts`), so the shipped surface stays the Tier-1 library and the self-authored skills beside it, plus the demo prompt templates under `prompts/` (M7a B3, the demo doctrine's scripted runs) and the Theta theme under `themes/` (M7a B5, the demo doctrine's brand surface — the teal palette and the session-start switch).\n- Never install `pi-mcp-adapter` — an installed adapter replaces pi's built-in MCP support (native since pi 0.99).\n- Target pi ≥ 1.4.0 and Node ≥ 22.19.0. The floor moves only at milestone boundaries, under the standing adoption rule recorded on #87 — a held review is recorded on the parent spec, never silent. Package loading uses `pi -e <source>`; local-path sources load without copying, so a repo checkout works exactly like the installed package.\n- The pi extension API is read from the installed package, not the web — the paths below sit under the pi install root (`$(npm root -g)/@earendil-works/pi-coding-agent/`): `docs/extensions.md` (events, the tool-call pipeline, UI modes), `docs/mcp.md` (tool naming and exposure — MCP tool names are sanitized to `[A-Za-z0-9_]`, so a server hyphen registers as an underscore), and `dist/core/extensions/types.d.ts` for the exact event and context shapes.\n\n## Conventions\n\n- Conventional commits (`feat:`, `chore:`, `docs:`). Tabs and existing field order in `package.json`.\n- Extract a shared helper as soon as the same logic shape appears twice — tree-wide, not per-module: a module boundary created mid-strike is where duplication is born, so the shared shape gets one home before the second caller (tests included). Copying code verbatim is for separately shipped trees only — skill-to-skill, never within a file.\n- Failure paths in runner and helper scripts: child-process spawns inherit the environment (overlay onto `process.env`, never replace it — the eslint `spawn-env-inherit` rule enforces direct call sites); `finally` cleanup never masks the primary failure; a machine-readable result lands as a file when its channel is shared with payload output (the exit-status rule — and a pipeline whose exit gates the next step runs unpiped or under `set -o pipefail`: a `tee` or `tail` in the tail position reports its own status, and #117's failed cluster re-deploy sailed through an `&&` chain that way). The rule binds agent tool calls too: a command whose exit gates the next step runs unpiped or records its status to a file — `npm test | tail` laundered a red suite's exit as 0 (the M6 S2 retro).\n- An accepted behavior delta — ordering, precedence, message bytes — is pinned by a test in the same strike; the PR body discloses what the suite already owns (#113's read-precedence delta reached the merge round disclosed but unpinned, and the merge round paid the pin). The bar reaches fix commits: each claimed behavior change moves or adds a pin — a comment-only change claims nothing (the S2 fix pass's \"no lost-update window\" claim rode a comment alone until re-investigation caught it). And a helper whose write can fail returns whether it landed; the caller announces success only on that result (the S2 `writeGateRecord` returned void, swallowed write failures, and both callers printed the success notify after one).\n- The review round names every accepted deviation from the spec's letter — additions beyond the enumeration included — with the reason; the disclosure lands in the same strike's PR body, not in a later pass (#127's survey-inputs bullet rode through PR #128's draft review undisclosed, and the triage round paid the disclosure).\n- An extraction test — one that pulls structured tokens out of prose — consumes from its anchor: the match opens the claim it pins, leading whitespace only, never searching forward past other text. An unanchored match can borrow a later passage and pass silently (#122's review round caught the prose check's enumeration doing exactly that).\n- A spec's acceptance numbers and failure-mode claims are measured before the spec lands — a claim one command can falsify is a delta the strike inherits for free (#120's lint:dups \"count drops\" claim was false at min-tokens 50: the four mirrors were never token-level clones, and the strike paid the probes to falsify it).\n- Secrets ride files — a read-only mount or a `--env-file` — into child processes and containers. An argv element is process-table-visible, so no credential, token, or header value rides one (the M5 S3 review round caught the gateway token on a `docker exec -e`; the preflight env file is the shape).\n- When a change supersedes text in a steering doc (`CLAUDE.md`, `GLOSSARY.md`, `docs/adr/`), the same strike edits that text — and superseded means stale by omission as well as false: a section that describes the changed surface covers the new behavior in the same strike (S1's ceiling paragraph was omission-stale through three review passes; only a post-merge strike fixed it).\n- A summary sentence covering another file's changes names the sections touched, never the individual edits — an itemized edit list goes stale by omission the moment a later round adds an edit, and a section list cannot (the B6 closeout's enumeration went stale across two review rounds, each catch costing a recapture; the scope-class rewrite closed the class).\n- A strike that changes a self-authored skill's `SKILL.md` bumps that skill's frontmatter `version:` in the same strike — the field is the skill's own minor, not the package's.\n- `.npmrc` pins the official registry (the machine default is npmmirror).\n- PR bodies, repo prose, and committed fixtures are public surfaces: cluster account names, SSH aliases, and node names never enter them — they live in `CLAUDE.local.md`, and GitHub keeps body edit history, so a scrub-after is not undo. A committed fixture is the sharpest case — a captured transcript above all: sanitization redacts the payload its tool outputs carry (node lists, job names), not only machine paths; the S2 codemode fixture shipped node lists until a round-2 review caught them. The recipe lives with the golden fixtures in `test/dogfood-audit.test.mjs`. (The cluster's own name is public — ADR 0004 names it.) The Spec review checks.\n- No build step; tests use Node's built-in node:test runner (pi loads extension TS via jiti). Verify changes with `npm test`, `npm run lint`, `npm run lint:py` (ruff over the self-authored skill scripts and the gateway tree — vendored trees stay verbatim and out of scope), `npm run lint:sh` (pipefail over the repo's shell surfaces; exceptions argue in the lint), `npm run lint:dups` (jscpd duplication ratchet), and `npm run typecheck`; check shipped files with `npm pack --dry-run`.\n- Commits run the suite via the versioned `.githooks/pre-commit` hook; enable it per clone with `git config core.hooksPath .githooks`.\n- Dogfood acceptance criteria are met on captured evidence — session transcripts for the skill criteria, recorded exit status and stderr for clean boot — never the model's self-report. Procedure: `docs/agents/dogfood.md`. Dogfood and adversarial sessions run in the clean-room rig (`test/rig/`, ADR 0005): `node test/rig/run.mjs run \"<prompt>\"`; the provider key and — on a `--gateway` leg — the gateway token are the only credentials that enter it (the cluster SSH key never does; the container reaches the gateway through the host-side port-forward, preflighted in-container before launch; a `--pool <pack>` leg adds none — it stages the pack's `.theta/skills.json` state file, which is not a credential), and a gated headless leg runs `--gateway --rpc` — the checked-in confirm driver answers the submit gate.\n\n## Git workflow — one \"coding strike\" per task\n\n1. Start the strike in a new git worktree on a feature branch. A worktree inside the repo (`.claude/worktrees/`) resolves the checkout's `node_modules`; one placed elsewhere needs `npm ci` first. Files read before entering the worktree carry the old base — re-read anything you are about to anchor-edit, and fetch `origin main` before diffing against or removing the worktree.\n2. On the first commit, open a **draft** PR against `main` and run `node scripts/check-strike.mjs <spec#>` from the strike worktree: the evidence leg passes by design at draft time, the review-coverage leg skips while the PR is draft, and the CI leg still exits 1 while a check runs pending — the printed offender line, not the exit code, tells pending from a real failure. The child walk is the draft-time signal: a gate defect or a missing child surfaces with the strike ahead of it, not at ready time (S1's gate read a blocked-by mention as an unlanded child; #61 fixed the detection, and the early run keeps the next defect cheap). Run the strike's review round at draft time too, **before any dogfood capture**: the reviewer sees the diff with the least context pressure, its fixes land while the tree is cheap to change, and the evidence pair then captures once at the final HEAD. The reverse order pays a full recapture every time a review fix moves HEAD — M5 S3 and S4 each paid one on 2026-10-31 (three live legs with cluster toggles; the closeout pair), review-first would have paid neither. Review first, capture once.\n3. Commit and push every further change to that PR branch, and refresh the PR body as each strike lands — the body is read mid-flight by reviewers and the owner, not only before ready.\n4. Before marking the PR ready, run `node scripts/check-strike.mjs <spec#>` from the strike worktree — every child of the spec issue must be landed on the branch or already closed (a closeout ticket for the post-merge steps is the expected open exception; a childless issue is a maintenance strike). The same gate fails a PR whose body attests dogfood evidence at an SHA that is not HEAD — recapture the pair, never rebind the words — and refuses while any PR check is non-pass, pending included (M3's red `verify` sat four hours past ready; only merge-day habit caught it). Refresh the PR's title and body to cover every landed child, then run the review pass over everything changed since the draft round and disclose each round in the body as a `reviewed: <base>..<head>` line (hex shas, base exclusive; a lone sha names one commit) — the gate's coverage leg refuses a ready PR whose branch commits no disclosed range covers (#133 retro: a fix range merged unreviewed and paid a post-merge triage round) — then mark the PR ready and merge to `main`. For milestone-sized PRs, consider one external-model review round before merge — M2's Codex round caught a defect class two same-model rounds missed.\n5. The adversarial loop's stop condition is judgment: once findings require crafted attack strings that honest usage would never produce, stop, record them as a residual trust boundary, and move on. \"Findings stay wording-level for two consecutive rounds\" applies only to findings a realistic session could trigger; if it has not fired within ~10 rounds, it will not — an adversarial reviewer regenerates findings indefinitely, and \"clean\" is not a stopping condition it can reach.\n6. While a review round is in flight, hold further commits on that branch; when its report arrives, triage against the SHA it reviewed.\n7. At teardown, run `node scripts/strike-teardown.mjs <branch>` from anywhere inside the repo — it anchors the main checkout by the shared git dir, refuses unless the branch is merged into `origin/main` (the guard that licenses the `-D`, since plain `-d` compares against the lagging remote topic branch), pulls `main` fast-forward, removes the worktree, and deletes the branch last: the worktree holds it checked out, so the delete refuses until the worktree is gone. A harness-created worktree carries the session's own lock — exit it through the harness's worktree-exit tool before the teardown, or the remove refuses on the lock (the M5 S0 retro). A manual teardown repeats that order with every git command anchored to the main checkout (`git -C <main-checkout>`) — a command run inside the worktree acts on the feature branch (the S4 retro's stray pull fast-forwarded it; the S5 retro repeated the accident), and a session standing in the removed worktree loses its git context (the S3 retro session).\n\n## Publishing\n\n`npm publish` is owner-only (browser 2FA; non-interactive publishes fail with `EOTP`). Prepare the release, commit, push — then stop and let the owner publish. It runs from the repo checkout — the committed `.npmrc` pins `registry.npmjs.org` (the machine default is npmmirror) — and that checkout must be the merged tree first: `git pull --ff-only origin main`, then confirm `package.json`'s version and the `npm pack --dry-run` file count match the release, because the M3 publish ran from a stale checkout (0.2.0, 289 files) and only npm's version-conflict refusal caught it. A publish that fails `E404` before any OTP prompt is a lapsed npmjs token, not a missing package: run `npm login` from inside the repo, then retry.\n\n## Agent skills\n\n### Issue tracker\n\nIssues live in GitHub Issues on `hugolld/theta-agent`, managed with the `gh` CLI. See `docs/agents/issue-tracker.md`.\n\n### Triage labels\n\nDefault five-role vocabulary (each label string equals its role name). See `docs/agents/triage-labels.md`.\n\n### Domain docs\n\nSingle-context: root `GLOSSARY.md` + `docs/adr/`. See `docs/agents/domain.md`. Glossary edits are suite-enforced: `_Avoid_` terms are banned from self-authored prose, every headword word must appear in it, a headword outside the provenance grandfather list names its deciding artifact, and an ADR's `(GLOSSARY)` markers match its declared coinages — the scan list lives in `test/skills-library.test.mjs` and verifies itself: self-authored prose (docs, skill text, and the extension sources' user-facing strings, not script comments) that carries glossary vocabulary joins that list in the same strike that lands it, and a file carrying a headword while off the list fails the converse test by name (S1's gateway README caught a banned term the moment it joined; S2's schema doc rode through two reviews until the check existed).\n\n### Connector scripts\n\nConnector helper scripts (`theta-lit-search`, plus the `theta-notebook` recorder) share enforced invariants — exit-code contract, classification shape, repeat-the-call records. See `docs/agents/connector-scripts.md`.\n\n### Compute gateway\n\n`gateway/` holds `theta-compute` (M4, ADR 0004): a FastMCP server wrapping the Slurm CLI, out of the npm tarball and out of Python lint's blind spot. Institutional facts ride deploy-time env; the audit-line shape, ALLOW/DENY/HOLD/THROTTLE semantics, and the phase-0 deploy recipe live in `gateway/README.md`. The deploy-time submit capability (M5, ADR 0006) is the outer bound on job creation: while off — the cluster-side `theta-compute.env`, sourced by every start line — the job-creating tools answer a hard HOLD refusal and the observed state rides every mutating audit line. Inside it, the per-principal submit ceiling (M5 S1) bounds runaway submits: past the deploy-env ceiling (default 20 per rolling hour, the count derived from the audit log itself) the same tools answer a THROTTLE refusal naming the principal, the count, and the window. Inside those server bounds, the theta-side submit gate stays the inner per-call gate — since M5 S2 the stacked gate framework (`extensions/submit-gate.ts`), whose three-tool confirm set is pinned against the gateway's annotations (a disagreement refuses as drift) and whose gate log (`gate.jsonl`) rides the session dir with `parentToolCallId` on nested calls. The offline tests drive the tools at the MCP boundary against the stub Slurm binaries in `test/fixtures/gateway/bin/`. A live step blocked on the cluster path parks — one scheduled re-probe, never a retry loop (waiting over one live connection is not retrying) — and resumes from the parked step when the path returns.\n\n### Eval suite\n\n`test/eval/` holds the eval suite (M6, ADR 0007), two layers, all outside the npm tarball; doctrine in `docs/agents/eval.md`. The replay net is the keyless, deterministic base layer in the standard suite: six sanitized rig captures — one per scenario (the connector's skill tree, the orchestrator doctrine, the notebook recorder, the gateway skill, the extension's user-facing strings on a `--gateway` leg where print mode refuses the submit before any server call, and the skill pool's bioinformatics pack tree on a keyless `--pool` leg), spanning the registry's five surface classes — each pinned three ways (provenance: one digest per surface class, so a model-visible edit reds until a fresh capture; snapshot: the normalized entry tree equals its committed snapshot; determinism: pi's reconstruction yields one context hash), with the per-scenario shape assertion in `test/eval/shape.mjs` and the scenario list (`test/eval/scenarios.mjs`) as the only source of capture prompts. The benchmark layer (M6 S2/S3) grades four checked-in tasks — one per benchmark class (`literature-triage`, `method-selection` from a committed figure, `provenance-recording`, `compute-staging` across two sessions) — workspace-as-oracle: declarative checks run in-container, two-tier judging through named OpenRouter config slots (a disclosed bend from ADR 0007's letter — the tiers never share a model family, and the slot ids are pinned against the installed catalog), one judge call per fresh child process (`bench-judge.mjs` — pooled fetch failures live in long-lived runner processes), and UsageEntry totals in the report (`bench-suite.json`). One command each, and only the provider key enters: `node test/rig/run.mjs eval <task-id>`, or `eval --suite` for the whole list — the eval mode refuses `--gateway`/`--rpc`; a benchmark leg has no gateway token path.\n\n`test/eval/capture.mjs` drives the rig and lands sanitized fixtures with a provenance manifest and a normalized snapshot; never edit a fixture or snapshot by hand. A model-visible change lands only with a fresh eval capture — a red provenance pin names the stale fixture — but reproduce the red before paying it: a failure only a long-lived checkout or harness process shows (ignored scratch riding a tree digest, pooled connection state in a runner) is local state, not a model-visible change. Doctrine, the digest-scope decision, the drill leg, and the benchmark recipe: `docs/agents/eval.md`; the eval-capture procedure rides `docs/agents/dogfood.md`; a re-sync's model-visible diff owes a fresh capture (`docs/agents/resync.md`).\n\n### Skill pool\n\n`pool/` holds the skill pool (ADR 0008): the versioned in-repo library of vendored domain packs — first wave 2026-11-15: protein-engineering, bioinformatics, cheminformatics, 48 skills — under the ADR 0001 verbatim rules, outside the npm tarball. A research project loads its packs through `.theta/skills.json` (S1's loader extension, `extensions/skill-pool.ts`), not the Tier-1 library's ships-always shape: the state file is committed project state, so a fresh clone of a project reproduces its pack selection, and the loader contributes per-skill paths — one `pool/<pack>/<skill>/` directory per skill whose class sits in the state's `classAllow` — because every pack is class-mixed (the disclosed deviation from ADR 0008's `pool/<pack>` letter: pack granularity can never be class-pure). The class map `pool/classes.json` gates what may load, a pack is the re-sync unit (`docs/agents/resync.md`), and the loader and gate pins live in `test/skill-pool.test.mjs` with the pack digests in `test/expected-pool.json`. The Jev gate (S2) bounds the class allowance: one `models.classify()` call over the project notebook's recent entries and the enabled pack names decides which credential classes beyond `local` a project's `skills.json` may load, firing once per project at a keyed session start and thereafter only as an explicit owner act — a human-widened allow set outranks it, and the metered `cloud` class never enters without the owner's explicit run. The decision and rationale land as one top-level `gate` record in the state file — the decision is class-level, not pack-level (the disclosed deviation from S1's per-pack history shape) — and a re-run sets the allow set to exactly its decision, narrowing honestly, never widen-only. The classifier key stays host-side. The pool joined the replay net at S3 (#167) as the `pool:<pack>` surface class — one digest over a pack's whole tree plus the class map — captured keyless on the rig's `--pool` leg: the staged state file is not a credential, so the gate cannot fire there. The loaded-pack dogfood procedure — a keyed, project-cwd host session where the gate does fire and the pack's skills carry real work — lives in `docs/agents/dogfood.md`.\n\n### SKILL.md frontmatter\n\nDescriptions are capped at 1..1024 chars and must stay plain-scalar-safe (no `: ` sequences in the value). `test/skills-library.test.mjs` enforces both: it parses frontmatter with the `yaml` package — the same engine pi runs — so invalid YAML fails the suite instead of pi silently dropping the skill.\n"
+					"text": "   94 __REPO__/CLAUDE.md\n  132 __REPO__/skills/theta-compute/SKILL.md\n  226 total\nAGENTS.md\nCLAUDE.md\nGLOSSARY.md\nLICENSE\nREADME.md\nbin\ndocs\neslint.config.js\nextensions\ngateway\npackage-lock.json\npackage.json\npool\nprompts\nscripts\nskills\ntest\nthemes\ntsconfig.json\n"
 				}
 			],
 			"isError": false,
@@ -287,8 +296,8 @@
 	},
 	{
 		"type": "message",
-		"id": "<id#10>",
-		"parentId": "<id#9>",
+		"id": "<id#11>",
+		"parentId": "<id#10>",
 		"timestamp": "<timestamp>",
 		"message": {
 			"role": "toolResult",
@@ -307,27 +316,47 @@
 	},
 	{
 		"type": "message",
-		"id": "<id#11>",
-		"parentId": "<id#10>",
+		"id": "<id#12>",
+		"parentId": "<id#11>",
+		"timestamp": "<timestamp>",
+		"message": {
+			"role": "toolResult",
+			"toolCallId": "<id#9>",
+			"toolName": "read",
+			"content": [
+				{
+					"type": "text",
+					"text": "# CLAUDE.md\n\nThis file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.\n\n## What this repository is\n\n`theta-agent` — a **pi package** (extensions + skills for the [pi](https://pi.dev) coding agent) that grows into **Theta**, a science co-researcher agent for biology/biomedicine. It is the code repo of the Theta campaign; design decisions (T1–T10), milestone definitions, and task handoffs live in the campaign vault (path in `CLAUDE.local.md`). Treat the vault as read-only reference.\n\nCurrent state: 0.6.0 — M6 shipped. The M1 base ships the `theta` launcher (a thin `bin/theta.mjs` that runs `pi -e <package-root>`; macOS/Linux — Windows waits for M8, tracked in issue #2) and the Tier-1 library: K-Dense skills vendored verbatim per ADR 0001 plus the self-authored `theta-research-loop` orchestrator, with re-syncs at milestone boundaries (`docs/agents/resync.md`). M2 adds the first connector skill, `theta-lit-search` (PubMed, arXiv, Semantic Scholar), landed tracer-first: search and get-by-identifier with pacing, in-200 error detection, and credential redaction enforced in its scripts (ADR 0002; script invariants in `docs/agents/connector-scripts.md`). M3 adds `theta-notebook`, the project notebook skill (ADR 0003): five dated provenance-entry types with content-addressed, graded evidence snapshots under the research project's `.theta/`, a recorder script under the connector-script invariants, a notebook-written attestation in the dogfood auditor, and orchestrator doctrine weaving recording into all six loop stages. M4 ships the compute gateway `theta-compute` (ADR 0004) from `gateway/` — a FastMCP server wrapping the Slurm CLI with argv arrays only, bearer auth from deploy-time env, one audit JSONL line per tool call, and the seven generic tools (the read-only environments/status pair plus the stage–submit–logs–cancel–fetch lifecycle) behind the path sandbox and the command guard, plus the typed `run_alphafold3` rendering the deploy-time template registry's registered template with its free variables only — all out of the npm tarball. On the theta side, M4 landed the gateway skill's lifecycle doctrine and the submit gate (#54), and the notebook's job-record path (#55): a compute run records a method entry whose evidence item is the assembled gateway job record, graded `re-executed` when its artifacts were fetched, and the orchestrator's execute stage routes cluster jobs to `theta-compute`.\n\nM5 stacks the safety gates: the deploy-time submit capability (ADR 0006) and the per-principal submit ceiling on the gateway, and on the theta side the submit gate grown into the stacked gate framework (#95) — the literal three-tool confirm set pinned against the gateway's destructive annotations (disagreement is drift and refuses loudly), concurrency-safe stacked confirms (pi 1.4.0's concurrent-dialog fix is the floor), `parentToolCallId` riding prompts, refusals, and the session-dir gate log (`gate.jsonl`, one JSONL line per gated decision), and the dogfood auditor reading codemode's `nestedCalls` records instead of assuming a flat call sequence. M5 S3 (#96) makes the rig itself gateway-bearing: the clean-room rig admits the gateway token as its second credential (`--gateway`, URL host rewritten to the Docker host alias, preflighted in-container before launch — the token rides a 0600 env file, never argv), a checked-in RPC confirm driver (`test/rig/rpc-driver.mjs`) answers the submit gate for headless `--rpc` evidence legs, the gateway skill carries the capability/throttle/codemode doctrine, the auditor finds the transcript by its own name grammar beside the gate log, and the M5 dogfood (gated submit with confirm, held refusal, throttle) ran in the rig against the live gateway.\n\nM6 opens the eval suite (ADR 0007) with the replay net's tracer (#133): a checked-in scenario list (`test/eval/scenarios.mjs`), the typed normalization layer with its five rewrite classes, and one connector fixture — a sanitized rig capture — pinned three ways in the keyless standard suite (provenance: one digest per model-visible surface class, so a model-visible edit reds until a fresh capture; snapshot: the normalized entry tree equals its committed snapshot; determinism: pi's reconstruction yields one context hash), with the capture pipeline (`test/eval/capture.mjs`) and doctrine in `docs/agents/eval.md` — all outside the npm tarball. M6 S1 (#134) extends the net to one fixture per model-visible surface class — orchestrator doctrine, the notebook recorder, the gateway skill, and the extension's user-facing strings (the submit gate's refusal, captured on a `--gateway` rig leg where print mode refuses the submit before any server call) — each with its scenario, sanitized fixture, and the three pins; the per-scenario shape assertion lives in `test/eval/shape.mjs`, and the orchestrator fixture binds the vendored skill its doctrine routes to, so a body-only re-sync reds by name. M6 S2 (#135) lands the benchmark layer's tracer beside the net: the rig runner's eval mode runs one checked-in benchmark task end-to-end from one command carrying only the provider key (it refuses `--gateway`/`--rpc` — no gateway token path exists on a benchmark leg), grades workspace-as-oracle through declarative checks run in-container plus one `models.classify()` judge whose named slot runs host-side so its key never enters the rig, and writes the report — task grade, judge tier, UsageEntry totals — beside the recorded exit status. M6 S3 (#136) grows the benchmark suite beside the tracer: four checked-in tasks, one per benchmark class, graded workspace-as-oracle through declarative checks run in-container plus two-tier judging through named OpenRouter config slots — a disclosed bend from ADR 0007's campaign-provider letter (pi's classifier catalog is closed to its families, so both tiers ride OpenRouter; the tiers never share a model family, and the slot ids are pinned against the installed catalog) — one judge call per fresh child process, a suite mode running the whole list from one command, and a per-run report; a benchmark leg still carries only the provider key. M6 S4 (#137) lands the steering: the eval-capture procedure rides the dogfood doc, a re-sync's model-visible diff owes a fresh capture, and the capture-trigger rule — reproduce a red before paying it — joins the eval section below.\n\nPast M6, the skill pool lands in steps (ADR 0008): `pool/` — the versioned in-repo library of vendored domain packs (first wave 2026-11-15: protein-engineering, bioinformatics, cheminformatics — 48 skills) under the ADR 0001 verbatim rules, outside the npm tarball — loads per research project through `.theta/skills.json` instead of shipping in every session; S1 (#160) ships the loader extension `extensions/skill-pool.ts`, with the class map `pool/classes.json` gating what may load and the pack as the re-sync unit (`docs/agents/resync.md`), and S2 (#162) the Jev gate: a one-call `models.classify()` judgment over the project notebook's recent entries and the enabled pack names decides which credential classes a project's `skills.json` may load beyond `local` — firing once per project at a keyed session start, then only as an explicit owner act; a human-widened allow set outranks it, the metered `cloud` class never enters without the owner's explicit run, the decision and rationale land in the state file, and the classifier key stays host-side. S3 (#167) joins the pool to the replay net: the `pool:<pack>` surface class (one digest over a pack's whole tree plus the class map), the rig's `--pool` leg staging the state file into the clone — keyless, so the Jev gate cannot fire in the rig — a pool-aware auditor, the sixth eval capture (the bioinformatics pack, `pydeseq2` opened), and one loaded-pack dogfood; #164 beside it teaches the RPC driver its session cwd. #172 pays the #167 retro in the environment — the digested-tree doctrine's reach, the rig's dirt-naming refusal, and check-strike's spec-close leg, whose closing forms admit `owner/repo#<n>` URLs. S4 (#168) sweeps the pool's doctrine to the landed surface — the README's tier story, this manual's pool sections, the loaded-pack dogfood procedure home — and pays the capture debt the manual's rewrite owes.\n\nM7a opens the demo slice (#177, doctrine in `docs/agents/demo.md`): B1 (#178) ships the notebook entry cards — `extensions/notebook-cards.ts` diffs `.theta/notebook.jsonl` in the session cwd on every `tool_result` (a codemode-wrapped recorder run still surfaces one outer result) and appends one durable `theta-notebook-entry` custom entry per new line that parses as a typed, dated provenance entry — line bytes the identity (re-runs and retries dedupe), malformed lines never card, the seen-set rebuilds at `session_start` from the session's own custom entries beside the startup backlog fence (lines present when the session opened never card — B2 owns the trail display on demand), and no notebook file leaves the hook inert. The paired `registerEntryRenderer` draws the card in interactive mode only (evidence sources with their grades badged, the observation's own grade, `supports` links as hypothesis references, the expanded raw entry; custom entries land in every mode, so print-mode transcripts carry them); the recorder script and skill trees stay frozen (the hook reads the file), and the notebook scenario's shape pin carries the card assertion on the recaptured fixtures. B2 (#182) ships the `<path>` command — `extensions/notebook-command.ts` renders the whole project notebook on demand through the cards extension's exported grammar (the validator, the whole-notebook read, and the evidence detail stay in one home): a header with entry count and grade totals, one aligned row per entry in file order (the journal is append-only, so file order is provenance order), evidence items as indented grade-badged lines. The output rides one notify — pi's interactive mode overwrites an info status text in place, so a line-by-line table would collapse to its last line — and the command never opens a dialog: complete in interactive mode, forwarded in RPC, a silent no-op in print and JSON, with the absence (no `.theta/notebook.jsonl`) notified as info, never an error. B3 (#184) ships the demo prompt templates: `prompts/demo-lit-triage.md` rides the `pi.prompts` manifest field into the npm tarball, and pi's native template expansion turns `<path>` into the scripted pharmacology question — the benchmark `lit-triage` shape with its steering sentences inlined verbatim, pure ASCII, argument-free (a scripted run's bytes are fixed) — which the orchestrator's doctrine routes through the research loop so B1's cards appear as the recorder appends; no extension code changes hands, and `test/demo-prompts.test.mjs` owns the class pins (ASCII, steering verbatim from the scenario list's home, zero variance, plain-scalar-safe frontmatter, no institutional facts). B4 (#186) ships the `<path>` command — `extensions/roadmap-command.ts` draws the owner-reviewed future-plans card (the M7b web workbench, the cloud deployment study, M8 packaging — settled 2026-11-19, static bytes, no file reads, no dynamic state) as a pi-tui Box composition on `ctx.ui.custom()` in interactive mode, with the blank separators on Spacer lines (a Text child swallows blank bytes); RPC degrades to one notify carrying the card's plain text, print and JSON stay a silent no-op, and `<path>` is the single roadmap home — `<path>`'s status notify drops its stale next-milestone line in the same strike, the strike adds the Web workbench glossary headword, and `test/roadmap-command.test.mjs` pins the reviewed bytes verbatim, the mode degradation, and the handover. B5 (#190) ships the Theta theme — `themes/theta.json` (teal brand colors on a fork of pi's dark base, the semantic roles kept so the grade badges and tool boxes never inherit the brand hue) rides the `pi.themes` manifest field into the npm tarball, and `theta.ts` brands the session at `session_start`: a persistent footer segment (`ctx.ui.setStatus`, ASCII bytes, preference-independent) beside an in-memory switch to the theta theme that fires only when the user set no theme preference (`pi.getSettings().theme` unset — a saved choice or a `--use-theme` override is respected) and only in interactive mode (RPC forwards the status as a fire-and-forget request; print and JSON touch no UI), with an unresolvable theme name skipping the switch silently — branding never announces itself, and the demo's operator-vouched visual capture is the proof the theme resolved; no B1/B4 renderer changes hands (the cards and the roadmap box re-color through the role tokens), and `test/theta-theme.test.mjs` owns the pins (the schema-required roles in pi's color grammar, the brand family on the teal band, the status bytes, the switch guards, and the mode degradation). B6 (#193) closes the slice with the rehearsal, run as a split strike: the rig leg ran the scripted pharmacology question through the research loop green on the first roll (the auditor's skill/script/notebook legs attested), and the login-node rehearsal settled the demo's venue on the devnode chain — tmux on the login node whose pane runs `ssh -t` into the standing allocation's compute node, because the login node's hard 5 GB virtual-memory cap breaks pi's provider calls (the bundled undici needs a WASM allocation per HTTP request, and every allocation fails under the cap; escape hatches exhausted — the diagnosis lives on the spec). The environment is prepared once: a uv-managed Python 3.12 venv in the checkout, first on PATH (the compute node's system python predates the connector scripts' 3.11 floor), and a loopback forward from the compute node to the login-node gateway, raised before the session boots (pi registers MCP servers at session start only). The full script walked live — the `/` menu, `<path>` with cards appearing as the recorder appends, `<path>`, the gated submit confirmed by the operator (the job record graded `re-executed` after the fetch), `<path>`, `<path>` — and the fallback pair (asciinema cast plus exported HTML) is archived under the owner's evidence root. The same strike amends `demo.md` throughout to the devnode venue — the standing decisions (the venue rewrite; the cluster-leg bullet drops its no-forward clause), the intro, the build table's B6 row to shipped, the runbook (the devnode attach step; the `<path>` patience note: the cast flushes its final chunk only on the recorder's clean exit), and the rehearsal doctrine's findings — and lands the `theta-notebook` fresh-project sentence (create `.theta/` before the first record; the recorder's exit-2 refusal scopes to evidence-free first records) with its version bump to 0.4.0.\n\n## pi-package rules\n\n- Host-provided packages (`@earendil-works/pi-coding-agent`, `@earendil-works/pi-ai`, `@earendil-works/pi-agent-core`, `@earendil-works/pi-tui`, `typebox`) go in `peerDependencies` with `\"*\"` ranges — never `dependencies`, never bundled.\n- Keep the `pi-package` keyword (gallery eligibility) and the explicit `pi` manifest (`extensions`, `skills`, `prompts`, `themes`) in `package.json`. Manifest fields are arrays of strings — pi silently drops bare-string fields (guarded by `test/manifest.test.mjs`). The skill pool stays out of the manifest and the tarball by design — its packs load per research project through the loader extension (`extensions/skill-pool.ts`), so the shipped surface stays the Tier-1 library and the self-authored skills beside it, plus the demo prompt templates under `prompts/` (M7a B3, the demo doctrine's scripted runs) and the Theta theme under `themes/` (M7a B5, the demo doctrine's brand surface — the teal palette and the session-start switch).\n- Never install `pi-mcp-adapter` — an installed adapter replaces pi's built-in MCP support (native since pi 0.99).\n- Target pi ≥ 1.4.0 and Node ≥ 22.19.0. The floor moves only at milestone boundaries, under the standing adoption rule recorded on #87 — a held review is recorded on the parent spec, never silent. Package loading uses `pi -e <source>`; local-path sources load without copying, so a repo checkout works exactly like the installed package.\n- The pi extension API is read from the installed package, not the web — the paths below sit under the pi install root (`$(npm root -g)/@earendil-works/pi-coding-agent/`): `docs/extensions.md` (events, the tool-call pipeline, UI modes), `docs/mcp.md` (tool naming and exposure — MCP tool names are sanitized to `[A-Za-z0-9_]`, so a server hyphen registers as an underscore), and `dist/core/extensions/types.d.ts` for the exact event and context shapes.\n\n## Conventions\n\n- Conventional commits (`feat:`, `chore:`, `docs:`). Tabs and existing field order in `package.json`.\n- Extract a shared helper as soon as the same logic shape appears twice — tree-wide, not per-module: a module boundary created mid-strike is where duplication is born, so the shared shape gets one home before the second caller (tests included). Copying code verbatim is for separately shipped trees only — skill-to-skill, never within a file.\n- Failure paths in runner and helper scripts: child-process spawns inherit the environment (overlay onto `process.env`, never replace it — the eslint `spawn-env-inherit` rule enforces direct call sites); `finally` cleanup never masks the primary failure; a machine-readable result lands as a file when its channel is shared with payload output (the exit-status rule — and a pipeline whose exit gates the next step runs unpiped or under `set -o pipefail`: a `tee` or `tail` in the tail position reports its own status, and #117's failed cluster re-deploy sailed through an `&&` chain that way). The rule binds agent tool calls too: a command whose exit gates the next step runs unpiped or records its status to a file — `npm test | tail` laundered a red suite's exit as 0 (the M6 S2 retro).\n- An accepted behavior delta — ordering, precedence, message bytes — is pinned by a test in the same strike; the PR body discloses what the suite already owns (#113's read-precedence delta reached the merge round disclosed but unpinned, and the merge round paid the pin). The bar reaches fix commits: each claimed behavior change moves or adds a pin — a comment-only change claims nothing (the S2 fix pass's \"no lost-update window\" claim rode a comment alone until re-investigation caught it). And a helper whose write can fail returns whether it landed; the caller announces success only on that result (the S2 `writeGateRecord` returned void, swallowed write failures, and both callers printed the success notify after one).\n- The review round names every accepted deviation from the spec's letter — additions beyond the enumeration included — with the reason; the disclosure lands in the same strike's PR body, not in a later pass (#127's survey-inputs bullet rode through PR #128's draft review undisclosed, and the triage round paid the disclosure).\n- An extraction test — one that pulls structured tokens out of prose — consumes from its anchor: the match opens the claim it pins, leading whitespace only, never searching forward past other text. An unanchored match can borrow a later passage and pass silently (#122's review round caught the prose check's enumeration doing exactly that).\n- A spec's acceptance numbers and failure-mode claims are measured before the spec lands — a claim one command can falsify is a delta the strike inherits for free (#120's lint:dups \"count drops\" claim was false at min-tokens 50: the four mirrors were never token-level clones, and the strike paid the probes to falsify it).\n- Secrets ride files — a read-only mount or a `--env-file` — into child processes and containers. An argv element is process-table-visible, so no credential, token, or header value rides one (the M5 S3 review round caught the gateway token on a `docker exec -e`; the preflight env file is the shape).\n- When a change supersedes text in a steering doc (`CLAUDE.md`, `GLOSSARY.md`, `docs/adr/`), the same strike edits that text — and superseded means stale by omission as well as false: a section that describes the changed surface covers the new behavior in the same strike (S1's ceiling paragraph was omission-stale through three review passes; only a post-merge strike fixed it).\n- A summary sentence covering another file's changes names the sections touched, never the individual edits — an itemized edit list goes stale by omission the moment a later round adds an edit, and a section list cannot (the B6 closeout's enumeration went stale across two review rounds, each catch costing a recapture; the scope-class rewrite closed the class).\n- A strike that changes a self-authored skill's `SKILL.md` bumps that skill's frontmatter `version:` in the same strike — the field is the skill's own minor, not the package's.\n- `.npmrc` pins the official registry (the machine default is npmmirror).\n- PR bodies, repo prose, and committed fixtures are public surfaces: cluster account names, SSH aliases, and node names never enter them — they live in `CLAUDE.local.md`, and GitHub keeps body edit history, so a scrub-after is not undo. A committed fixture is the sharpest case — a captured transcript above all: sanitization redacts the payload its tool outputs carry (node lists, job names), not only machine paths; the S2 codemode fixture shipped node lists until a round-2 review caught them. The recipe lives with the golden fixtures in `test/dogfood-audit.test.mjs`. (The cluster's own name is public — ADR 0004 names it.) The Spec review checks.\n- No build step; tests use Node's built-in node:test runner (pi loads extension TS via jiti). Verify changes with `npm test`, `npm run lint`, `npm run lint:py` (ruff over the self-authored skill scripts and the gateway tree — vendored trees stay verbatim and out of scope), `npm run lint:sh` (pipefail over the repo's shell surfaces; exceptions argue in the lint), `npm run lint:dups` (jscpd duplication ratchet), and `npm run typecheck`; check shipped files with `npm pack --dry-run`.\n- Commits run the suite via the versioned `.githooks/pre-commit` hook; enable it per clone with `git config core.hooksPath .githooks`.\n- Dogfood acceptance criteria are met on captured evidence — session transcripts for the skill criteria, recorded exit status and stderr for clean boot — never the model's self-report. Procedure: `docs/agents/dogfood.md`. Dogfood and adversarial sessions run in the clean-room rig (`test/rig/`, ADR 0005): `node test/rig/run.mjs run \"<prompt>\"`; the provider key and — on a `--gateway` leg — the gateway token are the only credentials that enter it (the cluster SSH key never does; the container reaches the gateway through the host-side port-forward, preflighted in-container before launch; a `--pool <pack>` leg adds none — it stages the pack's `.theta/skills.json` state file, which is not a credential), and a gated headless leg runs `--gateway --rpc` — the checked-in confirm driver answers the submit gate.\n\n## Git workflow — one \"coding strike\" per task\n\n1. Start the strike in a new git worktree on a feature branch. A worktree inside the repo (`.claude/worktrees/`) resolves the checkout's `node_modules`; one placed elsewhere needs `npm ci` first. Files read before entering the worktree carry the old base — re-read anything you are about to anchor-edit, and fetch `origin main` before diffing against or removing the worktree.\n2. On the first commit, open a **draft** PR against `main` and run `node scripts/check-strike.mjs <spec#>` from the strike worktree: the evidence leg passes by design at draft time, the review-coverage leg skips while the PR is draft, and the CI leg still exits 1 while a check runs pending — the printed offender line, not the exit code, tells pending from a real failure. The child walk is the draft-time signal: a gate defect or a missing child surfaces with the strike ahead of it, not at ready time (S1's gate read a blocked-by mention as an unlanded child; #61 fixed the detection, and the early run keeps the next defect cheap). Run the strike's review round at draft time too, **before any dogfood capture**: the reviewer sees the diff with the least context pressure, its fixes land while the tree is cheap to change, and the evidence pair then captures once at the final HEAD. The reverse order pays a full recapture every time a review fix moves HEAD — M5 S3 and S4 each paid one on 2026-10-31 (three live legs with cluster toggles; the closeout pair), review-first would have paid neither. Review first, capture once.\n3. Commit and push every further change to that PR branch, and refresh the PR body as each strike lands — the body is read mid-flight by reviewers and the owner, not only before ready.\n4. Before marking the PR ready, run `node scripts/check-strike.mjs <spec#>` from the strike worktree — every child of the spec issue must be landed on the branch or already closed (a closeout ticket for the post-merge steps is the expected open exception; a childless issue is a maintenance strike). The same gate fails a PR whose body attests dogfood evidence at an SHA that is not HEAD — recapture the pair, never rebind the words — and refuses while any PR check is non-pass, pending included (M3's red `verify` sat four hours past ready; only merge-day habit caught it). Refresh the PR's title and body to cover every landed child, then run the review pass over everything changed since the draft round and disclose each round in the body as a `reviewed: <base>..<head>` line (hex shas, base exclusive; a lone sha names one commit) — the gate's coverage leg refuses a ready PR whose branch commits no disclosed range covers (#133 retro: a fix range merged unreviewed and paid a post-merge triage round) — then mark the PR ready and merge to `main`. For milestone-sized PRs, consider one external-model review round before merge — M2's Codex round caught a defect class two same-model rounds missed.\n5. The adversarial loop's stop condition is judgment: once findings require crafted attack strings that honest usage would never produce, stop, record them as a residual trust boundary, and move on. \"Findings stay wording-level for two consecutive rounds\" applies only to findings a realistic session could trigger; if it has not fired within ~10 rounds, it will not — an adversarial reviewer regenerates findings indefinitely, and \"clean\" is not a stopping condition it can reach.\n6. While a review round is in flight, hold further commits on that branch; when its report arrives, triage against the SHA it reviewed.\n7. At teardown, run `node scripts/strike-teardown.mjs <branch>` from anywhere inside the repo — it anchors the main checkout by the shared git dir, refuses unless the branch is merged into `origin/main` (the guard that licenses the `-D`, since plain `-d` compares against the lagging remote topic branch), pulls `main` fast-forward, removes the worktree, and deletes the branch last: the worktree holds it checked out, so the delete refuses until the worktree is gone. A harness-created worktree carries the session's own lock — exit it through the harness's worktree-exit tool before the teardown, or the remove refuses on the lock (the M5 S0 retro). A manual teardown repeats that order with every git command anchored to the main checkout (`git -C <main-checkout>`) — a command run inside the worktree acts on the feature branch (the S4 retro's stray pull fast-forwarded it; the S5 retro repeated the accident), and a session standing in the removed worktree loses its git context (the S3 retro session).\n\n## Publishing\n\n`npm publish` is owner-only (browser 2FA; non-interactive publishes fail with `EOTP`). Prepare the release, commit, push — then stop and let the owner publish. It runs from the repo checkout — the committed `.npmrc` pins `registry.npmjs.org` (the machine default is npmmirror) — and that checkout must be the merged tree first: `git pull --ff-only origin main`, then confirm `package.json`'s version and the `npm pack --dry-run` file count match the release, because the M3 publish ran from a stale checkout (0.2.0, 289 files) and only npm's version-conflict refusal caught it. A publish that fails `E404` before any OTP prompt is a lapsed npmjs token, not a missing package: run `npm login` from inside the repo, then retry.\n\n## Agent skills\n\n### Issue tracker\n\nIssues live in GitHub Issues on `hugolld/theta-agent`, managed with the `gh` CLI. See `docs/agents/issue-tracker.md`.\n\n### Triage labels\n\nDefault five-role vocabulary (each label string equals its role name). See `docs/agents/triage-labels.md`.\n\n### Domain docs\n\nSingle-context: root `GLOSSARY.md` + `docs/adr/`. See `docs/agents/domain.md`. Glossary edits are suite-enforced: `_Avoid_` terms are banned from self-authored prose, every headword word must appear in it, a headword outside the provenance grandfather list names its deciding artifact, and an ADR's `(GLOSSARY)` markers match its declared coinages — the scan list lives in `test/skills-library.test.mjs` and verifies itself: self-authored prose (docs, skill text, and the extension sources' user-facing strings, not script comments) that carries glossary vocabulary joins that list in the same strike that lands it, and a file carrying a headword while off the list fails the converse test by name (S1's gateway README caught a banned term the moment it joined; S2's schema doc rode through two reviews until the check existed).\n\n### Connector scripts\n\nConnector helper scripts (`theta-lit-search`, plus the `theta-notebook` recorder) share enforced invariants — exit-code contract, classification shape, repeat-the-call records. See `docs/agents/connector-scripts.md`.\n\n### Compute gateway\n\n`gateway/` holds `theta-compute` (M4, ADR 0004): a FastMCP server wrapping the Slurm CLI, out of the npm tarball and out of Python lint's blind spot. Institutional facts ride deploy-time env; the audit-line shape, ALLOW/DENY/HOLD/THROTTLE semantics, and the phase-0 deploy recipe live in `gateway/README.md`. The deploy-time submit capability (M5, ADR 0006) is the outer bound on job creation: while off — the cluster-side `theta-compute.env`, sourced by every start line — the job-creating tools answer a hard HOLD refusal and the observed state rides every mutating audit line. Inside it, the per-principal submit ceiling (M5 S1) bounds runaway submits: past the deploy-env ceiling (default 20 per rolling hour, the count derived from the audit log itself) the same tools answer a THROTTLE refusal naming the principal, the count, and the window. Inside those server bounds, the theta-side submit gate stays the inner per-call gate — since M5 S2 the stacked gate framework (`extensions/submit-gate.ts`), whose three-tool confirm set is pinned against the gateway's annotations (a disagreement refuses as drift) and whose gate log (`gate.jsonl`) rides the session dir with `parentToolCallId` on nested calls. The offline tests drive the tools at the MCP boundary against the stub Slurm binaries in `test/fixtures/gateway/bin/`. A live step blocked on the cluster path parks — one scheduled re-probe, never a retry loop (waiting over one live connection is not retrying) — and resumes from the parked step when the path returns.\n\n### Eval suite\n\n`test/eval/` holds the eval suite (M6, ADR 0007), two layers, all outside the npm tarball; doctrine in `docs/agents/eval.md`. The replay net is the keyless, deterministic base layer in the standard suite: six sanitized rig captures — one per scenario (the connector's skill tree, the orchestrator doctrine, the notebook recorder, the gateway skill, the extension's user-facing strings on a `--gateway` leg where print mode refuses the submit before any server call, and the skill pool's bioinformatics pack tree on a keyless `--pool` leg), spanning the registry's five surface classes — each pinned three ways (provenance: one digest per surface class, so a model-visible edit reds until a fresh capture; snapshot: the normalized entry tree equals its committed snapshot; determinism: pi's reconstruction yields one context hash), with the per-scenario shape assertion in `test/eval/shape.mjs` and the scenario list (`test/eval/scenarios.mjs`) as the only source of capture prompts. The benchmark layer (M6 S2/S3) grades four checked-in tasks — one per benchmark class (`literature-triage`, `method-selection` from a committed figure, `provenance-recording`, `compute-staging` across two sessions) — workspace-as-oracle: declarative checks run in-container, two-tier judging through named OpenRouter config slots (a disclosed bend from ADR 0007's letter — the tiers never share a model family, and the slot ids are pinned against the installed catalog), one judge call per fresh child process (`bench-judge.mjs` — pooled fetch failures live in long-lived runner processes), and UsageEntry totals in the report (`bench-suite.json`). One command each, and only the provider key enters: `node test/rig/run.mjs eval <task-id>`, or `eval --suite` for the whole list — the eval mode refuses `--gateway`/`--rpc`; a benchmark leg has no gateway token path.\n\n`test/eval/capture.mjs` drives the rig and lands sanitized fixtures with a provenance manifest and a normalized snapshot; never edit a fixture or snapshot by hand. A model-visible change lands only with a fresh eval capture — a red provenance pin names the stale fixture — but reproduce the red before paying it: a failure only a long-lived checkout or harness process shows (ignored scratch riding a tree digest, pooled connection state in a runner) is local state, not a model-visible change. Doctrine, the digest-scope decision, the drill leg, and the benchmark recipe: `docs/agents/eval.md`; the eval-capture procedure rides `docs/agents/dogfood.md`; a re-sync's model-visible diff owes a fresh capture (`docs/agents/resync.md`).\n\n### Skill pool\n\n`pool/` holds the skill pool (ADR 0008): the versioned in-repo library of vendored domain packs — first wave 2026-11-15: protein-engineering, bioinformatics, cheminformatics, 48 skills — under the ADR 0001 verbatim rules, outside the npm tarball. A research project loads its packs through `.theta/skills.json` (S1's loader extension, `extensions/skill-pool.ts`), not the Tier-1 library's ships-always shape: the state file is committed project state, so a fresh clone of a project reproduces its pack selection, and the loader contributes per-skill paths — one `pool/<pack>/<skill>/` directory per skill whose class sits in the state's `classAllow` — because every pack is class-mixed (the disclosed deviation from ADR 0008's `pool/<pack>` letter: pack granularity can never be class-pure). The class map `pool/classes.json` gates what may load, a pack is the re-sync unit (`docs/agents/resync.md`), and the loader and gate pins live in `test/skill-pool.test.mjs` with the pack digests in `test/expected-pool.json`. The Jev gate (S2) bounds the class allowance: one `models.classify()` call over the project notebook's recent entries and the enabled pack names decides which credential classes beyond `local` a project's `skills.json` may load, firing once per project at a keyed session start and thereafter only as an explicit owner act — a human-widened allow set outranks it, and the metered `cloud` class never enters without the owner's explicit run. The decision and rationale land as one top-level `gate` record in the state file — the decision is class-level, not pack-level (the disclosed deviation from S1's per-pack history shape) — and a re-run sets the allow set to exactly its decision, narrowing honestly, never widen-only. The classifier key stays host-side. The pool joined the replay net at S3 (#167) as the `pool:<pack>` surface class — one digest over a pack's whole tree plus the class map — captured keyless on the rig's `--pool` leg: the staged state file is not a credential, so the gate cannot fire there. The loaded-pack dogfood procedure — a keyed, project-cwd host session where the gate does fire and the pack's skills carry real work — lives in `docs/agents/dogfood.md`.\n\n### SKILL.md frontmatter\n\nDescriptions are capped at 1..1024 chars and must stay plain-scalar-safe (no `: ` sequences in the value). `test/skills-library.test.mjs` enforces both: it parses frontmatter with the `yaml` package — the same engine pi runs — so invalid YAML fails the suite instead of pi silently dropping the skill.\n"
+				}
+			],
+			"isError": false,
+			"durationMs": "<duration>",
+			"timestamp": "<timestamp>"
+		}
+	},
+	{
+		"type": "message",
+		"id": "<id#13>",
+		"parentId": "<id#12>",
 		"timestamp": "<timestamp>",
 		"message": {
 			"role": "assistant",
 			"content": [
 				{
 					"type": "thinking",
-					"thinking": "I've read both files fully. Now the doctrine:\n\n- Start every compute task with `list_environments` — shows partitions and state.\n- The run \"smoke-check\" is already staged. So I skip stage_files.\n- Submit: `submit_job(run_name, directives?)` — but wait, is smoke-check a raw batch job or alphafold3? The user says \"a small validation run named smoke-check is already staged\". So submit_job(\"smoke-check\").\n- The submit gate will prompt for confirmation — that's handled by the extension in interactive mode. In codemode, nested calls still cross the pipeline. Hmm, but in this session, I'm operating as the agent — the submit gate would fire for the user. Actually, if I call through codemode, the gate confirm dialog happens... In this environment, pi is running with extensions; the submit gate extension intercepts the gateway's destructive tools and asks the researcher. So calling submit_job (directly or via codemode) should trigger the gate. If the environment is non-interactive, it might refuse.\n\nLet me proceed step by step:\n1. `list_environments` first.\n2. Then submit `smoke-check` — probably via codemode (the skill says codemode is the normal case). But the gate confirmation: the skill says \"state what is about to run and let the answer land.\" The gate will prompt the researcher. I should make the submit call and let the gate handle confirmation.\n\nActually, wait — should I use codemode or call the gateway tools directly? The MCP server `mcp__theta_compute` is listed as a codemode server — \"MCP servers whose tools are not declared to you. Call the tools of `codemode` servers from codemode scripts.\" So I must use codemode to call the gateway tools.\n\nAlso the skill mentions docs/agents/... for the package, but the SKILL.md says to call tools directly. Let me also check gateway README? The user said \"Before you rely on any instruction or reference file, read it whole in a single call\" — I've read CLAUDE.md and SKILL.md whole. I don't think I need gateway/README.md since server-side enforcement is automatic; the skill carries the judgment. But maybe I should check the MCP server tools first via searchTools/describeTool.\n\nPlan:\n1. codemode: describe the namespace / list tools of mcp__theta_compute (describeNamespace or searchTools). Also call list_environments.\n2. Submit smoke-check via submit_job(run_name=\"smoke-check\") — let the gate prompt.\n3. Poll job_status with discipline (sane intervals; can end turn between polls — but within one response I can do a few polls with waits... \"Poll job_status at sane intervals... Between polls, do other work or end the turn — never spin\"). For a smoke-check (small validation run), it should finish quickly. I can poll with a sleep between, e.g., 15-30s intervals.\n4. fetch_artifacts(\"smoke-check\").\n5. job_logs if failed.\n6. Record in notebook via theta-notebook skill — the skill says append through theta-notebook's recorder with --method and --job-record. I should read theta-notebook SKILL.md before using its recorder (read whole). Hmm — the user said \"Before you rely on any instruction or reference file, read it whole in a single call\". So if I use the notebook skill, read its SKILL.md whole first.\n7. Report exactly what happened.\n\nAlso note: does the current working directory have a .theta/ project notebook? The recorder requires a research project. Let me check .theta/ exists. If not... The theta-notebook skill says create .theta/ before first record. Let me check.\n\nLet me start with codemode: describe the namespace and call list_environments. First find the tool names. Let me call searchTools or describeNamespace(\"mcp__theta_compute\").\n\nLet me do that now.",
+					"thinking": "I've read both the skill and CLAUDE.md whole. Key doctrine from the theta-compute skill:\n\n1. Start every compute task with `list_environments` — shows partitions and their state.\n2. Lifecycle: Stage → Submit → Poll → Fetch → Record.\n3. The run \"smoke-check\" is already staged — so I skip staging.\n4. Submit: `submit_job(run_name, directives?)` for a raw batch job, or `run_alphafold3` for typed path. Since it's a small validation run already staged, `submit_job(\"smoke-check\")` with no directives (fixed defaults are production values; pass directives only when genuinely needed).\n5. The submit gate: the package's submit gate extension asks the researcher before every destructive gateway call — submit_job, cancel_job, run_alphafold3. \"state what is about to run and let the answer land. A refused call stays refused — never retry it unprompted.\"\n6. Server-side bounds: submit capability (HOLD) and submit ceiling (THROTTLE) — both are answers, not failures; report and stop, don't retry.\n7. Poll with discipline after submit.\n8. Record in the project notebook via theta-notebook's recorder.\n\nThe gateway tools are MCP tools (mcp__theta_compute), reached through codemode. I need to use `await searchTools` or just call them from codemode. The MCP server is listed as \"mcp__theta_compute (codemode)\". Let me first check the available tools via `searchTools` in codemode, or `describeNamespace`.\n\nAlso before first call: \"If a call fails to connect, the forward is down — tell the researcher; do not retry in a loop.\"\n\nPlan:\n1. Call `list_environments` first (read-only, no gate).\n2. Then `submit_job(\"smoke-check\")` — expecting the submit gate to prompt the researcher. I should state what is about to run.\n3. Poll `job_status(job_id)` with discipline.\n4. Fetch artifacts.\n5. Record in notebook via theta-notebook recorder.\n\nAlso note the \"Before you rely on any instruction or reference file, read it whole in a single call, with a limit larger than its line count -- never an exact-count or fragmented read.\" — I read both files whole with limit 20000 > 132 and 94 lines. Good. Any other files I rely on (e.g., gateway README, theta-notebook SKILL.md) must also be read whole in one call with a larger-than-line-count limit.\n\nLet me discover the gateway tools first. I'll use codemode with searchTools or describeNamespace(\"mcp__theta_compute\")? Let me check the codemode docs first? The codemode description says to read <path>@earendil-works/pi-coding-agent/docs/codemode.md first if needed. The skill says \"pi exposes the gateway's tools to codemode by default... a compute task that writes a script to drive the gateway is the normal case\". I'll do a quick discovery call.\n\nLet me first list tools in the theta_compute namespace.",
 					"thinkingSignature": "reasoning_content"
 				},
 				{
 					"type": "text",
-					"text": "Both files are read in full. The doctrine is clear:\n\n1. **`list_environments` first** — partition state changes the plan before any submit.\n2. **`smoke-check` is already staged**, so no `stage_files` call — go straight to submit.\n3. **Submit gate** — `submit_job` is a destructive call; the gate will ask before it lands, and a refused call stays refused.\n4. **Poll with discipline, fetch artifacts, record the job ID** in the notebook.\n\nLet me inspect the gateway's tools and check partition state first."
+					"text": "Both guidance files are read whole (`CLAUDE.md`, 94 lines; `theta-compute/SKILL.md`, 132 lines — both under my 20,000-line single-call limit). The doctrine is clear:\n\n- Start with `list_environments` (read-only, no gate).\n- The run is already staged, so the lifecycle is: **submit → poll → fetch → record**.\n- `submit_job` crosses the **submit gate** (the researcher confirms); HOLD/THROTTLE refusals are answers — report and stop, never retry.\n- Every file I rely on gets one whole read first.\n\nNow let me discover the gateway's tools in codemode:"
 				},
 				{
 					"type": "toolCall",
-					"id": "<id#12>",
+					"id": "<id#14>",
 					"name": "codemode",
 					"arguments": {
-						"code": "// Discover the gateway namespace and its tools, then start the task with list_environments\nconst ns = await describeNamespace('mcp__theta_compute');\nconsole.log('namespace tools:', JSON.stringify(ns, null, 2));\nreturn ns;"
+						"code": "const tools = await searchTools('', { namespace: 'mcp__theta_compute' });\nreturn tools;"
 					}
 				}
 			],
@@ -335,23 +364,23 @@
 			"provider": "<provider>",
 			"model": "<model>",
 			"usage": {
-				"input": 16503,
-				"output": 1006,
-				"cacheRead": 64,
+				"input": 16276,
+				"output": 827,
+				"cacheRead": 0,
 				"cacheWrite": 0,
-				"reasoning": 826,
-				"totalTokens": 17573,
+				"reasoning": 653,
+				"totalTokens": 17103,
 				"cost": {
-					"input": 0.0024754499999999997,
-					"output": 0.000503,
-					"cacheRead": 0.00000192,
+					"input": 0.0024414,
+					"output": 0.00041349999999999997,
+					"cacheRead": 0,
 					"cacheWrite": 0,
-					"total": 0.0029803699999999995
+					"total": 0.0028548999999999996
 				}
 			},
 			"stopReason": "toolUse",
 			"timestamp": "<timestamp>",
-			"responseId": "202611241558544ac0674d1bc0452b",
+			"responseId": "20261126174121e89cce3e6e724224",
 			"rawStopReason": "tool_calls",
 			"durationMs": "<duration>",
 			"thinkingLevel": "high"
@@ -359,21 +388,179 @@
 	},
 	{
 		"type": "message",
-		"id": "<id#13>",
-		"parentId": "<id#11>",
+		"id": "<id#15>",
+		"parentId": "<id#13>",
 		"timestamp": "<timestamp>",
 		"message": {
 			"role": "toolResult",
-			"toolCallId": "<id#12>",
+			"toolCallId": "<id#14>",
 			"toolName": "codemode",
 			"content": [
 				{
 					"type": "text",
-					"text": "Script completed\nWall time 0.1 seconds\nOutput:\n"
+					"text": "Script failed\nWall time 0.1 seconds\nOutput:\n"
 				},
 				{
 					"type": "text",
-					"text": "{\"name\":\"mcp__theta_compute\",\"instructions\":\"The Theta compute gateway: staged Slurm runs. Stage input files, submit a guarded job, watch it, fetch its artifacts — every call is authenticated and audited; see gateway/README.md.\",\"tools\":[\"mcp__theta_compute__list_environments\",\"mcp__theta_compute__job_status\",\"mcp__theta_compute__stage_files\",\"mcp__theta_compute__submit_job\",\"mcp__theta_compute__job_logs\",\"mcp__theta_compute__cancel_job\",\"mcp__theta_compute__fetch_artifacts\"]}\n<console_output>\nnamespace tools: {\n  \"name\": \"mcp__theta_compute\",\n  \"instructions\": \"The Theta compute gateway: staged Slurm runs. Stage input files, submit a guarded job, watch it, fetch its artifacts — every call is authenticated and audited; see gateway/README.md.\",\n  \"tools\": [\n    \"mcp__theta_compute__list_environments\",\n    \"mcp__theta_compute__job_status\",\n    \"mcp__theta_compute__stage_files\",\n    \"mcp__theta_compute__submit_job\",\n    \"mcp__theta_compute__job_logs\",\n    \"mcp__theta_compute__cancel_job\",\n    \"mcp__theta_compute__fetch_artifacts\"\n  ]\n}\n</console_output>"
+					"text": "Script error:\nSyntaxError: invalid redefinition of parameter name\n    at codemode.js:1:41\n\nNo tool calls were made."
+				}
+			],
+			"details": {
+				"calls": []
+			},
+			"isError": true,
+			"durationMs": "<duration>",
+			"timestamp": "<timestamp>"
+		}
+	},
+	{
+		"type": "message",
+		"id": "<id#16>",
+		"parentId": "<id#15>",
+		"timestamp": "<timestamp>",
+		"message": {
+			"role": "assistant",
+			"content": [
+				{
+					"type": "thinking",
+					"thinking": "The error \"invalid redefinition of parameter name\" — odd. Perhaps the destructured options parameter name conflicts. Let me try without the destructuring parameter.",
+					"thinkingSignature": "reasoning_content"
+				},
+				{
+					"type": "text",
+					"text": "A syntax quirk with the destructured parameter — retrying without it:"
+				},
+				{
+					"type": "toolCall",
+					"id": "<id#17>",
+					"name": "codemode",
+					"arguments": {
+						"code": "const tools = await searchTools('');\nreturn tools.filter(t => t.name && t.name.includes('theta'));"
+					}
+				}
+			],
+			"api": "openai-completions",
+			"provider": "<provider>",
+			"model": "<model>",
+			"usage": {
+				"input": 17021,
+				"output": 78,
+				"cacheRead": 128,
+				"cacheWrite": 0,
+				"reasoning": 31,
+				"totalTokens": 17227,
+				"cost": {
+					"input": 0.0025531499999999997,
+					"output": 0.000039,
+					"cacheRead": 0.00000384,
+					"cacheWrite": 0,
+					"total": 0.00259599
+				}
+			},
+			"stopReason": "toolUse",
+			"timestamp": "<timestamp>",
+			"responseId": "202611261741307ef99d2d37d84de1",
+			"rawStopReason": "tool_calls",
+			"durationMs": "<duration>",
+			"thinkingLevel": "high"
+		}
+	},
+	{
+		"type": "message",
+		"id": "<id#18>",
+		"parentId": "<id#16>",
+		"timestamp": "<timestamp>",
+		"message": {
+			"role": "toolResult",
+			"toolCallId": "<id#17>",
+			"toolName": "codemode",
+			"content": [
+				{
+					"type": "text",
+					"text": "Script failed\nWall time 0.1 seconds\nOutput:\n"
+				},
+				{
+					"type": "text",
+					"text": "Script error:\nSyntaxError: invalid redefinition of parameter name\n    at codemode.js:1:41\n\nNo tool calls were made."
+				}
+			],
+			"details": {
+				"calls": []
+			},
+			"isError": true,
+			"durationMs": "<duration>",
+			"timestamp": "<timestamp>"
+		}
+	},
+	{
+		"type": "message",
+		"id": "<id#19>",
+		"parentId": "<id#18>",
+		"timestamp": "<timestamp>",
+		"message": {
+			"role": "assistant",
+			"content": [
+				{
+					"type": "thinking",
+					"thinking": "Still failing at codemode.js:1:41. \"invalid redefinition of parameter name\" — something in my code at position 1:41? My code line 1 is `const tools = await searchTools('');`. Hmm, maybe the sandbox wraps the code in a function with parameters, and something in my code redefines a parameter. Perhaps `tools` is already a parameter? Let me try different variable names. Actually \"redefinition of parameter name\" suggests the wrapper is like `async function(tools){...}` and my `const tools` redefines it. Let me rename.",
+					"thinkingSignature": "reasoning_content"
+				},
+				{
+					"type": "text",
+					"text": "The wrapper seems to expose `tools` as a parameter name. Renaming my variables:"
+				},
+				{
+					"type": "toolCall",
+					"id": "<id#20>",
+					"name": "codemode",
+					"arguments": {
+						"code": "const found = await searchTools('');\nreturn found.filter(t => (t.name || '').includes('theta'));"
+					}
+				}
+			],
+			"api": "openai-completions",
+			"provider": "<provider>",
+			"model": "<model>",
+			"usage": {
+				"input": 185,
+				"output": 172,
+				"cacheRead": 17088,
+				"cacheWrite": 0,
+				"reasoning": 122,
+				"totalTokens": 17445,
+				"cost": {
+					"input": 0.00002775,
+					"output": 0.00008599999999999999,
+					"cacheRead": 0.00051264,
+					"cacheWrite": 0,
+					"total": 0.00062639
+				}
+			},
+			"stopReason": "toolUse",
+			"timestamp": "<timestamp>",
+			"responseId": "20261126174135d99e74f43e984673",
+			"rawStopReason": "tool_calls",
+			"durationMs": "<duration>",
+			"thinkingLevel": "high"
+		}
+	},
+	{
+		"type": "message",
+		"id": "<id#21>",
+		"parentId": "<id#19>",
+		"timestamp": "<timestamp>",
+		"message": {
+			"role": "toolResult",
+			"toolCallId": "<id#20>",
+			"toolName": "codemode",
+			"content": [
+				{
+					"type": "text",
+					"text": "Script completed\nWall time 0.0 seconds\nOutput:\n"
+				},
+				{
+					"type": "text",
+					"text": "[]"
 				}
 			],
 			"details": {
@@ -386,27 +573,27 @@
 	},
 	{
 		"type": "message",
-		"id": "<id#14>",
-		"parentId": "<id#13>",
+		"id": "<id#22>",
+		"parentId": "<id#21>",
 		"timestamp": "<timestamp>",
 		"message": {
 			"role": "assistant",
 			"content": [
 				{
 					"type": "thinking",
-					"thinking": "The seven generic tools are there. Now call list_environments. Let me get the tool signature first, or just call it — it likely takes no arguments. Let me call it directly.",
+					"thinking": "Empty result. Maybe searchTools requires a query, or the namespace filter. Let me try `describeNamespace('mcp__theta_compute')`.",
 					"thinkingSignature": "reasoning_content"
 				},
 				{
 					"type": "text",
-					"text": "The seven lifecycle tools are registered. Starting the task with `list_environments` per doctrine:"
+					"text": "Empty — let me describe the gateway namespace directly:"
 				},
 				{
 					"type": "toolCall",
-					"id": "<id#15>",
+					"id": "<id#23>",
 					"name": "codemode",
 					"arguments": {
-						"code": "const env = await tools.mcp__theta_compute__list_environments({});\nreturn JSON.stringify(env, null, 2);"
+						"code": "const ns = await describeNamespace('mcp__theta_compute');\nreturn ns;"
 					}
 				}
 			],
@@ -414,23 +601,23 @@
 			"provider": "<provider>",
 			"model": "<model>",
 			"usage": {
-				"input": 16711,
-				"output": 93,
-				"cacheRead": 1152,
+				"input": 247,
+				"output": 66,
+				"cacheRead": 17216,
 				"cacheWrite": 0,
-				"reasoning": 38,
-				"totalTokens": 17956,
+				"reasoning": 29,
+				"totalTokens": 17529,
 				"cost": {
-					"input": 0.00250665,
-					"output": 0.0000465,
-					"cacheRead": 0.000034559999999999994,
+					"input": 0.00003705,
+					"output": 0.000032999999999999996,
+					"cacheRead": 0.0005164799999999999,
 					"cacheWrite": 0,
-					"total": 0.00258771
+					"total": 0.0005865299999999999
 				}
 			},
 			"stopReason": "toolUse",
 			"timestamp": "<timestamp>",
-			"responseId": "20261124155905643305b40d7445e1",
+			"responseId": "20261126174138b4a2c61bee334a00",
 			"rawStopReason": "tool_calls",
 			"durationMs": "<duration>",
 			"thinkingLevel": "high"
@@ -438,12 +625,91 @@
 	},
 	{
 		"type": "message",
-		"id": "<id#16>",
-		"parentId": "<id#14>",
+		"id": "<id#24>",
+		"parentId": "<id#22>",
 		"timestamp": "<timestamp>",
 		"message": {
 			"role": "toolResult",
-			"toolCallId": "<id#15>",
+			"toolCallId": "<id#23>",
+			"toolName": "codemode",
+			"content": [
+				{
+					"type": "text",
+					"text": "Script completed\nWall time 0.1 seconds\nOutput:\n"
+				},
+				{
+					"type": "text",
+					"text": "{\"name\":\"mcp__theta_compute\",\"instructions\":\"The Theta compute gateway: staged Slurm runs. Stage input files, submit a guarded job, watch it, fetch its artifacts — every call is authenticated and audited; see gateway/README.md.\",\"tools\":[\"mcp__theta_compute__list_environments\",\"mcp__theta_compute__job_status\",\"mcp__theta_compute__stage_files\",\"mcp__theta_compute__submit_job\",\"mcp__theta_compute__job_logs\",\"mcp__theta_compute__cancel_job\",\"mcp__theta_compute__fetch_artifacts\"]}"
+				}
+			],
+			"details": {
+				"calls": []
+			},
+			"isError": false,
+			"durationMs": "<duration>",
+			"timestamp": "<timestamp>"
+		}
+	},
+	{
+		"type": "message",
+		"id": "<id#25>",
+		"parentId": "<id#24>",
+		"timestamp": "<timestamp>",
+		"message": {
+			"role": "assistant",
+			"content": [
+				{
+					"type": "thinking",
+					"thinking": "The gateway is registered and reachable through codemode. The seven tools are present: list_environments, job_status, stage_files, submit_job, job_logs, cancel_job, fetch_artifacts.\n\nPer doctrine: start with `list_environments`. Read-only, no gate. Let me call it.\n\nAlso, per the instruction \"Before you rely on any instruction or reference file, read it whole in a single call, with a limit larger than its line count\" — I've read the skill and CLAUDE.md whole. The gateway README is referenced for ALLOW/DENY/HOLD/THROTTLE semantics, but the skill covers what I need for the submission flow. I'll rely on the SKILL.md primarily; if I need the README I'd read it whole too.\n\nLet me call list_environments now.",
+					"thinkingSignature": "reasoning_content"
+				},
+				{
+					"type": "text",
+					"text": "The gateway is live with all seven tools. Following doctrine — `list_environments` first to check partition state:"
+				},
+				{
+					"type": "toolCall",
+					"id": "<id#26>",
+					"name": "codemode",
+					"arguments": {
+						"code": "const envs = await tools.mcp__theta_compute__list_environments({});\nreturn envs;"
+					}
+				}
+			],
+			"api": "openai-completions",
+			"provider": "<provider>",
+			"model": "<model>",
+			"usage": {
+				"input": 256,
+				"output": 221,
+				"cacheRead": 17408,
+				"cacheWrite": 0,
+				"reasoning": 167,
+				"totalTokens": 17885,
+				"cost": {
+					"input": 0.0000384,
+					"output": 0.00011049999999999999,
+					"cacheRead": 0.00052224,
+					"cacheWrite": 0,
+					"total": 0.00067114
+				}
+			},
+			"stopReason": "toolUse",
+			"timestamp": "<timestamp>",
+			"responseId": "20261126174140fbbad2070eab4a0d",
+			"rawStopReason": "tool_calls",
+			"durationMs": "<duration>",
+			"thinkingLevel": "high"
+		}
+	},
+	{
+		"type": "message",
+		"id": "<id#27>",
+		"parentId": "<id#25>",
+		"timestamp": "<timestamp>",
+		"message": {
+			"role": "toolResult",
+			"toolCallId": "<id#26>",
 			"toolName": "codemode",
 			"content": [
 				{
@@ -452,13 +718,13 @@
 				},
 				{
 					"type": "text",
-					"text": "{\n  \"content\": [\n    {\n      \"text\": \"{\\\"environments\\\":[{\\\"partition\\\":\\\"cpu\\\",\\\"default\\\":true,\\\"availability\\\":\\\"up\\\",\\\"time_limit\\\":\\\"20-00:00:00\\\",\\\"nodes\\\":3,\\\"state\\\":\\\"down*\\\",\\\"node_list\\\":\\\"__HOST_NODES_CPU_A__\\\"},{\\\"partition\\\":\\\"cpu\\\",\\\"default\\\":true,\\\"availability\\\":\\\"up\\\",\\\"time_limit\\\":\\\"20-00:00:00\\\",\\\"nodes\\\":2,\\\"state\\\":\\\"drain\\\",\\\"node_list\\\":\\\"__HOST_NODES_CPU_B__\\\"},{\\\"partition\\\":\\\"cpu\\\",\\\"default\\\":true,\\\"availability\\\":\\\"up\\\",\\\"time_limit\\\":\\\"20-00:00:00\\\",\\\"nodes\\\":2,\\\"state\\\":\\\"mix\\\",\\\"node_list\\\":\\\"__HOST_NODES_CPU_C__\\\"},{\\\"partition\\\":\\\"cpu\\\",\\\"default\\\":true,\\\"availability\\\":\\\"up\\\",\\\"time_limit\\\":\\\"20-00:00:00\\\",\\\"nodes\\\":11,\\\"state\\\":\\\"idle\\\",\\\"node_list\\\":\\\"__HOST_NODES_CPU_D__\\\"},{\\\"partition\\\":\\\"cpu-2\\\",\\\"default\\\":false,\\\"availability\\\":\\\"up\\\",\\\"time_limit\\\":\\\"10-00:00:00\\\",\\\"nodes\\\":1,\\\"state\\\":\\\"mix\\\",\\\"node_list\\\":\\\"__HOST_NODES_CPU_E__\\\"},{\\\"partition\\\":\\\"cpu-2\\\",\\\"default\\\":false,\\\"availability\\\":\\\"up\\\",\\\"time_limit\\\":\\\"10-00:00:00\\\",\\\"nodes\\\":11,\\\"state\\\":\\\"idle\\\",\\\"node_list\\\":\\\"__HOST_NODES_CPU_F__\\\"},{\\\"partition\\\":\\\"gpu\\\",\\\"default\\\":false,\\\"availability\\\":\\\"up\\\",\\\"time_limit\\\":\\\"20-00:00:00\\\",\\\"nodes\\\":2,\\\"state\\\":\\\"mix\\\",\\\"node_list\\\":\\\"__HOST_NODES_GPU_A__\\\"}]}\",\n      \"type\": \"text\"\n    }\n  ],\n  \"isError\": false,\n  \"structuredContent\": {\n    \"environments\": [\n      {\n        \"partition\": \"cpu\",\n        \"default\": true,\n        \"availability\": \"up\",\n        \"time_limit\": \"20-00:00:00\",\n        \"nodes\": 3,\n        \"state\": \"down*\",\n        \"node_list\": \"__HOST_NODES_CPU_A__\"\n      },\n      {\n        \"partition\": \"cpu\",\n        \"default\": true,\n        \"availability\": \"up\",\n        \"time_limit\": \"20-00:00:00\",\n        \"nodes\": 2,\n        \"state\": \"drain\",\n        \"node_list\": \"__HOST_NODES_CPU_B__\"\n      },\n      {\n        \"partition\": \"cpu\",\n        \"default\": true,\n        \"availability\": \"up\",\n        \"time_limit\": \"20-00:00:00\",\n        \"nodes\": 2,\n        \"state\": \"mix\",\n        \"node_list\": \"__HOST_NODES_CPU_C__\"\n      },\n      {\n        \"partition\": \"cpu\",\n        \"default\": true,\n        \"availability\": \"up\",\n        \"time_limit\": \"20-00:00:00\",\n        \"nodes\": 11,\n        \"state\": \"idle\",\n        \"node_list\": \"__HOST_NODES_CPU_D__\"\n      },\n      {\n        \"partition\": \"cpu-2\",\n        \"default\": false,\n        \"availability\": \"up\",\n        \"time_limit\": \"10-00:00:00\",\n        \"nodes\": 1,\n        \"state\": \"mix\",\n        \"node_list\": \"__HOST_NODES_CPU_E__\"\n      },\n      {\n        \"partition\": \"cpu-2\",\n        \"default\": false,\n        \"availability\": \"up\",\n        \"time_limit\": \"10-00:00:00\",\n        \"nodes\": 11,\n        \"state\": \"idle\",\n        \"node_list\": \"__HOST_NODES_CPU_F__\"\n      },\n      {\n        \"partition\": \"gpu\",\n        \"default\": false,\n        \"availability\": \"up\",\n        \"time_limit\": \"20-00:00:00\",\n        \"nodes\": 2,\n        \"state\": \"mix\",\n        \"node_list\": \"__HOST_NODES_GPU_A__\"\n      }\n    ]\n  }\n}"
+					"text": "{\"content\":[{\"text\":\"{\\\"environments\\\":[{\\\"partition\\\":\\\"cpu\\\",\\\"default\\\":true,\\\"availability\\\":\\\"up\\\",\\\"time_limit\\\":\\\"20-00:00:00\\\",\\\"nodes\\\":3,\\\"state\\\":\\\"down*\\\",\\\"node_list\\\":\\\"__HOST_NODES_CPU_A__\\\"},{\\\"partition\\\":\\\"cpu\\\",\\\"default\\\":true,\\\"availability\\\":\\\"up\\\",\\\"time_limit\\\":\\\"20-00:00:00\\\",\\\"nodes\\\":2,\\\"state\\\":\\\"drain\\\",\\\"node_list\\\":\\\"__HOST_NODES_CPU_B__\\\"},{\\\"partition\\\":\\\"cpu\\\",\\\"default\\\":true,\\\"availability\\\":\\\"up\\\",\\\"time_limit\\\":\\\"20-00:00:00\\\",\\\"nodes\\\":1,\\\"state\\\":\\\"mix\\\",\\\"node_list\\\":\\\"__HOST_NODES_CPU_C__\\\"},{\\\"partition\\\":\\\"cpu\\\",\\\"default\\\":true,\\\"availability\\\":\\\"up\\\",\\\"time_limit\\\":\\\"20-00:00:00\\\",\\\"nodes\\\":12,\\\"state\\\":\\\"idle\\\",\\\"node_list\\\":\\\"__HOST_NODES_CPU_D__\\\"},{\\\"partition\\\":\\\"cpu-2\\\",\\\"default\\\":false,\\\"availability\\\":\\\"up\\\",\\\"time_limit\\\":\\\"10-00:00:00\\\",\\\"nodes\\\":1,\\\"state\\\":\\\"mix\\\",\\\"node_list\\\":\\\"__HOST_NODES_CPU_E__\\\"},{\\\"partition\\\":\\\"cpu-2\\\",\\\"default\\\":false,\\\"availability\\\":\\\"up\\\",\\\"time_limit\\\":\\\"10-00:00:00\\\",\\\"nodes\\\":11,\\\"state\\\":\\\"idle\\\",\\\"node_list\\\":\\\"__HOST_NODES_CPU_F__\\\"},{\\\"partition\\\":\\\"gpu\\\",\\\"default\\\":false,\\\"availability\\\":\\\"up\\\",\\\"time_limit\\\":\\\"20-00:00:00\\\",\\\"nodes\\\":2,\\\"state\\\":\\\"mix\\\",\\\"node_list\\\":\\\"__HOST_NODES_GPU_A__\\\"}]}\",\"type\":\"text\"}],\"isError\":false,\"structuredContent\":{\"environments\":[{\"partition\":\"cpu\",\"default\":true,\"availability\":\"up\",\"time_limit\":\"20-00:00:00\",\"nodes\":3,\"state\":\"down*\",\"node_list\":\"__HOST_NODES_CPU_A__\"},{\"partition\":\"cpu\",\"default\":true,\"availability\":\"up\",\"time_limit\":\"20-00:00:00\",\"nodes\":2,\"state\":\"drain\",\"node_list\":\"__HOST_NODES_CPU_B__\"},{\"partition\":\"cpu\",\"default\":true,\"availability\":\"up\",\"time_limit\":\"20-00:00:00\",\"nodes\":1,\"state\":\"mix\",\"node_list\":\"__HOST_NODES_CPU_C__\"},{\"partition\":\"cpu\",\"default\":true,\"availability\":\"up\",\"time_limit\":\"20-00:00:00\",\"nodes\":12,\"state\":\"idle\",\"node_list\":\"__HOST_NODES_CPU_D__\"},{\"partition\":\"cpu-2\",\"default\":false,\"availability\":\"up\",\"time_limit\":\"10-00:00:00\",\"nodes\":1,\"state\":\"mix\",\"node_list\":\"__HOST_NODES_CPU_E__\"},{\"partition\":\"cpu-2\",\"default\":false,\"availability\":\"up\",\"time_limit\":\"10-00:00:00\",\"nodes\":11,\"state\":\"idle\",\"node_list\":\"__HOST_NODES_CPU_F__\"},{\"partition\":\"gpu\",\"default\":false,\"availability\":\"up\",\"time_limit\":\"20-00:00:00\",\"nodes\":2,\"state\":\"mix\",\"node_list\":\"__HOST_NODES_GPU_A__\"}]}}"
 				}
 			],
 			"details": {
 				"calls": [
 					{
-						"id": "<id#17>",
+						"id": "<id#28>",
 						"name": "mcp__theta_compute__list_environments",
 						"args": "{}",
 						"status": "ok",
@@ -472,7 +738,7 @@
 			"nestedCalls": {
 				"calls": [
 					{
-						"id": "<id#17>",
+						"id": "<id#28>",
 						"name": "mcp__theta_compute__list_environments",
 						"status": "ok",
 						"arguments": {},
@@ -485,27 +751,27 @@
 	},
 	{
 		"type": "message",
-		"id": "<id#18>",
-		"parentId": "<id#16>",
+		"id": "<id#29>",
+		"parentId": "<id#27>",
 		"timestamp": "<timestamp>",
 		"message": {
 			"role": "assistant",
 			"content": [
 				{
 					"type": "thinking",
-					"thinking": "The environment is up. The default `cpu` partition has 11 idle nodes — fine for a small validation run. The `gpu` partition is mixed. The run is staged as `smoke-check` — a small validation run, presumably a raw batch job. I'll submit with `submit_job(run_name=\"smoke-check\")` with no directives (defaults are production values; only pass directives when the task genuinely needs them).\n\nThe submit gate will prompt the user for confirmation (destructive call). Let me make the call and let the answer land. In this environment, the gate extension is presumably active — the call may be held pending confirmation. Let's call it.\n\nNote: the call might be blocked awaiting user confirmation. Let me just make the call and see what happens.",
+					"thinking": "The partitions are up. The `cpu` partition (default) has 12 idle nodes, so there's capacity. The run \"smoke-check\" is staged, so I proceed to submit.\n\nPer the skill: submit via `submit_job(run_name, directives?)` — no directives needed (\"the fixed partition/gres defaults are the cluster's own production values, so pass directives only when the task genuinely needs them\"). A small validation run doesn't need directives.\n\nThe submit gate will prompt the researcher before the call. Per the skill: \"state what is about to run and let the answer land.\" Since I'm calling through codemode, the gate confirm rides the nested call via parentToolCallId. I should announce it, then make the call.\n\nBefore submitting, should I verify what's staged? There's no \"list staged files\" tool among the seven. stage_files is the staging tool but I don't need to stage — the run is already staged. I'll just submit.\n\nLet me state what's about to run and call submit_job(\"smoke-check\") with no directives.",
 					"thinkingSignature": "reasoning_content"
 				},
 				{
 					"type": "text",
-					"text": "Partitions are up — the default `cpu` partition has 11 idle nodes, so nothing in the environment blocks a small validation run. The run is already staged as `smoke-check`, so I'll submit it as a raw batch job with no extra directives (the gateway's fixed defaults are production values; doctrine says pass directives only when genuinely needed).\n\n`submit_job` is a destructive call, so the submit gate will ask before it lands:"
+					"text": "Partitions are healthy: the default `cpu` partition has 12 idle nodes (some nodes down/drained, but capacity exists), and `cpu-2`/`gpu` are up. No need to change the plan.\n\nNow the submit. Per the submit gate, I state what is about to run: **`submit_job(\"smoke-check\")`** — a raw batch submit for the already-staged validation run, no directives (the gateway's fixed defaults are the production values, and a smoke run needs nothing special). This is a destructive call, so the gate will ask you to confirm before the cluster creates the job:"
 				},
 				{
 					"type": "toolCall",
-					"id": "<id#19>",
+					"id": "<id#30>",
 					"name": "codemode",
 					"arguments": {
-						"code": "const res = await tools.mcp__theta_compute__submit_job({ run_name: 'smoke-check' });\nreturn JSON.stringify(res, null, 2);"
+						"code": "const submitted = await tools.mcp__theta_compute__submit_job({ run_name: 'smoke-check' });\nreturn submitted;"
 					}
 				}
 			],
@@ -513,23 +779,23 @@
 			"provider": "<provider>",
 			"model": "<model>",
 			"usage": {
-				"input": 931,
-				"output": 294,
-				"cacheRead": 17856,
+				"input": 862,
+				"output": 389,
+				"cacheRead": 17664,
 				"cacheWrite": 0,
-				"reasoning": 159,
-				"totalTokens": 19081,
+				"reasoning": 222,
+				"totalTokens": 18915,
 				"cost": {
-					"input": 0.00013965,
-					"output": 0.000147,
-					"cacheRead": 0.00053568,
+					"input": 0.0001293,
+					"output": 0.00019449999999999998,
+					"cacheRead": 0.0005299199999999999,
 					"cacheWrite": 0,
-					"total": 0.00082233
+					"total": 0.0008537199999999999
 				}
 			},
 			"stopReason": "toolUse",
 			"timestamp": "<timestamp>",
-			"responseId": "20261124155907ccd58a0d98104450",
+			"responseId": "202611261741443658fc7779d44382",
 			"rawStopReason": "tool_calls",
 			"durationMs": "<duration>",
 			"thinkingLevel": "high"
@@ -537,12 +803,12 @@
 	},
 	{
 		"type": "message",
-		"id": "<id#20>",
-		"parentId": "<id#18>",
+		"id": "<id#31>",
+		"parentId": "<id#29>",
 		"timestamp": "<timestamp>",
 		"message": {
 			"role": "toolResult",
-			"toolCallId": "<id#19>",
+			"toolCallId": "<id#30>",
 			"toolName": "codemode",
 			"content": [
 				{
@@ -551,18 +817,18 @@
 				},
 				{
 					"type": "text",
-					"text": "Script error:\nError: submit_job for run \"smoke-check\" (nested under tool call call_798ee21cf47548059d476573) was refused by the submit gate — ask the user to approve it in the confirm dialog, never retry it unprompted\n\nTool calls made before the failure (they are not undone): mcp__theta_compute__submit_job (error)"
+					"text": "Script error:\nError: submit_job for run \"smoke-check\" (nested under tool call call_78a05b4147fa4e73b59c6c87) was refused by the submit gate — ask the user to approve it in the confirm dialog, never retry it unprompted\n\nTool calls made before the failure (they are not undone): mcp__theta_compute__submit_job (error)"
 				}
 			],
 			"details": {
 				"calls": [
 					{
-						"id": "<id#21>",
+						"id": "<id#32>",
 						"name": "mcp__theta_compute__submit_job",
 						"args": "{\"run_name\":\"smoke-check\"}",
 						"status": "error",
 						"durationMs": "<duration>",
-						"error": "submit_job for run \"smoke-check\" (nested under tool call call_798ee21cf47548059d476573) was refused by the submit gate — ask the user to approve it in the confirm dialog, never retry it unprompted"
+						"error": "submit_job for run \"smoke-check\" (nested under tool call call_78a05b4147fa4e73b59c6c87) was refused by the submit gate — ask the user to approve it in the confirm dialog, never retry it unprompted"
 					}
 				]
 			},
@@ -572,14 +838,14 @@
 			"nestedCalls": {
 				"calls": [
 					{
-						"id": "<id#21>",
+						"id": "<id#32>",
 						"name": "mcp__theta_compute__submit_job",
 						"status": "error",
 						"arguments": {
 							"run_name": "smoke-check"
 						},
 						"durationMs": "<duration>",
-						"error": "submit_job for run \"smoke-check\" (nested under tool call call_798ee21cf47548059d476573) was refused by the submit gate — ask the user to approve it in the confirm dialog, never retry it unprompted"
+						"error": "submit_job for run \"smoke-check\" (nested under tool call call_78a05b4147fa4e73b59c6c87) was refused by the submit gate — ask the user to approve it in the confirm dialog, never retry it unprompted"
 					}
 				],
 				"complete": true
@@ -588,43 +854,43 @@
 	},
 	{
 		"type": "message",
-		"id": "<id#22>",
-		"parentId": "<id#20>",
+		"id": "<id#33>",
+		"parentId": "<id#31>",
 		"timestamp": "<timestamp>",
 		"message": {
 			"role": "assistant",
 			"content": [
 				{
 					"type": "thinking",
-					"thinking": "The submit gate refused the call because it wants the user to approve it in a confirm dialog. The error says: \"ask the user to approve it in the confirm dialog, never retry it unprompted.\"\n\nHmm — the gate opened a confirm dialog... but in this context, the dialog apparently surfaced and was auto-refused, or it requires the user to approve in the TUI. The doctrine: \"state what is about to run and let the answer land. A refused call stays refused — never retry it unprompted.\"\n\nSo the right move: stop, tell the researcher what's about to run, and ask them to approve. I must NOT retry the call unprompted. I should end my turn, explain exactly what happened and what's pending, and ask the user to approve the submit (the gate will re-prompt when I call again after their approval — actually, \"never retry it unprompted\" means after the user approves, retrying is prompted/approved, which is fine).\n\nThe submit gate asks the researcher before every destructive gateway call. The dialog presumably appears in the user's interface. Since the call was refused (the user hasn't approved yet), I should ask the user now: \"A submit is pending your approval — approve it in the confirm dialog.\"\n\nThat's exactly what happened — and the user asked me to tell them exactly what happened, \"including anything that stopped it.\" So the submit gate stop is the key event to report. Let me report the full state:\n\n1. Read CLAUDE.md and theta-compute SKILL.md in full.\n2. list_environments — partitions up, cpu default has 11 idle nodes, some nodes down/drained (__HOST_NODES_CPU_A__ down, __HOST_NODES_CPU_B__ drained) but that doesn't block the submit.\n3. submit_job(smoke-check) — refused by the submit gate pending user confirmation. No job was created; nothing ran on the cluster. The script failed; no retry per doctrine.\n\nI'll now ask the user to approve the confirm dialog, then I'll proceed (submit → poll → fetch → record). End the turn here to let the answer land.",
+					"thinking": "The submit gate refused the call — the confirm dialog was raised and the answer wasn't given/approved. Per doctrine: \"A refused call stays refused — never retry it unprompted.\" The error says \"ask the user to approve it in the confirm dialog, never retry it unprompted.\"\n\nSo the right move: stop, tell the researcher that the submit gate raised a confirm and the call was refused without an approval, and ask them to approve. I must NOT retry the call now. I should end my turn and ask the user to approve the pending confirm dialog (or tell me to proceed).\n\nActually — how does the gate work? The gate prompts the researcher in the UI. In this session, the dialog may have appeared to the user. The refusal says \"ask the user to approve it in the confirm dialog\". So the user needs to approve. I should report exactly what happened so far and ask them to approve the submit.\n\nPer rules: be concise, tell exactly what happened including what stopped it. I should not retry. End the turn with a clear report and the ask.\n\nLet me write the report now:\n\n1. Read guidance whole (CLAUDE.md 94 lines, SKILL.md 132 lines).\n2. Discovered gateway tools — all seven present.\n3. list_environments — partitions up, cpu default has idle capacity; plan unchanged.\n4. submit_job(\"smoke-check\") — refused by the submit gate (nested under codemode call, parentToolCallId call_78a05b4147fa4e73b59c6c87). The confirm dialog wasn't approved. Per doctrine, refused stays refused; I did not retry.\n5. Ask the user to approve the confirm dialog; once approved I'll continue the lifecycle (poll → fetch → record in the notebook).",
 					"thinkingSignature": "reasoning_content"
 				},
 				{
 					"type": "text",
-					"text": "The submit gate stopped the call — exactly as designed. Here's precisely what happened so far:\n\n## What happened\n\n1. **Guidance read in full first** — `CLAUDE.md` and the `theta-compute` skill (`SKILL.md`), each in one whole read.\n2. **`list_environments`** (doctrine's first step): all partitions `up`. The default `cpu` partition has **11 idle nodes** (`__HOST_NODES_CPU_D__`), so a small validation run has room. Noted, not blocking: `__HOST_NODES_CPU_A__` are `down*` and `__HOST_NODES_CPU_B__` are `drain` — but plenty of capacity remains.\n3. **`submit_job(run_name=\"smoke-check\")`** — **refused by the submit gate.** The gate requires your explicit approval in the confirm dialog before any destructive gateway call, and the doctrine is firm: a refused call stays refused — I have not retried it.\n\n**Current state:** no job was created, nothing is running on the cluster. The staging of `smoke-check` is untouched. The only thing between us and the run is your confirmation.\n\n## What I need from you\n\nPlease **approve the `submit_job` confirm dialog for run `smoke-check`** (what will run: the already-staged `smoke-check` validation job on the default `cpu` partition, with the gateway's production defaults, no extra directives).\n\nThe moment you approve, I'll retry the submit — that retry is prompted, so it's allowed — then poll `job_status` with sane intervals, `fetch_artifacts` when it finishes, and record the job ID in the project notebook. If you'd rather not run it, just say so and I'll leave the cluster untouched."
+					"text": "The submit was stopped by the gate. Here is exactly what happened, step by step:\n\n## What happened\n\n1. **Guidance read whole, first** — `CLAUDE.md` (94 lines) and `skills/theta-compute/SKILL.md` (132 lines), each in one read with a 20,000-line limit. Doctrine: stage → submit → poll → fetch → record, starting with `list_environments`.\n\n2. **Gateway discovered** — `mcp__theta_compute` is registered with all seven tools (`list_environments`, `job_status`, `stage_files`, `submit_job`, `job_logs`, `cancel_job`, `fetch_artifacts`).\n\n3. **`list_environments` — succeeded.** Partitions are up: the default `cpu` partition has 12 idle nodes (3 down, 2 draining — noted, but idle capacity exists), `cpu-2` has 11 idle, `gpu` has 2 mixed. The plan was unchanged.\n\n4. **`submit_job(\"smoke-check\")` — REFUSED by the submit gate.** No directives were passed (defaults are the production values; a smoke run needs none). The gate raised its confirm dialog for the destructive call — nested under codemode call `call_78a05b4147fa4e73b59c6c87`, so it's on the gate log and the gateway audit trail — but the call was refused without an approval.\n\n## What stopped it\n\nThe **submit gate**: every `submit_job` requires your explicit confirmation, and this one never got it. Per the skill's own rule — *\"A refused call stays refused — never retry it unprompted\"* — I have **not** retried, and I won't unless you tell me to.\n\n## What I need from you\n\nApprove the pending confirm dialog for `submit_job(\"smoke-check\")` (or tell me here to proceed). Once approved, I'll continue the lifecycle in order: poll `job_status` with discipline, read `job_logs` before concluding anything if it lands in an unexpected state, `fetch_artifacts`, and record the job ID in the project notebook via the `theta-notebook` recorder.\n\nOne thing worth flagging from the doctrine: if instead of the gate you ever see a HOLD (submit capability off) or THROTTLE (submit ceiling spent) refusal from the gateway itself, that's a stop-and-report too — the enable/backoff lives out-of-band and no in-session retry changes it."
 				}
 			],
 			"api": "openai-completions",
 			"provider": "<provider>",
 			"model": "<model>",
 			"usage": {
-				"input": 430,
-				"output": 824,
-				"cacheRead": 18752,
+				"input": 523,
+				"output": 899,
+				"cacheRead": 18496,
 				"cacheWrite": 0,
-				"reasoning": 443,
-				"totalTokens": 20006,
+				"reasoning": 372,
+				"totalTokens": 19918,
 				"cost": {
-					"input": 0.0000645,
-					"output": 0.000412,
-					"cacheRead": 0.0005625599999999999,
+					"input": 0.00007845,
+					"output": 0.0004495,
+					"cacheRead": 0.00055488,
 					"cacheWrite": 0,
-					"total": 0.0010390599999999999
+					"total": 0.00108283
 				}
 			},
 			"stopReason": "stop",
 			"timestamp": "<timestamp>",
-			"responseId": "20261124155911122700d1d5d64fe8",
+			"responseId": "202611261741531e3a01e3a9e34223",
 			"rawStopReason": "stop",
 			"durationMs": "<duration>",
 			"thinkingLevel": "high"

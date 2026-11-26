@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 import { createJiti } from "jiti";
 import { tempDir } from "./helpers/temp-dir.mjs";
@@ -261,6 +262,91 @@ test("the gate refuses every malformed shape", () => {
 		badGradeItem,
 	]) {
 		assert.equal(parseProvenanceEntry(line), undefined, `must refuse: ${line.slice(0, 60)}`);
+	}
+});
+
+// --- the plan citation's grammar (spec #202) ---------------------------------
+
+// The shared fixture line: one committed decision entry the Python suite
+// reads back through the recorder and this suite pins through the
+// validator — one grammar, both languages.
+const planDecisionLine = fs
+	.readFileSync(
+		fileURLToPath(new URL("fixtures/notebook/plan-decision.jsonl", import.meta.url)),
+		"utf8",
+	)
+	.trim();
+
+test("the shared grammar fixture parses: a plan-citing decision's full field set", () => {
+	const entry = parseProvenanceEntry(planDecisionLine);
+	assert.ok(entry !== undefined, "the committed fixture line must parse");
+	assert.equal(entry.id, "dec-0001");
+	assert.equal(entry.type, "decision");
+	assert.equal(entry.date, "2026-11-18");
+	assert.equal(entry.planPath, ".theta/plans/2026-11-18-af3-benchmark.md");
+	assert.equal(entry.planRevision, "c6f6084b0e5f");
+	assert.equal(entry.decision, "approved");
+	assert.equal(entry.rationale, "Digest matches the plan on disk");
+	// The expanded raw view carries the citation — no renderer change needed.
+	const expanded = cardLines(cardModel(entry), plainStyle, true);
+	assert.ok(expanded.some((l) => l.includes('"planPath"')));
+	assert.ok(expanded.some((l) => l.includes('"decision": "approved"')));
+	// The collapsed card stays free of raw JSON, as before.
+	const collapsed = cardLines(cardModel(entry), plainStyle, false);
+	assert.ok(!collapsed.some((l) => l.includes('"planPath"')));
+});
+
+test("a citing decision without the optional rationale parses", () => {
+	const line = JSON.stringify({ ...JSON.parse(planDecisionLine), rationale: undefined });
+	assert.ok(parseProvenanceEntry(line) !== undefined);
+});
+
+test("both verdicts parse: the refused citation carries the same field set", () => {
+	const line = JSON.stringify({ ...JSON.parse(planDecisionLine), decision: "refused" });
+	const entry = parseProvenanceEntry(line);
+	assert.ok(entry !== undefined);
+	assert.equal(entry.decision, "refused");
+	assert.equal(entry.planPath, ".theta/plans/2026-11-18-af3-benchmark.md");
+	assert.equal(entry.planRevision, "c6f6084b0e5f");
+});
+
+test("the citation grammar refuses every malformed shape", () => {
+	const base = JSON.parse(planDecisionLine);
+	const mutate = (patch) => JSON.stringify({ ...base, ...patch });
+	const drop = (key) => {
+		const rest = { ...base };
+		delete rest[key];
+		return JSON.stringify(rest);
+	};
+	for (const line of [
+		drop("planPath"),
+		drop("planRevision"),
+		drop("decision"),
+		mutate({ decision: "pending" }),
+		mutate({ decision: null }),
+		mutate({ planRevision: "c6f6084b0e5" }),
+		mutate({ planRevision: "C6F6084B0E5F" }),
+		mutate({ planRevision: 123 }),
+		mutate({ planPath: "plans/2026-11-18-af3-benchmark.md" }),
+		mutate({ planPath: ".theta/plans/af3-benchmark.md" }),
+		mutate({ planPath: ".theta/plans/2026-13-01-af3-benchmark.md" }),
+		mutate({ planPath: ".theta/plans/2026-11-18-af3--benchmark.md" }),
+		mutate({ planPath: `.theta/plans/2026-11-18-${"a".repeat(49)}.md` }),
+		mutate({ planPath: ".theta/plans/2026-11-18/af3-benchmark.md" }),
+		mutate({ planPath: ".theta/plans/2026-11-18-af3-benchmark" }),
+		mutate({ planPath: null }),
+		mutate({ rationale: "" }),
+		mutate({ rationale: null }),
+		// A rationale without the citation fields is not an all-or-nothing
+		// citation — it rides only an entry that cites.
+		JSON.stringify({ ...base, planPath: undefined, planRevision: undefined, decision: undefined }),
+		mutate({ type: "method", id: "mth-0001" }),
+	]) {
+		assert.equal(
+			parseProvenanceEntry(line),
+			undefined,
+			`must refuse: ${line.slice(0, 80)}…`,
+		);
 	}
 });
 

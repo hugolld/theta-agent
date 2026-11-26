@@ -51,6 +51,14 @@ export const GRADES = ["asserted", "cross-checked", "re-executed"] as const;
 
 export type EvidenceGrade = (typeof GRADES)[number];
 
+/**
+ * The two verdicts a plan-citing decision records (spec #202): both are
+ * provenance — an approval and a refusal cite the plan the same way.
+ */
+export const DECISION_VERDICTS = ["approved", "refused"] as const;
+
+export type DecisionVerdict = (typeof DECISION_VERDICTS)[number];
+
 /** One evidence item as the recorder writes it — connector output or job record. */
 export interface EvidenceItem {
 	source: string;
@@ -75,6 +83,14 @@ export interface NotebookEntry {
 	grade?: EvidenceGrade;
 	/** The hypothesis a confidence entry judges — judgment's named subject. */
 	hypothesis?: string;
+	/** The plan citation (spec #202): the plan a decision approves or refuses. The writer resolved it against disk before recording — never an unresolved or stale citation. */
+	planPath?: string;
+	/** The cited revision: the digest the decision weighs (T1's recipe). */
+	planRevision?: string;
+	/** The verdict on the cited plan — a refusal records too. */
+	decision?: DecisionVerdict;
+	/** The decision's optional free-text rationale. */
+	rationale?: string;
 	evidence?: EvidenceItem[];
 }
 
@@ -144,6 +160,39 @@ function isEvidenceList(value: unknown): value is EvidenceItem[] {
 }
 
 /**
+ * The plan citation's grammar (spec #202), pinned against the shared
+ * fixture entry both suites read: `planPath` names a plan object by its
+ * recorded path — `.theta/plans/<plan-id>.md`, the form every plan
+ * operation reports — `planRevision` is the 12-hex digest the decision
+ * weighs, and `decision` is one of the two verdicts. The fields are
+ * all-or-nothing on a decision entry and ride only a decision: the
+ * recorder resolved the citation against disk before writing (a missing
+ * plan or a stale revision never became an entry), so this validator
+ * pins the shapes, not the disk state.
+ */
+const PLAN_SLUG_MAX = 48;
+const PLAN_SLUG_RE = /^[a-z0-9]+(-[a-z0-9]+)*$/;
+const PLAN_PATH_RE = /^\.theta\/plans\/(\d{4}-\d{2}-\d{2})-(.+)\.md$/;
+const PLAN_REVISION_RE = /^[0-9a-f]{12}$/;
+
+function isDecisionVerdict(value: unknown): value is DecisionVerdict {
+	return (
+		typeof value === "string" &&
+		(DECISION_VERDICTS as readonly string[]).includes(value)
+	);
+}
+
+function isPlanSlug(slug: string): boolean {
+	return slug.length <= PLAN_SLUG_MAX && PLAN_SLUG_RE.test(slug);
+}
+
+/** `.theta/plans/<plan-id>.md` under the plan-id grammar — the same bar `check_plan_id` holds on the Python side. */
+function isPlanPath(value: string): boolean {
+	const match = PLAN_PATH_RE.exec(value);
+	return match !== null && isCalendarDate(match[1]) && isPlanSlug(match[2]);
+}
+
+/**
  * One notebook line as a typed, dated provenance entry, or undefined: the
  * gate every diffed line crosses before it earns a card. The id must
  * carry its own type's prefix (the recorder sequences ids per type), the
@@ -152,7 +201,9 @@ function isEvidenceList(value: unknown): value is EvidenceItem[] {
  * grade), a named hypothesis on a confidence. Method and decision entries
  * carry evidence only when a motivating source was recorded; a confidence
  * entry never does, and extra fields beyond the card's needs are the
- * recorder's business, not the card's.
+ * recorder's business, not the card's. A decision may cite the plan it
+ * approves or refuses (spec #202): the citation fields are all-or-nothing
+ * and ride only a decision.
  */
 export function parseProvenanceEntry(line: string): NotebookEntry | undefined {
 	let parsed: unknown;
@@ -179,6 +230,27 @@ export function parseProvenanceEntry(line: string): NotebookEntry | undefined {
 	}
 	if (entryType === "observation" && !isGrade(entry.grade)) return undefined;
 	if (entryType === "confidence" && !isHypRef(entry.hypothesis)) return undefined;
+	const cites =
+		entry.planPath !== undefined ||
+		entry.planRevision !== undefined ||
+		entry.decision !== undefined ||
+		entry.rationale !== undefined;
+	if (cites) {
+		if (entryType !== "decision") return undefined;
+		if (typeof entry.planPath !== "string" || !isPlanPath(entry.planPath)) {
+			return undefined;
+		}
+		if (
+			typeof entry.planRevision !== "string" ||
+			!PLAN_REVISION_RE.test(entry.planRevision)
+		) {
+			return undefined;
+		}
+		if (!isDecisionVerdict(entry.decision)) return undefined;
+		if (entry.rationale !== undefined && !nonEmptyString(entry.rationale)) {
+			return undefined;
+		}
+	}
 	return { ...(entry as unknown as NotebookEntry) };
 }
 

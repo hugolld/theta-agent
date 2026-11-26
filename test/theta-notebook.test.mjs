@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
-import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -44,6 +44,15 @@ const planVectorFixture = fileURLToPath(
 	new URL("fixtures/notebook/plan-vector.md", import.meta.url),
 );
 const planVectorRevision = "c6f6084b0e5f";
+// The shared plan-citation grammar fixture (spec #202): one committed
+// decision entry line both this suite and the TS cards suite read — field
+// names, shapes, and one grammar in both languages. Its cited revision is
+// the plan vector's own digest: the cited plan's bytes are the committed
+// vector's bytes.
+const planDecisionFixture = fileURLToPath(
+	new URL("fixtures/notebook/plan-decision.jsonl", import.meta.url),
+);
+const planDecisionPlanId = "2026-11-18-af3-benchmark";
 
 // The script requires Python 3.11+. `python3` is 3.9 on some macOS setups, so
 // probe the versioned names too — same fallback list the script's version gate
@@ -949,6 +958,10 @@ test("the slug grammar: date-prefixable kebab, lowercase, capped", { skip: skipR
 		["path escape", "../escape"],
 		["non-ascii", "af3-é"],
 		["over the cap", "a".repeat(49)],
+		// The write must hold the same grammar the naming operations do: a
+		// slug carrying a newline would write a plan file no read, update,
+		// citation, or decision read can name.
+		["trailing newline", "af3-benchmark\n"],
 	];
 	for (const [name, slug] of invalid) {
 		const project = await scratchThetaProject(t);
@@ -1029,7 +1042,7 @@ test("plan-flag pairing errors exit 1 and write nothing", { skip: skipReason }, 
 		{ name: "write with --job-record", args: ["--plan-write", "af3-benchmark", "--plan-file", "-", "--job-record", jobRecordFixture, "--grade", "asserted"], stdin: PLAN_TEXT, err: "--job-record is not accepted with --plan-write" },
 		{ name: "empty plan text", args: ["--plan-write", "af3-benchmark", "--plan-file", "-"], stdin: "  \n", err: "--plan-file is empty" },
 		{ name: "plan file missing", args: ["--plan-write", "af3-benchmark", "--plan-file", "/nonexistent/plan.md"], err: "--plan-file unreadable" },
-		{ name: "no operation at all", args: [], err: "or plan operation (--plan-write, --plan-update, --plan-read) is required" },
+		{ name: "no operation at all", args: [], err: "or plan operation (--plan-write, --plan-update, --plan-read, --plan-decision) is required" },
 	];
 	for (const { name, args, stdin, err } of cases) {
 		const project = await scratchThetaProject(t);
@@ -1115,4 +1128,479 @@ test("a fresh project refuses the first plan write until .theta exists; a non-di
 	});
 	assert.equal(notDir.status, 2);
 	assert.ok(notDir.stderr.includes(".theta"));
+});
+
+// --- The plan-citation path (spec #202, parent #200 T2): a decision entry
+// --- cites the plan it approves or refuses — planPath, planRevision,
+// --- decision, optional rationale — resolved against disk before writing,
+// --- and the notebook answers a decision read per plan path and revision.
+
+test("a decision cites the plan it approves: the pinned field set, resolved against disk", { skip: skipReason }, async (t) => {
+	const project = await scratchThetaProject(t);
+	// The plan is written from the committed vector, so its revision is the
+	// shared literal — the same bytes the fixture entry cites.
+	const write = runRecorder(["--plan-write", "af3-benchmark", "--plan-file", planVectorFixture], {
+		cwd: project,
+	});
+	assert.equal(write.status, 0, `stderr: ${write.stderr}`);
+	const planId = planIdToday("af3-benchmark");
+
+	const run = runRecorder(
+		[
+			"--decision", "Approve the AF3 benchmark plan",
+			"--plan-cite", planId,
+			"--revision", planVectorRevision,
+			"--verdict", "approved",
+			"--rationale", "Digest matches the plan on disk",
+		],
+		{ cwd: project },
+	);
+	assert.equal(run.status, 0, `stderr: ${run.stderr}`);
+	const lines = run.stdout.trimEnd().split("\n");
+	assert.equal(lines[0], "recorded dec-0001 (decision) in .theta/notebook.jsonl");
+	assert.equal(
+		lines[1],
+		`# plan: .theta/plans/${planId}.md revision ${planVectorRevision} approved`,
+	);
+
+	const [entry] = await readEntries(project);
+	assert.equal(entry.id, "dec-0001");
+	assert.equal(entry.type, "decision");
+	assert.equal(entry.text, "Approve the AF3 benchmark plan");
+	assert.equal(entry.planPath, `.theta/plans/${planId}.md`);
+	// The cited revision is the committed vector's digest.
+	assert.equal(entry.planRevision, planVectorRevision);
+	assert.equal(entry.decision, "approved");
+	assert.equal(entry.rationale, "Digest matches the plan on disk");
+	// The field set is exactly the pinned grammar's, nothing else.
+	assert.deepEqual(Object.keys(entry).sort(), [
+		"date",
+		"decision",
+		"id",
+		"planPath",
+		"planRevision",
+		"rationale",
+		"text",
+		"type",
+	]);
+});
+
+test("a refusal records the citation too; the rationale stays optional", { skip: skipReason }, async (t) => {
+	const project = await scratchThetaProject(t);
+	const write = runRecorder(["--plan-write", "af3-benchmark", "--plan-file", "-"], {
+		cwd: project,
+		stdin: PLAN_TEXT,
+	});
+	assert.equal(write.status, 0, `stderr: ${write.stderr}`);
+	const planId = planIdToday("af3-benchmark");
+
+	const run = runRecorder(
+		[
+			"--decision", DECISION,
+			"--plan-cite", planId,
+			"--revision", revisionOf(PLAN_TEXT),
+			"--verdict", "refused",
+		],
+		{ cwd: project },
+	);
+	assert.equal(run.status, 0, `stderr: ${run.stderr}`);
+	assert.ok(
+		run.stdout.includes(
+			`# plan: .theta/plans/${planId}.md revision ${revisionOf(PLAN_TEXT)} refused`,
+		),
+		`footer names the refusal: ${run.stdout}`,
+	);
+	const [entry] = await readEntries(project);
+	assert.equal(entry.decision, "refused");
+	assert.equal(entry.planPath, `.theta/plans/${planId}.md`);
+	assert.equal("rationale" in entry, false, "no rationale flag, no rationale field");
+});
+
+test("the citation resolves against disk: a missing plan and a stale revision exit 1, appending nothing", { skip: skipReason }, async (t) => {
+	const project = await scratchThetaProject(t);
+
+	// A citation naming no written plan is a usage refusal.
+	const missing = runRecorder(
+		[
+			"--decision", "x",
+			"--plan-cite", "2026-01-01-none-such",
+			"--revision", planVectorRevision,
+			"--verdict", "approved",
+		],
+		{ cwd: project },
+	);
+	assert.equal(missing.status, 1, `stderr: ${missing.stderr}`);
+	assert.match(missing.stderr, /no plan/);
+	assert.match(missing.stderr, /2026-01-01-none-such/);
+	assert.equal(missing.stdout, "");
+
+	// A stale citation — the digest of bytes the plan no longer carries —
+	// refuses too, naming the revision the plan holds now.
+	const write = runRecorder(["--plan-write", "af3-benchmark", "--plan-file", "-"], {
+		cwd: project,
+		stdin: PLAN_TEXT,
+	});
+	assert.equal(write.status, 0, `stderr: ${write.stderr}`);
+	const planId = planIdToday("af3-benchmark");
+	const update = runRecorder(["--plan-update", planId, "--plan-file", "-"], {
+		cwd: project,
+		stdin: PLAN_REVISED,
+	});
+	assert.equal(update.status, 0, `stderr: ${update.stderr}`);
+	const stale = runRecorder(
+		[
+			"--decision", "x",
+			"--plan-cite", planId,
+			"--revision", revisionOf(PLAN_TEXT),
+			"--verdict", "approved",
+		],
+		{ cwd: project },
+	);
+	assert.equal(stale.status, 1);
+	assert.match(stale.stderr, /stale/);
+	assert.ok(
+		stale.stderr.includes(revisionOf(PLAN_REVISED)),
+		"stderr names the plan's current revision",
+	);
+	assert.equal(stale.stdout, "");
+	// Neither refusal appended anything: the notebook does not even exist.
+	assert.equal(
+		existsSync(path.join(project, ".theta", "notebook.jsonl")),
+		false,
+		"appended nothing",
+	);
+
+	// Citing the revision the plan holds now records the decision — the
+	// positive control names the citation, not only the exit.
+	const fresh = runRecorder(
+		[
+			"--decision", "x",
+			"--plan-cite", planId,
+			"--revision", revisionOf(PLAN_REVISED),
+			"--verdict", "approved",
+		],
+		{ cwd: project },
+	);
+	assert.equal(fresh.status, 0, `stderr: ${fresh.stderr}`);
+	assert.equal(
+		fresh.stdout.trimEnd().split("\n")[1],
+		`# plan: .theta/plans/${planId}.md revision ${revisionOf(PLAN_REVISED)} approved`,
+	);
+});
+
+test("--plan-decision reads the latest citing decision per plan path and revision", { skip: skipReason }, async (t) => {
+	const project = await scratchThetaProject(t);
+	const write = runRecorder(["--plan-write", "af3-benchmark", "--plan-file", "-"], {
+		cwd: project,
+		stdin: PLAN_TEXT,
+	});
+	assert.equal(write.status, 0, `stderr: ${write.stderr}`);
+	const planId = planIdToday("af3-benchmark");
+	const r1 = revisionOf(PLAN_TEXT);
+
+	const approve = runRecorder(
+		["--decision", "Approve v1", "--plan-cite", planId, "--revision", r1, "--verdict", "approved"],
+		{ cwd: project },
+	);
+	assert.equal(approve.status, 0, `stderr: ${approve.stderr}`);
+
+	const update = runRecorder(["--plan-update", planId, "--plan-file", "-"], {
+		cwd: project,
+		stdin: PLAN_REVISED,
+	});
+	assert.equal(update.status, 0, `stderr: ${update.stderr}`);
+	const r2 = revisionOf(PLAN_REVISED);
+
+	const refuse = runRecorder(
+		[
+			"--decision", "Refuse v2 — the controls are misstated",
+			"--plan-cite", planId,
+			"--revision", r2,
+			"--verdict", "refused",
+			"--rationale", "Revision dropped the negative-control arm",
+		],
+		{ cwd: project },
+	);
+	assert.equal(refuse.status, 0, `stderr: ${refuse.stderr}`);
+
+	// The latest decision for each revision: the refusal for the current
+	// one, the approval for the superseded one.
+	const readR1 = runRecorder(["--plan-decision", planId, "--revision", r1], { cwd: project });
+	assert.equal(readR1.status, 0, `stderr: ${readR1.stderr}`);
+	assert.equal(
+		readR1.stdout.trimEnd(),
+		`decision approved for .theta/plans/${planId}.md revision ${r1} (dec-0001)`,
+	);
+	const readR2 = runRecorder(["--plan-decision", planId, "--revision", r2], { cwd: project });
+	assert.equal(readR2.status, 0, `stderr: ${readR2.stderr}`);
+	assert.equal(
+		readR2.stdout.trimEnd(),
+		`decision refused for .theta/plans/${planId}.md revision ${r2} (dec-0002)`,
+	);
+
+	// --json carries the entry itself; the notebook's own last line is it.
+	const readJson = runRecorder(["--plan-decision", planId, "--revision", r2, "--json"], {
+		cwd: project,
+	});
+	assert.equal(readJson.status, 0, `stderr: ${readJson.stderr}`);
+	const entries = await readEntries(project);
+	assert.deepEqual(JSON.parse(readJson.stdout), {
+		planPath: `.theta/plans/${planId}.md`,
+		planRevision: r2,
+		latest: entries[1],
+	});
+
+	// The latest decision wins: a later entry for the same revision
+	// supersedes the earlier one on read — a first-match reader would
+	// answer the refusal here.
+	const restated = runRecorder(
+		[
+			"--decision", "Approve v2 once the controls were restated",
+			"--plan-cite", planId,
+			"--revision", r2,
+			"--verdict", "approved",
+		],
+		{ cwd: project },
+	);
+	assert.equal(restated.status, 0, `stderr: ${restated.stderr}`);
+	const readLatest = runRecorder(["--plan-decision", planId, "--revision", r2], {
+		cwd: project,
+	});
+	assert.equal(readLatest.status, 0, `stderr: ${readLatest.stderr}`);
+	assert.equal(
+		readLatest.stdout.trimEnd(),
+		`decision approved for .theta/plans/${planId}.md revision ${r2} (dec-0003)`,
+	);
+
+	// A revision no decision cites: the clear no-decision report, JSON
+	// latest null — and the read op never needed the plan file on disk.
+	await rm(path.join(project, ".theta", "plans", `${planId}.md`));
+	const none = runRecorder(["--plan-decision", planId, "--revision", "0".repeat(12)], {
+		cwd: project,
+	});
+	assert.equal(none.status, 0, `stderr: ${none.stderr}`);
+	assert.equal(
+		none.stdout.trimEnd(),
+		`no decision for .theta/plans/${planId}.md revision 000000000000`,
+	);
+	const noneJson = runRecorder(
+		["--plan-decision", planId, "--revision", "0".repeat(12), "--json"],
+		{ cwd: project },
+	);
+	assert.deepEqual(JSON.parse(noneJson.stdout), {
+		planPath: `.theta/plans/${planId}.md`,
+		planRevision: "000000000000",
+		latest: null,
+	});
+});
+
+test("citation-flag pairing errors exit 1 and write nothing", { skip: skipReason }, async (t) => {
+	// Each case names the stderr that discriminates it (the
+	// connector-scripts invariant): the refusal is this one, not any
+	// non-empty stderr.
+	const cases = [
+		{ name: "citation flags on a method", args: ["--method", "x", "--plan-cite", planDecisionPlanId, "--revision", planVectorRevision, "--verdict", "approved"], err: "only accepted with --decision" },
+		{ name: "--verdict without --plan-cite", args: ["--decision", "x", "--verdict", "approved"], err: "--plan-cite is required with" },
+		{ name: "--revision without --plan-cite", args: ["--decision", "x", "--revision", planVectorRevision], err: "--plan-cite is required with" },
+		{ name: "--rationale without --plan-cite", args: ["--decision", "x", "--rationale", "why"], err: "--plan-cite is required with" },
+		{ name: "citation without --revision", args: ["--decision", "x", "--plan-cite", planDecisionPlanId, "--verdict", "approved"], err: "requires --revision" },
+		{ name: "citation without --verdict", args: ["--decision", "x", "--plan-cite", planDecisionPlanId, "--revision", planVectorRevision], err: "requires --verdict" },
+		{ name: "revision short of 12 hex", args: ["--decision", "x", "--plan-cite", planDecisionPlanId, "--revision", "c6f6084b0e5", "--verdict", "approved"], err: "12 lowercase hex" },
+		{ name: "revision uppercase", args: ["--decision", "x", "--plan-cite", planDecisionPlanId, "--revision", "C6F6084B0E5F", "--verdict", "approved"], err: "12 lowercase hex" },
+		{ name: "citation with a malformed plan-id", args: ["--decision", "x", "--plan-cite", "af3-benchmark", "--revision", planVectorRevision, "--verdict", "approved"], err: "plan ids are <YYYY-MM-DD>-<slug>" },
+		{ name: "blank rationale", args: ["--decision", "x", "--plan-cite", planDecisionPlanId, "--revision", planVectorRevision, "--verdict", "approved", "--rationale", "   "], err: "--rationale must be non-empty" },
+		{ name: "verdict outside the choices", args: ["--decision", "x", "--plan-cite", planDecisionPlanId, "--revision", planVectorRevision, "--verdict", "pending"], err: "invalid choice" },
+		{ name: "--revision beside --plan-write", args: ["--plan-write", "af3-benchmark", "--plan-file", "-", "--revision", planVectorRevision], stdin: PLAN_TEXT, err: "--revision is only accepted with" },
+		{ name: "--plan-cite beside --plan-write", args: ["--plan-write", "af3-benchmark", "--plan-file", "-", "--plan-cite", planDecisionPlanId], stdin: PLAN_TEXT, err: "--plan-cite is not accepted with --plan-write" },
+		{ name: "--plan-file with --plan-decision", args: ["--plan-decision", planDecisionPlanId, "--revision", planVectorRevision, "--plan-file", "-"], stdin: PLAN_TEXT, err: "--plan-file is not accepted with --plan-decision" },
+		{ name: "--plan-decision without --revision", args: ["--plan-decision", planDecisionPlanId], err: "--plan-decision requires --revision" },
+		{ name: "--plan-decision beside an entry type", args: ["--decision", "x", "--plan-decision", planDecisionPlanId], err: "one operation per call" },
+		{ name: "--plan-decision with a malformed plan-id", args: ["--plan-decision", "af3-benchmark", "--revision", planVectorRevision], err: "plan ids are <YYYY-MM-DD>-<slug>" },
+		{ name: "--verdict beside --plan-decision", args: ["--plan-decision", planDecisionPlanId, "--revision", planVectorRevision, "--verdict", "approved"], err: "--verdict is not accepted with --plan-decision" },
+		{ name: "--rationale beside --plan-decision", args: ["--plan-decision", planDecisionPlanId, "--revision", planVectorRevision, "--rationale", "why"], err: "--rationale is not accepted with --plan-decision" },
+		{ name: "--plan-cite beside --plan-decision", args: ["--plan-decision", planDecisionPlanId, "--revision", planVectorRevision, "--plan-cite", planDecisionPlanId], err: "--plan-cite is not accepted with --plan-decision" },
+		{ name: "decision-read revision uppercase", args: ["--plan-decision", planDecisionPlanId, "--revision", "C6F6084B0E5F"], err: "12 lowercase hex" },
+		// A `$` anchor also sits before a trailing newline under `match`; the
+		// citation grammars are fullmatch, so a value carrying one refuses
+		// instead of passing the shape check and then matching nothing.
+		{ name: "plan-cite with a trailing newline", args: ["--decision", "x", "--plan-cite", `${planDecisionPlanId}\n`, "--revision", planVectorRevision, "--verdict", "approved"], err: "plan ids are <YYYY-MM-DD>-<slug>" },
+		{ name: "citation revision with a trailing newline", args: ["--decision", "x", "--plan-cite", planDecisionPlanId, "--revision", `${planVectorRevision}\n`, "--verdict", "approved"], err: "12 lowercase hex" },
+		{ name: "decision-read plan-id with a trailing newline", args: ["--plan-decision", `${planDecisionPlanId}\n`, "--revision", planVectorRevision], err: "plan ids are <YYYY-MM-DD>-<slug>" },
+		{ name: "decision-read revision with a trailing newline", args: ["--plan-decision", planDecisionPlanId, "--revision", `${planVectorRevision}\n`], err: "12 lowercase hex" },
+	];
+	for (const { name, args, stdin, err } of cases) {
+		const project = await scratchProject(t);
+		const run = runRecorder(args, { cwd: project, stdin });
+		assert.equal(run.status, 1, `${name}: should exit 1 (stderr: ${run.stderr})`);
+		assert.ok(run.stderr.includes(err), `${name}: stderr names the refusal (${err})`);
+		assert.equal(run.stdout, "", `${name}: no stdout on failure`);
+		assert.deepEqual(await readdir(project), [], `${name}: wrote nothing`);
+	}
+});
+
+test("the shared grammar fixture: the recorder reads it back and ids sequence past it", { skip: skipReason }, async (t) => {
+	const project = await scratchProject(t);
+	await mkdir(path.join(project, ".theta"));
+	await writeFile(
+		path.join(project, ".theta", "notebook.jsonl"),
+		`${(await readFile(planDecisionFixture, "utf8")).trimEnd()}\n`,
+		"utf8",
+	);
+
+	// The reader consumes the committed line as-is: the latest decision for
+	// the cited path and revision is the fixture entry, shape-equal — and
+	// the read op never needed the plan object on disk.
+	const read = runRecorder(
+		["--plan-decision", planDecisionPlanId, "--revision", planVectorRevision],
+		{ cwd: project },
+	);
+	assert.equal(read.status, 0, `stderr: ${read.stderr}`);
+	assert.equal(
+		read.stdout.trimEnd(),
+		`decision approved for .theta/plans/${planDecisionPlanId}.md revision ${planVectorRevision} (dec-0001)`,
+	);
+	const readJson = runRecorder(
+		["--plan-decision", planDecisionPlanId, "--revision", planVectorRevision, "--json"],
+		{ cwd: project },
+	);
+	assert.equal(readJson.status, 0, `stderr: ${readJson.stderr}`);
+	assert.deepEqual(JSON.parse(readJson.stdout), {
+		planPath: `.theta/plans/${planDecisionPlanId}.md`,
+		planRevision: planVectorRevision,
+		latest: JSON.parse(await readFile(planDecisionFixture, "utf8")),
+	});
+	assert.deepEqual(await readdir(path.join(project, ".theta")), ["notebook.jsonl"]);
+
+	// The recorder sequences past the fixture's id: the next decision is
+	// dec-0002.
+	const next = runRecorder(["--decision", DECISION], { cwd: project });
+	assert.equal(next.status, 0, `stderr: ${next.stderr}`);
+	const entries = await readEntries(project);
+	assert.deepEqual(entries.map((entry) => entry.id), ["dec-0001", "dec-0002"]);
+});
+
+test("the decision read skips lines that are not citing decisions", { skip: skipReason }, async (t) => {
+	// The reader holds the TS validator's two citation bars: a decision
+	// entry carrying a verdict. A citation on another entry type, or a
+	// citing decision with no verdict (hand edits the recorder never
+	// writes), matches no query — they sit after the fixture line, so a
+	// reader that ignored the type or the verdict would answer one of them.
+	// The validator's wider entry grammar (ids, dates, the rationale's
+	// shape) is not this read's.
+	const project = await scratchProject(t);
+	await mkdir(path.join(project, ".theta"));
+	const fixtureLine = (await readFile(planDecisionFixture, "utf8")).trimEnd();
+	const notCiting = [
+		JSON.stringify({
+			id: "mth-0001",
+			type: "method",
+			date: "2026-11-18",
+			text: "x",
+			planPath: `.theta/plans/${planDecisionPlanId}.md`,
+			planRevision: planVectorRevision,
+			decision: "approved",
+		}),
+		JSON.stringify({
+			id: "dec-0002",
+			type: "decision",
+			date: "2026-11-18",
+			text: "x",
+			planPath: `.theta/plans/${planDecisionPlanId}.md`,
+			planRevision: planVectorRevision,
+		}),
+	];
+	await writeFile(
+		path.join(project, ".theta", "notebook.jsonl"),
+		`${[fixtureLine, ...notCiting].join("\n")}\n`,
+		"utf8",
+	);
+
+	const read = runRecorder(
+		["--plan-decision", planDecisionPlanId, "--revision", planVectorRevision],
+		{ cwd: project },
+	);
+	assert.equal(read.status, 0, `stderr: ${read.stderr}`);
+	assert.equal(
+		read.stdout.trimEnd(),
+		`decision approved for .theta/plans/${planDecisionPlanId}.md revision ${planVectorRevision} (dec-0001)`,
+	);
+});
+
+test("a corrupt notebook exits 2 on the decision read too, before any answer", { skip: skipReason }, async (t) => {
+	const project = await scratchProject(t);
+	await mkdir(path.join(project, ".theta"));
+	await writeFile(path.join(project, ".theta", "notebook.jsonl"), "this is not json\n", "utf8");
+
+	const run = runRecorder(
+		["--plan-decision", planDecisionPlanId, "--revision", planVectorRevision],
+		{ cwd: project },
+	);
+	assert.equal(run.status, 2);
+	assert.match(run.stderr, /not JSON/);
+	assert.equal(run.stdout, "");
+});
+
+test("an unreadable plan file exits 2 on the citation path", { skip: skipReason }, async (t) => {
+	const project = await scratchThetaProject(t);
+	const write = runRecorder(["--plan-write", "af3-benchmark", "--plan-file", "-"], {
+		cwd: project,
+		stdin: PLAN_TEXT,
+	});
+	assert.equal(write.status, 0, `stderr: ${write.stderr}`);
+	const planId = planIdToday("af3-benchmark");
+	await chmod(planPath(project, planId), 0o000);
+
+	// A plan the recorder cannot read is a notebook failure (exit 2), the
+	// code --plan-read and --plan-update take on the same bytes — not a
+	// usage error, and never an entry.
+	const run = runRecorder(
+		[
+			"--decision", "x",
+			"--plan-cite", planId,
+			"--revision", revisionOf(PLAN_TEXT),
+			"--verdict", "approved",
+		],
+		{ cwd: project },
+	);
+	assert.equal(run.status, 2, `stderr: ${run.stderr}`);
+	assert.match(run.stderr, /cannot read/);
+	assert.equal(run.stdout, "");
+	assert.equal(
+		existsSync(path.join(project, ".theta", "notebook.jsonl")),
+		false,
+		"appended nothing",
+	);
+});
+
+test("a citing decision may carry evidence too; the footer names the plan first", { skip: skipReason }, async (t) => {
+	const project = await scratchThetaProject(t);
+	const write = runRecorder(["--plan-write", "af3-benchmark", "--plan-file", "-"], {
+		cwd: project,
+		stdin: PLAN_TEXT,
+	});
+	assert.equal(write.status, 0, `stderr: ${write.stderr}`);
+	const planId = planIdToday("af3-benchmark");
+
+	const run = runRecorder(
+		[
+			"--decision", DECISION,
+			"--evidence", evidenceFixture,
+			"--grade", "asserted",
+			"--plan-cite", planId,
+			"--revision", revisionOf(PLAN_TEXT),
+			"--verdict", "refused",
+		],
+		{ cwd: project },
+	);
+	assert.equal(run.status, 0, `stderr: ${run.stderr}`);
+	const lines = run.stdout.trimEnd().split("\n");
+	assert.equal(lines.length, 4);
+	assert.equal(
+		lines[1],
+		`# plan: .theta/plans/${planId}.md revision ${revisionOf(PLAN_TEXT)} refused`,
+	);
+	assert.ok(lines[2].includes("pubmed"), "the evidence footer follows the plan line");
+	const [entry] = await readEntries(project);
+	assert.equal(entry.decision, "refused");
+	assert.equal(entry.evidence[0].source, "pubmed");
 });
