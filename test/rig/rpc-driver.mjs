@@ -1,7 +1,9 @@
 #!/usr/bin/env node
-// RPC-mode driver for the rig's gateway legs (spec #96): run one theta
-// session in RPC mode, answer the submit gate's confirm headlessly, and
-// capture everything to the session dir. Dogfood evidence tooling — it
+// RPC-mode driver for the rig's gateway and plan-review legs (spec #96;
+// spec #203 adds the plan-review dialog): run one theta session in RPC
+// mode, answer the gates' confirms headlessly — the submit gate's and the
+// plan-review gate's, both rendering into the one session-dir gate.jsonl —
+// and capture everything to the session dir. Dogfood evidence tooling — it
 // answers gate confirms without a human, so it is never a user path; it
 // exists because print mode's no-op UI denies every confirm, and a gated
 // submit cannot cross the submit gate there. Ported from the M5 S0 live
@@ -168,9 +170,10 @@ child.stdout.on("data", (chunk) => {
 });
 
 function handle(record) {
-	// The submit gate's confirm: answer with the configured verdict. The
-	// stacked gate may ask from interleaved calls; each request carries its
-	// own id, and each answer matches it.
+	// A gate's confirm — the submit gate's or the plan-review gate's:
+	// answer with the configured verdict. The stacked gates may ask from
+	// interleaved calls; each request carries its own id, and each answer
+	// matches it.
 	if (record.type === "extension_ui_request" && record.method === "confirm") {
 		const answer = { type: "extension_ui_response", id: record.id };
 		if (gateAnswer === "deny") answer.cancelled = true;

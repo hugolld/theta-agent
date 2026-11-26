@@ -599,6 +599,15 @@ const scanSurfaces = [
 	// extensions/submit-gate.ts carries the Submit gate headword's working
 	// vocabulary — the confirm dialog's title and the refusal/drift reasons.
 	"extensions/submit-gate.ts",
+	// extensions/plan-review-gate.ts carries the Plan-review gate headword's
+	// working vocabulary — the dialog title, the durable-approval rule, and
+	// the refusal reasons (spec #203).
+	"extensions/plan-review-gate.ts",
+	// extensions/gate-framework.ts and extensions/plan-object.ts carry the
+	// same stop's working vocabulary — the framework's extraction home and
+	// the plan object's TS side (spec #203).
+	"extensions/gate-framework.ts",
+	"extensions/plan-object.ts",
 	// extensions/skill-pool.ts carries the pool headwords' working vocabulary
 	// (skill pool, domain pack) — the status table, the toggle replies, and
 	// the diagnosis block.

@@ -9,6 +9,7 @@ import type {
 	SessionStartEvent,
 	ToolResultEvent,
 } from "@earendil-works/pi-coding-agent";
+import { isCalendarDate, isPlanPath, PLAN_REVISION_RE } from "./plan-object.ts";
 
 /**
  * The notebook entry cards (spec #178, demo doctrine B1 —
@@ -103,23 +104,6 @@ function isHypRef(value: unknown): value is string {
 	return typeof value === "string" && idPattern("hyp").test(value);
 }
 
-/**
- * A real YYYY-MM-DD calendar date — the same bar the recorder and the
- * dogfood auditor hold: shape alone is not a date, and `new Date` rolls
- * `2026-02-30` over instead of refusing it, so the components round-trip
- * through a UTC construction instead.
- */
-export function isCalendarDate(value: string): boolean {
-	if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
-	const [year, month, day] = value.split("-").map(Number);
-	const constructed = new Date(Date.UTC(year, month - 1, day));
-	return (
-		constructed.getUTCFullYear() === year &&
-		constructed.getUTCMonth() === month - 1 &&
-		constructed.getUTCDate() === day
-	);
-}
-
 function nonEmptyString(value: unknown): value is string {
 	return typeof value === "string" && value !== "";
 }
@@ -168,28 +152,15 @@ function isEvidenceList(value: unknown): value is EvidenceItem[] {
  * all-or-nothing on a decision entry and ride only a decision: the
  * recorder resolved the citation against disk before writing (a missing
  * plan or a stale revision never became an entry), so this validator
- * pins the shapes, not the disk state.
+ * pins the shapes, not the disk state. The shapes themselves live in
+ * plan-object.ts since spec #203 made the gate their second reader.
  */
-const PLAN_SLUG_MAX = 48;
-const PLAN_SLUG_RE = /^[a-z0-9]+(-[a-z0-9]+)*$/;
-const PLAN_PATH_RE = /^\.theta\/plans\/(\d{4}-\d{2}-\d{2})-(.+)\.md$/;
-const PLAN_REVISION_RE = /^[0-9a-f]{12}$/;
 
 function isDecisionVerdict(value: unknown): value is DecisionVerdict {
 	return (
 		typeof value === "string" &&
 		(DECISION_VERDICTS as readonly string[]).includes(value)
 	);
-}
-
-function isPlanSlug(slug: string): boolean {
-	return slug.length <= PLAN_SLUG_MAX && PLAN_SLUG_RE.test(slug);
-}
-
-/** `.theta/plans/<plan-id>.md` under the plan-id grammar — the same bar `check_plan_id` holds on the Python side. */
-function isPlanPath(value: string): boolean {
-	const match = PLAN_PATH_RE.exec(value);
-	return match !== null && isCalendarDate(match[1]) && isPlanSlug(match[2]);
 }
 
 /**
