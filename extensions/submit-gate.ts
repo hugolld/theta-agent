@@ -1,25 +1,26 @@
-import fs from "node:fs";
-import path from "node:path";
 import type {
 	ExtensionAPI,
-	ExtensionContext,
 	ToolCallEvent,
 	ToolCallEventResult,
 } from "@earendil-works/pi-coding-agent";
+import {
+	type GateCheck,
+	type GateContext,
+	type GateLogSink,
+	runGateChecks,
+	writeGateDecision,
+} from "./lib/gate-framework.ts";
 
 /**
  * The Submit gate — the package's tool-call-pipeline permission extension
  * (spec #54 → #95, ADR 0004; the gate-framework instance of ADR 0006). A
  * stack of checks judges every theta-compute gateway call before it
- * reaches the gateway; read-only gateway tools run ungated. The confirm
- * set is the three destructive tools BY NAME (the GLOSSARY's literal
- * definition), pinned against the gateway's own MCP annotations — the
- * server stays the single source of what is destructive, and a call where
- * the two disagree is a drift the gate refuses loudly rather than a set
- * it silently re-derives. Codemode-nested calls carry the same tool names
- * through the pipeline (parentToolCallId links the layers), so the stack
- * gates them exactly like direct ones and every log line and refusal
- * names the parent call that spawned them.
+ * reaches the gateway; read-only gateway tools run ungated. The framework
+ * (the decision vocabulary, the stack, the verdicts, the log's line shape
+ * and sink) lives in lib/gate-framework.ts since spec #203's extraction;
+ * this file keeps the submit gate's specifics — its trigger surface, its
+ * two checks, and the pipeline mapping — and is byte-for-byte unchanged
+ * in behavior.
  */
 
 /**
@@ -46,66 +47,18 @@ export const CONFIRM_SET: ReadonlySet<string> = new Set([
 	"run_alphafold3",
 ]);
 
-/**
- * The gate log's file name. The log lands beside the session transcript
- * (the session dir is the evidence channel: `--session-dir` captures it
- * with the run), one JSONL line per gated decision — never for ungated
- * calls, which stay frictionless by design.
- */
-export const GATE_LOG_NAME = "gate.jsonl";
-
-/** What a check decided — the gate log's decision vocabulary. */
-export type GateDecision = "approved" | "refused" | "drift";
-
-/** One gate log line, fielded like the gateway's audit lines (sorted). */
-export interface GateLogLine {
-	check: string;
-	decision: GateDecision;
-	parentToolCallId?: string;
-	reason?: string;
-	tool: string;
-	toolCallId: string;
-	ts: string;
-}
-
-/** Where gate log lines go; the default appends to the session dir. */
-export type GateLogSink = (line: GateLogLine) => void;
-
-/** The context the checks and the log need from the handler's ctx. */
-type GateContext = Pick<ExtensionContext, "ui" | "sessionManager">;
-
 /** The looked-up gateway tool whose annotations the checks read. */
 interface GatewayTool {
 	name: string;
 	annotations?: { destructiveHint?: boolean };
 }
 
-/**
- * One check in the stack. `undefined` passes the call to the next check
- * (or through the gate, at the stack's end — ungated calls pass every
- * check by construction); a verdict ends the stack: "approved" passes the
- * call through, "refused" and "drift" block it. Checks hold no state
- * across events, so stacked confirms — two destructive calls pending
- * their dialogs at once, resolved in any order — cannot cross wires; pi
- * 1.4.0's concurrent-dialog fix is the floor that makes stacking sound
- * (before it, a second confirm dialog replaced the first and the first
- * promise never settled).
- */
-interface GateCheck {
-	name: string;
-	run: (
-		event: ToolCallEvent,
-		ctx: GateContext,
-		tool: GatewayTool | undefined,
-	) => Promise<CheckVerdict | undefined> | CheckVerdict | undefined;
+/** What one gateway call's checks can see: the event, the ctx, the tool. */
+interface SubmitEnv {
+	event: ToolCallEvent;
+	ctx: GateContext;
+	tool: GatewayTool | undefined;
 }
-
-/**
- * A check's verdict: "approved" passes the call through; a refusing
- * decision carries its reason — the type has no refusing-without-a-reason
- * shape, so no block can reach the model wordless.
- */
-type CheckVerdict = { decision: "approved" } | { decision: Exclude<GateDecision, "approved">; reason: string };
 
 /**
  * The gate only judges calls in the gateway's namespace, and narrowing the
@@ -144,9 +97,9 @@ function nestedUnder(event: ToolCallEvent): string {
  * blocks the call loudly instead of confirming some third set silently;
  * read-only tools agree on "neither" and pass.
  */
-const driftCheck: GateCheck = {
+const driftCheck: GateCheck<SubmitEnv> = {
 	name: "confirm-set",
-	run: (event, _ctx, tool) => {
+	run: ({ event, tool }) => {
 		const short = shortToolName(event.toolName);
 		const inSet = CONFIRM_SET.has(short);
 		const declared = tool?.annotations?.destructiveHint === true;
@@ -169,9 +122,9 @@ const driftCheck: GateCheck = {
  * parent attribution into the dialog, so the user answering sees who is
  * spending the cluster time.
  */
-const confirmCheck: GateCheck = {
+const confirmCheck: GateCheck<SubmitEnv> = {
 	name: "confirm",
-	run: async (event, ctx) => {
+	run: async ({ event, ctx }) => {
 		const short = shortToolName(event.toolName);
 		if (!CONFIRM_SET.has(short)) return undefined;
 		const description = describeCall(event.toolName, event.input);
@@ -192,17 +145,7 @@ const confirmCheck: GateCheck = {
 };
 
 /** The stack, in run order: drift refuses before anything asks the user. */
-const CHECKS: readonly GateCheck[] = [driftCheck, confirmCheck];
-
-/** The default sink: one appended line beside the session transcript. */
-function sessionLogSink(ctx: GateContext): GateLogSink | undefined {
-	// a context with no session manager (an in-memory test stub) logs
-	// nowhere — a guard, not a swallowed failure
-	const sessionFile = ctx.sessionManager?.getSessionFile();
-	if (sessionFile === undefined) return undefined; // nothing persistent to write beside
-	const file = path.join(path.dirname(sessionFile), GATE_LOG_NAME);
-	return (line) => fs.appendFileSync(file, `${JSON.stringify(line)}\n`);
-}
+const CHECKS: readonly GateCheck<SubmitEnv>[] = [driftCheck, confirmCheck];
 
 export function createSubmitGate(
 	pi: Pick<ExtensionAPI, "getAllTools">,
@@ -214,31 +157,18 @@ export function createSubmitGate(
 	): Promise<ToolCallEventResult | undefined> => {
 		if (!isGatewayCall(event)) return undefined;
 		const tool = pi.getAllTools().find((t) => t.name === event.toolName);
-		for (const check of CHECKS) {
-			const verdict = await check.run(event, ctx, tool);
-			if (verdict === undefined) continue;
-			// The log is the audit trail, not the gate: the confirm above is
-			// the safety mechanism, so a log that cannot write must never
-			// change the decision — the failure is swallowed here.
-			const line: GateLogLine = {
-				check: check.name,
-				decision: verdict.decision,
-				parentToolCallId: event.parentToolCallId,
-				reason: verdict.decision === "approved" ? undefined : verdict.reason,
-				tool: event.toolName,
-				toolCallId: event.toolCallId,
-				ts: new Date().toISOString(),
-			};
-			try {
-				(options.log ?? sessionLogSink(ctx))?.(line);
-			} catch {
-				// best-effort by design — see above
-			}
-			return verdict.decision === "approved"
-				? undefined
-				: { block: true, reason: verdict.reason };
-		}
-		return undefined;
+		const decided = await runGateChecks(CHECKS, { event, ctx, tool });
+		if (decided === undefined) return undefined;
+		writeGateDecision(ctx, options, {
+			check: decided.check,
+			verdict: decided.verdict,
+			tool: event.toolName,
+			toolCallId: event.toolCallId,
+			parentToolCallId: event.parentToolCallId,
+		});
+		return decided.verdict.decision === "approved"
+			? undefined
+			: { block: true, reason: decided.verdict.reason };
 	};
 }
 

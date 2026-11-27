@@ -163,3 +163,7 @@ _Avoid_: version number, content version
 **Plan citation**:
 The decision entry's name for the plan it weighs: `planPath` (the plan object's path), `planRevision` (the digest the decision names), `decision` (`approved` or `refused` — a refusal is provenance and cites the plan the same way), and an optional free-text rationale. The recorder resolves the citation against disk before writing — the cited revision must be the plan's current one — so a recorded decision always names a state the plan carried. The decision read (`--plan-decision <plan-id> --revision <12-hex>`) answers the latest decision entry citing that plan at that revision, or that none cites it. Spec #202 ships it.
 _Avoid_: plan approval field, verdict tag
+
+**Plan-review gate**:
+The gate framework's second instance — the research loop's stop between Design and Execute, fail-closed and revision-bound: the latest recorded decision citing the plan's current revision decides the stop before any dialog (an approval is the durable approval and passes with no dialog; a refusal is provenance and refuses without re-prompting), an undecided revision asks the user's confirm, print and json modes degrade to a refusal, and one session-dir `gate.jsonl` line logs the verdict beside the submit gate's, the extension-registered tool `theta_plan_review` its trigger surface. Spec #203 ships it.
+_Avoid_: plan approval gate, execute gate
